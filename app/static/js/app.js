@@ -4,6 +4,7 @@ const state = {
     pairs: [],
     mirrors: [],
     tokens: [],
+    groupDefaults: [],
     selectedPair: null
 };
 
@@ -35,6 +36,7 @@ function initTabs() {
                 loadMirrors();
             } else if (targetId === 'tokens-tab') {
                 loadTokens();
+                loadGroupDefaults();
             }
         });
     });
@@ -109,6 +111,12 @@ function setupEventListeners() {
     document.getElementById('token-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         await createToken();
+    });
+
+    // Group defaults form
+    document.getElementById('group-defaults-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await upsertGroupDefaults();
     });
 }
 
@@ -321,6 +329,8 @@ async function loadTokens() {
         state.tokens = tokens;
         renderTokens(tokens);
         updateTokenInstanceSelector();
+        updateGroupDefaultsPairSelector();
+        resetGroupDefaultsOverrides();
     } catch (error) {
         console.error('Failed to load tokens:', error);
     }
@@ -398,6 +408,135 @@ function updateTokenInstanceSelector() {
         state.instances.map(inst =>
             `<option value="${inst.id}">${escapeHtml(inst.name)}</option>`
         ).join('');
+}
+
+// Group Mirror Defaults
+async function loadGroupDefaults() {
+    try {
+        const rows = await apiRequest('/api/group-defaults');
+        state.groupDefaults = rows;
+        renderGroupDefaults(rows);
+        updateGroupDefaultsPairSelector();
+        resetGroupDefaultsOverrides();
+    } catch (error) {
+        console.error('Failed to load group defaults:', error);
+    }
+}
+
+function renderGroupDefaults(rows) {
+    const tbody = document.getElementById('group-defaults-list');
+    if (!tbody) return;
+
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No group defaults configured</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = rows.map(r => {
+        const pair = state.pairs.find(p => p.id === r.instance_pair_id);
+        const b = (v) => (v === null || v === undefined) ? '<span class="text-muted">inherit</span>' : (v ? 'true' : 'false');
+        const s = (v) => (v === null || v === undefined || v === '') ? '<span class="text-muted">inherit</span>' : escapeHtml(String(v));
+        return `
+            <tr>
+                <td><strong>${escapeHtml(pair?.name || 'Unknown')}</strong></td>
+                <td>${escapeHtml(r.group_path)}</td>
+                <td>${s(r.mirror_direction)}</td>
+                <td>${b(r.mirror_overwrite_diverged)}</td>
+                <td>${b(r.mirror_trigger_builds)}</td>
+                <td>${b(r.only_mirror_protected_branches)}</td>
+                <td>${s(r.mirror_branch_regex)}</td>
+                <td>${s(r.mirror_user_id)}</td>
+                <td>
+                    <button class="btn btn-danger btn-small" onclick="deleteGroupDefaults(${r.id})">Delete</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function updateGroupDefaultsPairSelector() {
+    const select = document.getElementById('group-defaults-pair');
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Select instance pair...</option>' +
+        state.pairs.map(pair =>
+            `<option value="${pair.id}">${escapeHtml(pair.name)}</option>`
+        ).join('');
+}
+
+function resetGroupDefaultsOverrides() {
+    const triStateCheckboxIds = [
+        'group-defaults-overwrite',
+        'group-defaults-trigger',
+        'group-defaults-only-protected',
+    ];
+    triStateCheckboxIds.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.checked = false;
+        el.indeterminate = true;
+        el.title = 'Inherit pair default';
+        el.onchange = () => {
+            el.indeterminate = false;
+            el.title = '';
+        };
+    });
+
+    const dir = document.getElementById('group-defaults-direction');
+    if (dir) dir.value = '';
+
+    const regex = document.getElementById('group-defaults-branch-regex');
+    if (regex) regex.value = '';
+
+    const userId = document.getElementById('group-defaults-mirror-user-id');
+    if (userId) userId.value = '';
+}
+
+async function upsertGroupDefaults() {
+    const form = document.getElementById('group-defaults-form');
+    const formData = new FormData(form);
+
+    const overwriteEl = document.getElementById('group-defaults-overwrite');
+    const triggerEl = document.getElementById('group-defaults-trigger');
+    const onlyProtectedEl = document.getElementById('group-defaults-only-protected');
+
+    const branchRegexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
+    const mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
+    const dirRaw = (formData.get('mirror_direction') || '').toString().trim();
+
+    const payload = {
+        instance_pair_id: parseInt(formData.get('instance_pair_id')),
+        group_path: (formData.get('group_path') || '').toString().trim(),
+        mirror_direction: dirRaw || null,
+        mirror_overwrite_diverged: overwriteEl && overwriteEl.indeterminate ? null : !!overwriteEl?.checked,
+        mirror_trigger_builds: triggerEl && triggerEl.indeterminate ? null : !!triggerEl?.checked,
+        only_mirror_protected_branches: onlyProtectedEl && onlyProtectedEl.indeterminate ? null : !!onlyProtectedEl?.checked,
+        mirror_branch_regex: branchRegexRaw || null,
+        mirror_user_id: mirrorUserIdRaw ? parseInt(mirrorUserIdRaw) : null,
+    };
+
+    try {
+        await apiRequest('/api/group-defaults', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        showMessage('Group defaults saved successfully', 'success');
+        form.reset();
+        await loadGroupDefaults();
+    } catch (error) {
+        console.error('Failed to save group defaults:', error);
+    }
+}
+
+async function deleteGroupDefaults(id) {
+    if (!confirm('Are you sure you want to delete these group defaults?')) return;
+    try {
+        await apiRequest(`/api/group-defaults/${id}`, { method: 'DELETE' });
+        showMessage('Group defaults deleted successfully', 'success');
+        await loadGroupDefaults();
+    } catch (error) {
+        console.error('Failed to delete group defaults:', error);
+    }
 }
 
 // Mirrors

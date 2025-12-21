@@ -9,6 +9,7 @@ The following HTML files contain mockups with sample data for taking screenshots
 - `demo-dashboard.html` - Dashboard view with quick stats
 - `demo-instances.html` - GitLab Instances management view
 - `demo-pairs.html` - Instance Pairs configuration view
+- `demo-tokens.html` - Group Settings view (tokens + group defaults)
 - `demo-mirrors.html` - Mirrors management view
 
 ## Taking Screenshots
@@ -21,6 +22,7 @@ The following HTML files contain mockups with sample data for taking screenshots
    open docs/screenshots/demo-dashboard.html
    open docs/screenshots/demo-instances.html
    open docs/screenshots/demo-pairs.html
+   open docs/screenshots/demo-tokens.html
    open docs/screenshots/demo-mirrors.html
    ```
 
@@ -33,7 +35,8 @@ The following HTML files contain mockups with sample data for taking screenshots
    - `01-dashboard.png`
    - `02-instances.png`
    - `03-pairs.png`
-   - `04-mirrors.png`
+   - `04-tokens.png`
+   - `05-mirrors.png`
 
 ### Method 2: Using Automated Script
 
@@ -77,7 +80,8 @@ This will automatically generate all screenshots in the correct format.
 - `01-dashboard.png` - Main dashboard view
 - `02-instances.png` - GitLab Instances management
 - `03-pairs.png` - Instance Pairs configuration
-- `04-mirrors.png` - Mirrors management
+- `04-tokens.png` - Group Settings (tokens + group defaults)
+- `05-mirrors.png` - Mirrors management
 - `05-mirror-detail.png` - (Optional) Detailed view of a specific mirror
 - `06-export.png` - (Optional) Import/Export functionality
 

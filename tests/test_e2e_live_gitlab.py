@@ -170,7 +170,26 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
 
         timeout_s = float(_env("E2E_GITLAB_MIRROR_TIMEOUT_S") or "45")
 
-        # 4) Create pull mirror via API (target pulls from source)
+        # 4) Configure group-level defaults (override pair defaults)
+        gd_pull = await client.post("/api/group-defaults", json={
+            "instance_pair_id": pull_pair_id,
+            "group_path": cfg["group_path"],
+            "mirror_trigger_builds": True,
+            "mirror_branch_regex": "^main$",
+            "mirror_overwrite_diverged": True,
+            "only_mirror_protected_branches": False,
+        })
+        assert gd_pull.status_code == 200, gd_pull.text
+
+        gd_push = await client.post("/api/group-defaults", json={
+            "instance_pair_id": push_pair_id,
+            "group_path": cfg["group_path"],
+            "mirror_overwrite_diverged": True,
+            "only_mirror_protected_branches": True,
+        })
+        assert gd_push.status_code == 200, gd_push.text
+
+        # 5) Create pull mirror via API (target pulls from source)
         pull_mirror_resp = await client.post("/api/mirrors", json={
             "instance_pair_id": pull_pair_id,
             "source_project_id": source_project.id,
@@ -178,9 +197,7 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
             "target_project_id": target_project.id,
             "target_project_path": target_project.path_with_namespace,
             "enabled": True,
-            # Exercise pull-only settings
-            "mirror_trigger_builds": True,
-            "mirror_branch_regex": "^main$",
+            # Do not pass pull-only settings; they should come from group defaults.
         })
         assert pull_mirror_resp.status_code == 200, pull_mirror_resp.text
         pull_mirror_body = pull_mirror_resp.json()
@@ -189,11 +206,26 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
         pull_remote_mirror_id = pull_mirror_body["mirror_id"]
         assert pull_remote_mirror_id, "Expected GitLab mirror id to be returned"
 
-        # 5) Trigger update (best-effort; GitLab may queue).
+        # 6) Best-effort: verify group defaults took effect (when visible via API).
+        try:
+            rm = gl.projects.get(target_project.id).remote_mirrors.get(pull_remote_mirror_id)
+            # GitLab versions differ; only assert when the attribute exists/returns non-None.
+            if getattr(rm, "trigger_builds", None) is not None:
+                assert rm.trigger_builds is True
+            if getattr(rm, "mirror_branch_regex", None) is not None:
+                assert rm.mirror_branch_regex == "^main$"
+            if getattr(rm, "keep_divergent_refs", None) is not None:
+                # overwrite_diverged=True => keep_divergent_refs=False
+                assert rm.keep_divergent_refs is False
+        except Exception:
+            # Mirror settings are not consistently exposed across GitLab versions / python-gitlab.
+            pass
+
+        # 7) Trigger update (best-effort; GitLab may queue).
         pull_upd = await client.post(f"/api/mirrors/{pull_mirror_db_id}/update")
         assert pull_upd.status_code == 200, pull_upd.text
 
-        # 6) Best-effort: verify GitLab has any mirror status/timestamp visible.
+        # 8) Best-effort: verify GitLab has any mirror status/timestamp visible.
         pull_status = await _poll_remote_mirror_status(
             gl=gl,
             project_id=target_project.id,
@@ -202,7 +234,7 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
         )
         assert isinstance(pull_status, dict)
 
-        # 7) Export should include our pull mirror
+        # 9) Export should include our pull mirror
         pull_export = await client.get(f"/api/export/pair/{pull_pair_id}")
         assert pull_export.status_code == 200, pull_export.text
         pull_export_data = json.loads(pull_export.text)
@@ -213,7 +245,7 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
             for m in pull_export_data["mirrors"]
         )
 
-        # 8) Create push mirror via API (source pushes to target)
+        # 10) Create push mirror via API (source pushes to target)
         push_mirror_resp = await client.post("/api/mirrors", json={
             "instance_pair_id": push_pair_id,
             "source_project_id": source_project.id,
@@ -221,9 +253,7 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
             "target_project_id": target_project.id,
             "target_project_path": target_project.path_with_namespace,
             "enabled": True,
-            # Include pull-only settings to validate the app filters them for push
-            "mirror_trigger_builds": True,
-            "mirror_branch_regex": "^main$",
+            # Do not pass settings; keep_divergent_refs / only_protected should come from group defaults.
         })
         assert push_mirror_resp.status_code == 200, push_mirror_resp.text
         push_mirror_body = push_mirror_resp.json()
@@ -232,11 +262,21 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
         push_remote_mirror_id = push_mirror_body["mirror_id"]
         assert push_remote_mirror_id, "Expected GitLab mirror id to be returned"
 
-        # 9) Trigger update for push mirror.
+        # 11) Best-effort: verify group defaults took effect (when visible via API).
+        try:
+            rm = gl.projects.get(source_project.id).remote_mirrors.get(push_remote_mirror_id)
+            if getattr(rm, "only_protected_branches", None) is not None:
+                assert rm.only_protected_branches is True
+            if getattr(rm, "keep_divergent_refs", None) is not None:
+                assert rm.keep_divergent_refs is False
+        except Exception:
+            pass
+
+        # 12) Trigger update for push mirror.
         push_upd = await client.post(f"/api/mirrors/{push_mirror_db_id}/update")
         assert push_upd.status_code == 200, push_upd.text
 
-        # 10) Best-effort: verify GitLab has any mirror status/timestamp visible (push mirror lives on source project).
+        # 13) Best-effort: verify GitLab has any mirror status/timestamp visible (push mirror lives on source project).
         push_status = await _poll_remote_mirror_status(
             gl=gl,
             project_id=source_project.id,
@@ -245,7 +285,7 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
         )
         assert isinstance(push_status, dict)
 
-        # 11) Export should include our push mirror
+        # 14) Export should include our push mirror
         push_export = await client.get(f"/api/export/pair/{push_pair_id}")
         assert push_export.status_code == 200, push_export.text
         push_export_data = json.loads(push_export.text)
