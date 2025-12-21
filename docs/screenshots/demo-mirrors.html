@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitLab Mirror Wizard - Mirrors</title>
+    <link rel="stylesheet" href="../../app/static/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>GitLab Mirror Wizard</h1>
+            <p>Manage GitLab mirrors across multiple instance pairs</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab" data-tab="dashboard-tab">Dashboard</button>
+            <button class="tab" data-tab="instances-tab">GitLab Instances</button>
+            <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
+            <button class="tab active" data-tab="mirrors-tab">Mirrors</button>
+        </div>
+
+        <!-- Mirrors Tab -->
+        <div id="mirrors-tab" class="tab-content active">
+            <div class="card">
+                <div class="flex-between">
+                    <h2>Mirrors</h2>
+                    <div class="flex">
+                        <button class="btn btn-secondary btn-small">Export</button>
+                        <button class="btn btn-secondary btn-small">Import</button>
+                    </div>
+                </div>
+                <p class="text-muted">Manage mirrors for your instance pairs.</p>
+
+                <div class="form-group mt-20">
+                    <label for="pair-selector">Select Instance Pair *</label>
+                    <select id="pair-selector">
+                        <option value="">Select instance pair...</option>
+                        <option value="1" selected>Prod → Backup</option>
+                        <option value="2">Prod → Partner</option>
+                        <option value="3">Dev → Prod</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Create New Mirror</h3>
+                <form id="mirror-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="mirror-source-project">Source Project *</label>
+                            <select id="mirror-source-project" required>
+                                <option value="">Select source project...</option>
+                                <option value="123">platform/api-gateway</option>
+                                <option value="124">platform/user-service</option>
+                                <option value="125">platform/payment-processor</option>
+                                <option value="126">frontend/web-dashboard</option>
+                                <option value="127">infrastructure/terraform-configs</option>
+                                <option value="128">data/analytics-pipeline</option>
+                                <option value="129">mobile/ios-app</option>
+                                <option value="130">mobile/android-app</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="mirror-target-project">Target Project *</label>
+                            <select id="mirror-target-project" required>
+                                <option value="">Select target project...</option>
+                                <option value="456">platform/api-gateway</option>
+                                <option value="457">platform/user-service</option>
+                                <option value="458">platform/payment-processor</option>
+                                <option value="459">frontend/web-dashboard</option>
+                                <option value="460">infrastructure/terraform-configs</option>
+                                <option value="461">data/analytics-pipeline</option>
+                                <option value="462">mobile/ios-app</option>
+                                <option value="463">mobile/android-app</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Create Mirror</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>Configured Mirrors</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Source Project</th>
+                            <th>Target Project</th>
+                            <th>Status</th>
+                            <th>Update Status</th>
+                            <th>Last Update</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mirrors-list">
+                        <tr>
+                            <td>platform/api-gateway</td>
+                            <td>platform/api-gateway</td>
+                            <td><span class="badge badge-success">Enabled</span></td>
+                            <td><span class="badge badge-info">finished</span></td>
+                            <td>2 hours ago</td>
+                            <td>
+                                <button class="btn btn-success btn-small">Update</button>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>platform/user-service</td>
+                            <td>platform/user-service</td>
+                            <td><span class="badge badge-success">Enabled</span></td>
+                            <td><span class="badge badge-info">finished</span></td>
+                            <td>1 hour ago</td>
+                            <td>
+                                <button class="btn btn-success btn-small">Update</button>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>platform/payment-processor</td>
+                            <td>platform/payment-processor</td>
+                            <td><span class="badge badge-success">Enabled</span></td>
+                            <td><span class="badge badge-info">finished</span></td>
+                            <td>30 minutes ago</td>
+                            <td>
+                                <button class="btn btn-success btn-small">Update</button>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>frontend/web-dashboard</td>
+                            <td>frontend/web-dashboard</td>
+                            <td><span class="badge badge-success">Enabled</span></td>
+                            <td><span class="badge badge-info">finished</span></td>
+                            <td>3 hours ago</td>
+                            <td>
+                                <button class="btn btn-success btn-small">Update</button>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>infrastructure/terraform-configs</td>
+                            <td>infrastructure/terraform-configs</td>
+                            <td><span class="badge badge-success">Enabled</span></td>
+                            <td><span class="badge badge-info">finished</span></td>
+                            <td>45 minutes ago</td>
+                            <td>
+                                <button class="btn btn-success btn-small">Update</button>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>data/analytics-pipeline</td>
+                            <td>data/analytics-pipeline</td>
+                            <td><span class="badge badge-success">Enabled</span></td>
+                            <td><span class="badge badge-danger">failed</span></td>
+                            <td>5 hours ago</td>
+                            <td>
+                                <button class="btn btn-success btn-small">Update</button>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>mobile/ios-app</td>
+                            <td>mobile/ios-app</td>
+                            <td><span class="badge badge-success">Enabled</span></td>
+                            <td><span class="badge badge-info">finished</span></td>
+                            <td>1 day ago</td>
+                            <td>
+                                <button class="btn btn-success btn-small">Update</button>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>mobile/android-app</td>
+                            <td>mobile/android-app</td>
+                            <td><span class="badge badge-warning">Disabled</span></td>
+                            <td><span class="text-muted">N/A</span></td>
+                            <td>Never</td>
+                            <td>
+                                <button class="btn btn-success btn-small">Update</button>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
