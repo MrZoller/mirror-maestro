@@ -1,0 +1,72 @@
+name: Live GitLab E2E (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      gitlab_url:
+        description: "GitLab base URL (optional override; otherwise uses secret E2E_GITLAB_URL)"
+        required: false
+        type: string
+      gitlab_group_path:
+        description: "GitLab group full_path (optional override; otherwise uses secret E2E_GITLAB_GROUP_PATH)"
+        required: false
+        type: string
+      http_username:
+        description: "HTTP username for PAT auth (default: oauth2)"
+        required: false
+        default: "oauth2"
+        type: string
+      mirror_timeout_s:
+        description: "Seconds to wait for mirror status visibility (default: 60)"
+        required: false
+        default: "60"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-gitlab-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: Run live GitLab E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run live GitLab E2E tests
+        env:
+          # Hard opt-in guardrail for the test.
+          E2E_LIVE_GITLAB: "1"
+
+          # Prefer workflow inputs, fall back to secrets.
+          E2E_GITLAB_URL: ${{ inputs.gitlab_url || secrets.E2E_GITLAB_URL }}
+          E2E_GITLAB_GROUP_PATH: ${{ inputs.gitlab_group_path || secrets.E2E_GITLAB_GROUP_PATH }}
+          E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
+
+          # Optional tuning.
+          E2E_GITLAB_HTTP_USERNAME: ${{ inputs.http_username }}
+          E2E_GITLAB_MIRROR_TIMEOUT_S: ${{ inputs.mirror_timeout_s }}
+        run: |
+          python -m pytest -q -m live_gitlab
+
