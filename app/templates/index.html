@@ -210,33 +210,12 @@
                             <th>Source</th>
                             <th>Target</th>
                             <th>Direction</th>
+                            <th>Default Settings</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="pairs-list">
-                        <tr><td colspan="5" class="text-center"><div class="spinner"></div></td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="card">
-                <h3>Pair Default Mirror Settings</h3>
-                <p class="text-muted">View the default mirror settings configured on each instance pair.</p>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Pair</th>
-                            <th>Direction</th>
-                            <th>Protected</th>
-                            <th>Overwrite</th>
-                            <th>Trigger</th>
-                            <th>Only Protected</th>
-                            <th>Regex</th>
-                            <th>User</th>
-                        </tr>
-                    </thead>
-                    <tbody id="pair-defaults-list">
-                        <tr><td colspan="8" class="text-center"><div class="spinner"></div></td></tr>
+                        <tr><td colspan="6" class="text-center"><div class="spinner"></div></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -282,24 +261,6 @@
                     Create a token for each group that contains projects you want to mirror.
                     The token must have <code>read_repository</code> and <code>write_repository</code> scopes.
                 </div>
-            </div>
-
-            <div class="card">
-                <h3>Configured Tokens</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>GitLab Instance</th>
-                            <th>Group Path</th>
-                            <th>Token Name</th>
-                            <th>Created</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tokens-list">
-                        <tr><td colspan="5" class="text-center"><div class="spinner"></div></td></tr>
-                    </tbody>
-                </table>
             </div>
 
             <div class="card">
@@ -363,23 +324,20 @@
             </div>
 
             <div class="card">
-                <h3>Configured Group Defaults</h3>
+                <h3>Configured Group Settings</h3>
+                <p class="text-muted">View group defaults (resolved with pair defaults) alongside token coverage for each instance pair.</p>
                 <table>
                     <thead>
                         <tr>
                             <th>Instance Pair</th>
                             <th>Group Path</th>
-                            <th>Direction</th>
-                            <th>Overwrite</th>
-                            <th>Trigger</th>
-                            <th>Only Protected</th>
-                            <th>Regex</th>
-                            <th>User</th>
+                            <th>Default Settings</th>
+                            <th>Tokens</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="group-defaults-list">
-                        <tr><td colspan="9" class="text-center"><div class="spinner"></div></td></tr>
+                    <tbody id="group-settings-list">
+                        <tr><td colspan="5" class="text-center"><div class="spinner"></div></td></tr>
                     </tbody>
                 </table>
             </div>
