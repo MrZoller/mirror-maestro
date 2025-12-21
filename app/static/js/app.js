@@ -826,7 +826,7 @@ function renderMirrors(mirrors) {
                 <td>${updateStatus}</td>
                 <td>${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}</td>
                 <td>
-                    <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})">Update</button>
+                    <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
                     <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
                 </td>
             </tr>
