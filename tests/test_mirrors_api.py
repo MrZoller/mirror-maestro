@@ -10,15 +10,26 @@ class FakeGitLabClient:
     push_calls = []
     trigger_calls = []
     delete_calls = []
+    update_calls = []
 
     def __init__(self, url: str, encrypted_token: str):
         self.url = url
         self.encrypted_token = encrypted_token
         self.__class__.inits.append((url, encrypted_token))
 
-    def create_pull_mirror(self, project_id: int, mirror_url: str, enabled=True, only_protected_branches=False):
+    def create_pull_mirror(
+        self,
+        project_id: int,
+        mirror_url: str,
+        enabled=True,
+        only_protected_branches=False,
+        keep_divergent_refs=None,
+        trigger_builds=None,
+        mirror_branch_regex=None,
+        mirror_user_id=None,
+    ):
         self.__class__.pull_calls.append(
-            (project_id, mirror_url, enabled, only_protected_branches)
+            (project_id, mirror_url, enabled, only_protected_branches, keep_divergent_refs, trigger_builds, mirror_branch_regex, mirror_user_id)
         )
         return {"id": 77}
 
@@ -27,13 +38,15 @@ class FakeGitLabClient:
         project_id: int,
         mirror_url: str,
         enabled=True,
-        keep_divergent_refs=False,
+        keep_divergent_refs=None,
         only_protected_branches=False,
+        mirror_branch_regex=None,
+        mirror_user_id=None,
     ):
         self.__class__.push_calls.append(
-            (project_id, mirror_url, enabled, keep_divergent_refs, only_protected_branches)
+            (project_id, mirror_url, enabled, keep_divergent_refs, only_protected_branches, mirror_branch_regex, mirror_user_id)
         )
-        return {"project_id": 88}
+        return {"id": 88}
 
     def trigger_mirror_update(self, project_id: int, mirror_id: int) -> bool:
         self.__class__.trigger_calls.append((project_id, mirror_id))
@@ -42,6 +55,31 @@ class FakeGitLabClient:
     def delete_mirror(self, project_id: int, mirror_id: int) -> bool:
         self.__class__.delete_calls.append((project_id, mirror_id))
         return True
+
+    def update_mirror(
+        self,
+        project_id: int,
+        mirror_id: int,
+        enabled=None,
+        only_protected_branches=None,
+        keep_divergent_refs=None,
+        trigger_builds=None,
+        mirror_branch_regex=None,
+        mirror_user_id=None,
+    ):
+        self.__class__.update_calls.append(
+            (
+                project_id,
+                mirror_id,
+                enabled,
+                only_protected_branches,
+                keep_divergent_refs,
+                trigger_builds,
+                mirror_branch_regex,
+                mirror_user_id,
+            )
+        )
+        return {"id": mirror_id}
 
 
 async def seed_instance(session_maker, *, name: str, url: str) -> int:
@@ -236,4 +274,56 @@ async def test_mirrors_delete_best_effort_gitlab_and_db(client, session_maker, m
     async with session_maker() as s:
         row = (await s.execute(select(Mirror).where(Mirror.id == mirror_id))).scalar_one_or_none()
         assert row is None
+
+
+@pytest.mark.asyncio
+async def test_mirrors_update_applies_settings_to_gitlab(client, session_maker, monkeypatch):
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.update_calls.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        # Pair defaults
+        pair = (await s.execute(select(InstancePair).where(InstancePair.id == pair_id))).scalar_one()
+        pair.mirror_overwrite_diverged = True
+        pair.only_mirror_protected_branches = True
+        pair.mirror_trigger_builds = True
+        pair.mirror_branch_regex = "^main$"
+        pair.mirror_user_id = 42
+
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="platform/proj",
+            target_project_id=2,
+            target_project_path="platform/proj",
+            mirror_id=77,
+            enabled=True,
+            last_update_status="pending",
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        db_mirror_id = m.id
+
+    # Update enabled only; other values should be inherited from pair defaults.
+    resp = await client.put(f"/api/mirrors/{db_mirror_id}", json={"enabled": False})
+    assert resp.status_code == 200, resp.text
+
+    # Pull direction => update on target project_id (2)
+    assert FakeGitLabClient.update_calls[-1] == (
+        2,   # project_id
+        77,  # mirror_id
+        False,  # enabled
+        True,   # only_protected_branches (pair default)
+        False,  # keep_divergent_refs (not overwrite_diverged)
+        True,   # trigger_builds (pair default; pull only)
+        "^main$",
+        42,
+    )
 

@@ -225,6 +225,9 @@ async function createPair() {
     const form = document.getElementById('pair-form');
     const formData = new FormData(form);
 
+    const branchRegexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
+    const mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
+
     const data = {
         name: formData.get('name'),
         source_instance_id: parseInt(formData.get('source_instance_id')),
@@ -234,6 +237,8 @@ async function createPair() {
         mirror_overwrite_diverged: formData.get('mirror_overwrite_diverged') === 'on',
         mirror_trigger_builds: formData.get('mirror_trigger_builds') === 'on',
         only_mirror_protected_branches: formData.get('only_mirror_protected_branches') === 'on',
+        mirror_branch_regex: branchRegexRaw || null,
+        mirror_user_id: mirrorUserIdRaw ? parseInt(mirrorUserIdRaw) : null,
         description: formData.get('description') || ''
     };
 
@@ -417,6 +422,8 @@ async function loadProjectsForPair() {
     if (!pair) return;
 
     try {
+        resetMirrorOverrides();
+
         // Load source projects
         const sourceProjects = await apiRequest(`/api/instances/${pair.source_instance_id}/projects`);
         const sourceSelect = document.getElementById('mirror-source-project');
@@ -437,11 +444,46 @@ async function loadProjectsForPair() {
     }
 }
 
+function resetMirrorOverrides() {
+    // Tri-state checkboxes (indeterminate => "use pair default" / don't send)
+    const triStateCheckboxIds = [
+        'mirror-overwrite',
+        'mirror-trigger',
+        'mirror-only-protected',
+    ];
+    triStateCheckboxIds.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.checked = false;
+        el.indeterminate = true;
+        el.title = 'Use pair default';
+        el.onchange = () => {
+            // Once the user interacts, treat it as an explicit override.
+            el.indeterminate = false;
+            el.title = '';
+        };
+    });
+
+    const regex = document.getElementById('mirror-branch-regex');
+    if (regex) regex.value = '';
+    const userId = document.getElementById('mirror-mirror-user-id');
+    if (userId) userId.value = '';
+
+    const dir = document.getElementById('mirror-direction');
+    if (dir) dir.value = '';
+
+    const enabled = document.getElementById('mirror-enabled');
+    if (enabled) enabled.checked = true;
+}
+
 async function createMirror() {
     if (!state.selectedPair) {
         showMessage('Please select an instance pair first', 'error');
         return;
     }
+
+    const form = document.getElementById('mirror-form');
+    const formData = new FormData(form);
 
     const sourceSelect = document.getElementById('mirror-source-project');
     const targetSelect = document.getElementById('mirror-target-project');
@@ -455,8 +497,35 @@ async function createMirror() {
         source_project_path: sourceOption.dataset.path,
         target_project_id: parseInt(targetSelect.value),
         target_project_path: targetOption.dataset.path,
-        enabled: true
+        enabled: formData.get('enabled') === 'on'
     };
+
+    const mirrorDirection = (formData.get('mirror_direction') || '').toString().trim();
+    if (mirrorDirection) {
+        data.mirror_direction = mirrorDirection;
+    }
+
+    const overwriteEl = document.getElementById('mirror-overwrite');
+    if (overwriteEl && !overwriteEl.indeterminate) {
+        data.mirror_overwrite_diverged = overwriteEl.checked;
+    }
+    const triggerEl = document.getElementById('mirror-trigger');
+    if (triggerEl && !triggerEl.indeterminate) {
+        data.mirror_trigger_builds = triggerEl.checked;
+    }
+    const onlyProtectedEl = document.getElementById('mirror-only-protected');
+    if (onlyProtectedEl && !onlyProtectedEl.indeterminate) {
+        data.only_mirror_protected_branches = onlyProtectedEl.checked;
+    }
+
+    const regexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
+    if (regexRaw) {
+        data.mirror_branch_regex = regexRaw;
+    }
+    const mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
+    if (mirrorUserIdRaw) {
+        data.mirror_user_id = parseInt(mirrorUserIdRaw);
+    }
 
     try {
         await apiRequest('/api/mirrors', {
