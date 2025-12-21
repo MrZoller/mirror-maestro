@@ -39,6 +39,8 @@ class MirrorExport(BaseModel):
     mirror_overwrite_diverged: bool | None = None
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
+    mirror_branch_regex: str | None = None
+    mirror_user_id: int | None = None
     enabled: bool = True
 
 
@@ -86,6 +88,8 @@ async def export_pair_mirrors(
             mirror_overwrite_diverged=m.mirror_overwrite_diverged,
             mirror_trigger_builds=m.mirror_trigger_builds,
             only_mirror_protected_branches=m.only_mirror_protected_branches,
+            mirror_branch_regex=m.mirror_branch_regex,
+            mirror_user_id=m.mirror_user_id,
             enabled=m.enabled
         )
         for m in mirrors
@@ -159,6 +163,8 @@ async def import_pair_mirrors(
                 mirror_overwrite_diverged=mirror_data.mirror_overwrite_diverged,
                 mirror_trigger_builds=mirror_data.mirror_trigger_builds,
                 only_mirror_protected_branches=mirror_data.only_mirror_protected_branches,
+                mirror_branch_regex=mirror_data.mirror_branch_regex,
+                mirror_user_id=mirror_data.mirror_user_id,
                 enabled=mirror_data.enabled,
                 last_update_status="pending"
             )

@@ -81,26 +81,25 @@ class GitLabClient:
         project_id: int,
         mirror_url: str,
         enabled: bool = True,
-        only_protected_branches: bool = False
+        only_protected_branches: bool = False,
+        keep_divergent_refs: bool | None = None,
+        trigger_builds: bool | None = None,
+        mirror_branch_regex: str | None = None,
+        mirror_user_id: int | None = None,
     ) -> Dict[str, Any]:
-        """Create a pull mirror for a project."""
+        """Create a pull mirror for a project (target pulls from source)."""
         try:
-            project = self.gl.projects.get(project_id)
-
-            # GitLab API for pull mirrors
-            mirror = project.remote_mirrors.create({
-                "url": mirror_url,
-                "enabled": enabled,
-                "only_protected_branches": only_protected_branches
-            })
-
-            return {
-                "id": mirror.id,
-                "url": mirror.url,
-                "enabled": mirror.enabled,
-                "update_status": getattr(mirror, "update_status", "unknown"),
-                "last_update_at": getattr(mirror, "last_update_at", None),
-            }
+            return self._create_remote_mirror(
+                project_id=project_id,
+                mirror_url=mirror_url,
+                enabled=enabled,
+                only_protected_branches=only_protected_branches,
+                keep_divergent_refs=keep_divergent_refs,
+                trigger_builds=trigger_builds,
+                mirror_branch_regex=mirror_branch_regex,
+                mirror_user_id=mirror_user_id,
+                mirror_direction="pull",
+            )
         except Exception as e:
             raise Exception(f"Failed to create pull mirror: {str(e)}")
 
@@ -109,60 +108,60 @@ class GitLabClient:
         project_id: int,
         mirror_url: str,
         enabled: bool = True,
-        keep_divergent_refs: bool = False,
-        only_protected_branches: bool = False
+        keep_divergent_refs: bool | None = None,
+        only_protected_branches: bool = False,
+        mirror_branch_regex: str | None = None,
+        mirror_user_id: int | None = None,
     ) -> Dict[str, Any]:
-        """Create a push mirror for a project."""
+        """Create a push mirror for a project (source pushes to target)."""
         try:
-            project = self.gl.projects.get(project_id)
-
-            # For push mirrors, we use the import_url or mirror settings
-            project.mirror = True
-            project.import_url = mirror_url
-            project.mirror_overwrites_diverged_branches = not keep_divergent_refs
-            project.only_mirror_protected_branches = only_protected_branches
-            project.save()
-
-            return {
-                "project_id": project.id,
-                "mirror": project.mirror,
-                "mirror_overwrites_diverged_branches": project.mirror_overwrites_diverged_branches,
-            }
+            return self._create_remote_mirror(
+                project_id=project_id,
+                mirror_url=mirror_url,
+                enabled=enabled,
+                only_protected_branches=only_protected_branches,
+                keep_divergent_refs=keep_divergent_refs,
+                mirror_branch_regex=mirror_branch_regex,
+                mirror_user_id=mirror_user_id,
+                mirror_direction="push",
+            )
         except Exception as e:
             raise Exception(f"Failed to create push mirror: {str(e)}")
 
     def get_project_mirrors(self, project_id: int) -> List[Dict[str, Any]]:
         """Get all mirrors for a project."""
         try:
-            project = self.gl.projects.get(project_id)
-            mirrors = []
+            mirrors = self.gl.http_get(f"/projects/{project_id}/remote_mirrors")
+            if not isinstance(mirrors, list):
+                return []
 
-            # Get remote mirrors (push mirrors)
-            try:
-                remote_mirrors = project.remote_mirrors.list()
-                for m in remote_mirrors:
-                    mirrors.append({
-                        "id": m.id,
-                        "url": m.url,
-                        "enabled": m.enabled,
-                        "update_status": getattr(m, "update_status", "unknown"),
-                        "last_update_at": getattr(m, "last_update_at", None),
-                        "last_successful_update_at": getattr(m, "last_successful_update_at", None),
-                        "type": "push"
-                    })
-            except Exception:
-                pass
-
-            return mirrors
+            out: List[Dict[str, Any]] = []
+            for m in mirrors:
+                if not isinstance(m, dict):
+                    continue
+                out.append({
+                    "id": m.get("id"),
+                    "url": m.get("url"),
+                    "enabled": m.get("enabled"),
+                    "mirror_direction": m.get("mirror_direction"),
+                    "only_protected_branches": m.get("only_protected_branches"),
+                    "keep_divergent_refs": m.get("keep_divergent_refs"),
+                    "trigger_builds": m.get("trigger_builds"),
+                    "mirror_branch_regex": m.get("mirror_branch_regex"),
+                    "mirror_user_id": m.get("mirror_user_id"),
+                    "update_status": m.get("update_status"),
+                    "last_update_at": m.get("last_update_at"),
+                    "last_successful_update_at": m.get("last_successful_update_at"),
+                })
+            return out
         except Exception as e:
             raise Exception(f"Failed to fetch project mirrors: {str(e)}")
 
     def trigger_mirror_update(self, project_id: int, mirror_id: int) -> bool:
         """Trigger an immediate update of a mirror."""
         try:
-            project = self.gl.projects.get(project_id)
-            mirror = project.remote_mirrors.get(mirror_id)
-            mirror.update()
+            # GitLab: POST /projects/:id/remote_mirrors/:mirror_id/sync
+            self.gl.http_post(f"/projects/{project_id}/remote_mirrors/{mirror_id}/sync")
             return True
         except Exception as e:
             raise Exception(f"Failed to trigger mirror update: {str(e)}")
@@ -170,9 +169,7 @@ class GitLabClient:
     def delete_mirror(self, project_id: int, mirror_id: int) -> bool:
         """Delete a mirror."""
         try:
-            project = self.gl.projects.get(project_id)
-            mirror = project.remote_mirrors.get(mirror_id)
-            mirror.delete()
+            self.gl.http_delete(f"/projects/{project_id}/remote_mirrors/{mirror_id}")
             return True
         except Exception as e:
             raise Exception(f"Failed to delete mirror: {str(e)}")
@@ -182,24 +179,69 @@ class GitLabClient:
         project_id: int,
         mirror_id: int,
         enabled: Optional[bool] = None,
-        only_protected_branches: Optional[bool] = None
+        only_protected_branches: Optional[bool] = None,
+        keep_divergent_refs: Optional[bool] = None,
+        trigger_builds: Optional[bool] = None,
+        mirror_branch_regex: Optional[str] = None,
+        mirror_user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Update mirror settings."""
         try:
-            project = self.gl.projects.get(project_id)
-            mirror = project.remote_mirrors.get(mirror_id)
-
+            data: Dict[str, Any] = {}
             if enabled is not None:
-                mirror.enabled = enabled
+                data["enabled"] = enabled
             if only_protected_branches is not None:
-                mirror.only_protected_branches = only_protected_branches
+                data["only_protected_branches"] = only_protected_branches
+            if keep_divergent_refs is not None:
+                data["keep_divergent_refs"] = keep_divergent_refs
+            if trigger_builds is not None:
+                data["trigger_builds"] = trigger_builds
+            if mirror_branch_regex is not None:
+                data["mirror_branch_regex"] = mirror_branch_regex
+            if mirror_user_id is not None:
+                data["mirror_user_id"] = mirror_user_id
 
-            mirror.save()
+            if not data:
+                return {"id": mirror_id}
 
-            return {
-                "id": mirror.id,
-                "enabled": mirror.enabled,
-                "only_protected_branches": getattr(mirror, "only_protected_branches", False),
-            }
+            return self.gl.http_put(
+                f"/projects/{project_id}/remote_mirrors/{mirror_id}",
+                post_data=data,
+            )
         except Exception as e:
             raise Exception(f"Failed to update mirror: {str(e)}")
+
+    def _create_remote_mirror(
+        self,
+        *,
+        project_id: int,
+        mirror_url: str,
+        enabled: bool = True,
+        only_protected_branches: bool = False,
+        keep_divergent_refs: bool | None = None,
+        trigger_builds: bool | None = None,
+        mirror_branch_regex: str | None = None,
+        mirror_user_id: int | None = None,
+        mirror_direction: str | None = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a remote mirror using a raw API call (bypasses python-gitlab's
+        strict attribute whitelist so we can expose all GitLab UI settings).
+        """
+        data: Dict[str, Any] = {
+            "url": mirror_url,
+            "enabled": enabled,
+            "only_protected_branches": only_protected_branches,
+        }
+        if keep_divergent_refs is not None:
+            data["keep_divergent_refs"] = keep_divergent_refs
+        if trigger_builds is not None:
+            data["trigger_builds"] = trigger_builds
+        if mirror_branch_regex is not None:
+            data["mirror_branch_regex"] = mirror_branch_regex
+        if mirror_user_id is not None:
+            data["mirror_user_id"] = mirror_user_id
+        if mirror_direction is not None:
+            data["mirror_direction"] = mirror_direction
+
+        return self.gl.http_post(f"/projects/{project_id}/remote_mirrors", post_data=data)
