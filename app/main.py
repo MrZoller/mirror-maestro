@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
@@ -41,7 +41,7 @@ app.include_router(export.router)
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request, _: str = verify_credentials):
+async def root(request: Request, _: str = Depends(verify_credentials)):
     """Serve the main web interface."""
     return templates.TemplateResponse(
         "index.html",
