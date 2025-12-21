@@ -219,6 +219,9 @@ async def delete_instance(
 async def get_instance_projects(
     instance_id: int,
     search: str | None = None,
+    per_page: int = 50,
+    page: int = 1,
+    get_all: bool = False,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
@@ -233,7 +236,10 @@ async def get_instance_projects(
 
     try:
         client = GitLabClient(instance.url, instance.encrypted_token)
-        projects = client.get_projects(search=search)
+        # Clamp pagination to keep requests bounded.
+        per_page = max(1, min(int(per_page), 100))
+        page = max(1, int(page))
+        projects = client.get_projects(search=search, per_page=per_page, page=page, get_all=get_all)
         return {"projects": projects}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch projects: {str(e)}")
