@@ -22,7 +22,7 @@
             <button class="tab active" data-tab="dashboard-tab">Dashboard</button>
             <button class="tab" data-tab="instances-tab">GitLab Instances</button>
             <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
-            <button class="tab" data-tab="tokens-tab">Group Tokens</button>
+            <button class="tab" data-tab="tokens-tab">Group Settings</button>
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
         </div>
 
@@ -42,8 +42,8 @@
                         <p class="text-muted">Define pairs of GitLab instances where mirrors will be created.</p>
                     </div>
                     <div>
-                        <h3>3. Add Group Tokens</h3>
-                        <p class="text-muted">Configure group access tokens for HTTPS authentication (required for mirrors).</p>
+                        <h3>3. Configure Group Settings</h3>
+                        <p class="text-muted">Add group access tokens and (optionally) group-level mirror default overrides.</p>
                     </div>
                     <div>
                         <h3>4. Configure Mirrors</h3>
@@ -186,8 +186,8 @@
                                 <input type="text" id="pair-branch-regex" name="mirror_branch_regex" placeholder="Optional (e.g., ^main$|^release/.*$)">
                             </div>
                             <div class="form-group">
-                                <label for="pair-mirror-user-id">Mirror user ID</label>
-                                <input type="number" id="pair-mirror-user-id" name="mirror_user_id" placeholder="Optional (GitLab user id)">
+                                <label for="pair-mirror-user-id">Mirror user</label>
+                                <input type="number" id="pair-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
                             </div>
                         </div>
                     </div>
@@ -218,13 +218,35 @@
                     </tbody>
                 </table>
             </div>
+
+            <div class="card">
+                <h3>Pair Default Mirror Settings</h3>
+                <p class="text-muted">View the default mirror settings configured on each instance pair.</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pair</th>
+                            <th>Direction</th>
+                            <th>Protected</th>
+                            <th>Overwrite</th>
+                            <th>Trigger</th>
+                            <th>Only Protected</th>
+                            <th>Regex</th>
+                            <th>User</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pair-defaults-list">
+                        <tr><td colspan="8" class="text-center"><div class="spinner"></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
-        <!-- Group Tokens Tab -->
+        <!-- Group Settings Tab -->
         <div id="tokens-tab" class="tab-content">
             <div class="card">
-                <h2>Group Access Tokens</h2>
-                <p class="text-muted">Configure group access tokens for authenticating mirrors. Each group in your GitLab instances needs a token for HTTPS mirroring.</p>
+                <h2>Group Settings</h2>
+                <p class="text-muted">Manage group access tokens (for HTTPS mirroring) and group-level mirror default overrides (that take precedence over pair defaults).</p>
 
                 <form id="token-form" class="mt-20">
                     <div class="form-row">
@@ -275,6 +297,87 @@
                     </thead>
                     <tbody id="tokens-list">
                         <tr><td colspan="5" class="text-center"><div class="spinner"></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>Group Mirror Default Overrides</h3>
+                <p class="text-muted">Optional: override an instance pair's default mirror settings for a specific GitLab group path. Mirrors can still override these settings per mirror.</p>
+
+                <form id="group-defaults-form" class="mt-20">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="group-defaults-pair">Instance Pair *</label>
+                            <select id="group-defaults-pair" name="instance_pair_id" required>
+                                <option value="">Select instance pair...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="group-defaults-group-path">Group Path *</label>
+                            <input type="text" id="group-defaults-group-path" name="group_path" required placeholder="e.g., platform, platform/core">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="group-defaults-direction">Default Mirror Direction</label>
+                            <select id="group-defaults-direction" name="mirror_direction">
+                                <option value="">Inherit pair default</option>
+                                <option value="pull">Pull</option>
+                                <option value="push">Push</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Default Mirror Settings (optional overrides)</label>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="group-defaults-overwrite" name="mirror_overwrite_diverged">
+                            <label for="group-defaults-overwrite">Overwrite divergent branches</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="group-defaults-trigger" name="mirror_trigger_builds">
+                            <label for="group-defaults-trigger">Trigger builds on mirror update (pull only)</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="group-defaults-only-protected" name="only_mirror_protected_branches">
+                            <label for="group-defaults-only-protected">Only mirror protected branches</label>
+                        </div>
+                        <div class="form-row mt-10">
+                            <div class="form-group">
+                                <label for="group-defaults-branch-regex">Mirror branch regex (pull only)</label>
+                                <input type="text" id="group-defaults-branch-regex" name="mirror_branch_regex" placeholder="Optional (e.g., ^main$|^release/.*$)">
+                            </div>
+                            <div class="form-group">
+                                <label for="group-defaults-mirror-user-id">Mirror user (pull only)</label>
+                                <input type="number" id="group-defaults-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Save Group Defaults</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>Configured Group Defaults</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Instance Pair</th>
+                            <th>Group Path</th>
+                            <th>Direction</th>
+                            <th>Overwrite</th>
+                            <th>Trigger</th>
+                            <th>Only Protected</th>
+                            <th>Regex</th>
+                            <th>User</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="group-defaults-list">
+                        <tr><td colspan="9" class="text-center"><div class="spinner"></div></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -354,8 +457,8 @@
                                 <input type="text" id="mirror-branch-regex" name="mirror_branch_regex" placeholder="Optional (e.g., ^main$|^release/.*$)">
                             </div>
                             <div class="form-group">
-                                <label for="mirror-mirror-user-id">Mirror user ID</label>
-                                <input type="number" id="mirror-mirror-user-id" name="mirror_user_id" placeholder="Optional (GitLab user id)">
+                                <label for="mirror-mirror-user-id">Mirror user</label>
+                                <input type="number" id="mirror-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
                             </div>
                         </div>
                     </div>

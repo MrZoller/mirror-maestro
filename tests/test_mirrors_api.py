@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models import GitLabInstance, InstancePair, GroupAccessToken, Mirror
+from app.models import GroupMirrorDefaults
 
 
 class FakeGitLabClient:
@@ -86,7 +87,7 @@ class FakeGitLabClient:
 
 async def seed_instance(session_maker, *, name: str, url: str) -> int:
     async with session_maker() as s:
-        inst = GitLabInstance(name=name, url=url, encrypted_token="enc:t", description="")
+        inst = GitLabInstance(name=name, url=url, encrypted_token="enc:t", description="", api_user_id=None, api_username=None)
         s.add(inst)
         await s.commit()
         await s.refresh(inst)
@@ -119,6 +120,35 @@ async def seed_group_token(session_maker, *, instance_id: int, group_path: str, 
         await s.commit()
         await s.refresh(t)
         return t.id
+
+
+async def seed_group_defaults(
+    session_maker,
+    *,
+    pair_id: int,
+    group_path: str,
+    mirror_direction: str | None = None,
+    mirror_overwrite_diverged: bool | None = None,
+    mirror_trigger_builds: bool | None = None,
+    only_mirror_protected_branches: bool | None = None,
+    mirror_branch_regex: str | None = None,
+    mirror_user_id: int | None = None,
+) -> int:
+    async with session_maker() as s:
+        d = GroupMirrorDefaults(
+            instance_pair_id=pair_id,
+            group_path=group_path,
+            mirror_direction=mirror_direction,
+            mirror_overwrite_diverged=mirror_overwrite_diverged,
+            mirror_trigger_builds=mirror_trigger_builds,
+            only_mirror_protected_branches=only_mirror_protected_branches,
+            mirror_branch_regex=mirror_branch_regex,
+            mirror_user_id=mirror_user_id,
+        )
+        s.add(d)
+        await s.commit()
+        await s.refresh(d)
+        return d.id
 
 
 @pytest.mark.asyncio
@@ -327,6 +357,189 @@ async def test_mirrors_update_applies_settings_to_gitlab(client, session_maker, 
         True,   # trigger_builds (pair default; pull only)
         "^main$",
         42,
+        "pull",
+    )
+
+
+@pytest.mark.asyncio
+async def test_mirrors_create_pull_uses_group_defaults_over_pair(client, session_maker, monkeypatch):
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.inits.clear()
+    FakeGitLabClient.pull_calls.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    # Pair defaults (intentionally opposite of group defaults)
+    async with session_maker() as s:
+        pair = (await s.execute(select(InstancePair).where(InstancePair.id == pair_id))).scalar_one()
+        pair.mirror_overwrite_diverged = False
+        pair.only_mirror_protected_branches = False
+        pair.mirror_trigger_builds = False
+        pair.mirror_branch_regex = None
+        pair.mirror_user_id = None
+        await s.commit()
+
+    await seed_group_defaults(
+        session_maker,
+        pair_id=pair_id,
+        group_path="platform/core",
+        mirror_overwrite_diverged=True,
+        only_mirror_protected_branches=True,
+        mirror_trigger_builds=True,
+        mirror_branch_regex="^main$",
+        mirror_user_id=7,
+    )
+
+    payload = {
+        "instance_pair_id": pair_id,
+        "source_project_id": 1,
+        "source_project_path": "platform/core/api",
+        "target_project_id": 2,
+        "target_project_path": "platform/core/api",
+        "enabled": True,
+    }
+    resp = await client.post("/api/mirrors", json=payload)
+    assert resp.status_code == 200, resp.text
+
+    # create_pull_mirror(project_id, mirror_url, enabled, only_protected, keep_divergent, trigger, regex, user_id)
+    _project_id, _url, enabled, only_protected, keep_divergent, trigger, regex, user_id = FakeGitLabClient.pull_calls[-1]
+    assert enabled is True
+    assert only_protected is True
+    assert keep_divergent is False  # overwrite_diverged=True => keep_divergent_refs=False
+    assert trigger is True
+    assert regex == "^main$"
+    assert user_id == 7
+
+
+@pytest.mark.asyncio
+async def test_mirrors_create_pull_defaults_mirror_user_to_token_user(client, session_maker, monkeypatch):
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.pull_calls.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+
+    # Store token user identity on the target instance (pull mirror lives on target).
+    async with session_maker() as s:
+        tgt = (await s.execute(select(GitLabInstance).where(GitLabInstance.id == tgt_id))).scalar_one()
+        tgt.api_user_id = 123
+        tgt.api_username = "mirror-bot"
+        await s.commit()
+
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    payload = {
+        "instance_pair_id": pair_id,
+        "source_project_id": 1,
+        "source_project_path": "platform/proj",
+        "target_project_id": 2,
+        "target_project_path": "platform/proj",
+        "enabled": True,
+    }
+    resp = await client.post("/api/mirrors", json=payload)
+    assert resp.status_code == 200, resp.text
+
+    *_head, mirror_user_id = FakeGitLabClient.pull_calls[-1]
+    assert mirror_user_id == 123
+
+
+@pytest.mark.asyncio
+async def test_mirrors_create_pull_mirror_override_wins_over_group_defaults(client, session_maker, monkeypatch):
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.pull_calls.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    await seed_group_defaults(
+        session_maker,
+        pair_id=pair_id,
+        group_path="platform",
+        mirror_overwrite_diverged=True,
+    )
+
+    payload = {
+        "instance_pair_id": pair_id,
+        "source_project_id": 1,
+        "source_project_path": "platform/proj",
+        "target_project_id": 2,
+        "target_project_path": "platform/proj",
+        "enabled": True,
+        "mirror_overwrite_diverged": False,  # explicit mirror override should win
+    }
+    resp = await client.post("/api/mirrors", json=payload)
+    assert resp.status_code == 200, resp.text
+
+    _project_id, _url, _enabled, _only_protected, keep_divergent, *_rest = FakeGitLabClient.pull_calls[-1]
+    assert keep_divergent is True  # overwrite_diverged=False => keep_divergent_refs=True
+
+
+@pytest.mark.asyncio
+async def test_mirrors_update_uses_group_defaults_over_pair(client, session_maker, monkeypatch):
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.update_calls.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        pair = (await s.execute(select(InstancePair).where(InstancePair.id == pair_id))).scalar_one()
+        pair.mirror_overwrite_diverged = True
+        pair.only_mirror_protected_branches = True
+        pair.mirror_trigger_builds = True
+        pair.mirror_branch_regex = "^main$"
+        pair.mirror_user_id = 42
+
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="platform/core/proj",
+            target_project_id=2,
+            target_project_path="platform/core/proj",
+            mirror_id=77,
+            enabled=True,
+            last_update_status="pending",
+            mirror_direction="pull",
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        db_mirror_id = m.id
+
+    # Override just a subset at the group level
+    await seed_group_defaults(
+        session_maker,
+        pair_id=pair_id,
+        group_path="platform/core",
+        mirror_overwrite_diverged=False,
+        only_mirror_protected_branches=False,
+        mirror_trigger_builds=False,
+    )
+
+    resp = await client.put(f"/api/mirrors/{db_mirror_id}", json={"enabled": False})
+    assert resp.status_code == 200, resp.text
+
+    assert FakeGitLabClient.update_calls[-1] == (
+        2,
+        77,
+        False,
+        False,  # group default
+        True,   # keep_divergent_refs (overwrite_diverged=False)
+        False,  # group default
+        "^main$",  # pair default (not overridden)
+        42,        # pair default (not overridden)
         "pull",
     )
 

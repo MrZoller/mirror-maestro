@@ -8,6 +8,7 @@ class FakeGitLabClient:
     test_ok = True
     projects = [{"id": 1, "name": "p"}]
     groups = [{"id": 2, "name": "g"}]
+    current_user = {"id": 42, "username": "mirror-bot", "name": "Mirror Bot"}
 
     def __init__(self, url: str, encrypted_token: str):
         self.url = url
@@ -21,6 +22,9 @@ class FakeGitLabClient:
 
     def get_groups(self, search=None):
         return self.groups
+
+    def get_current_user(self):
+        return self.current_user
 
 
 @pytest.mark.asyncio
