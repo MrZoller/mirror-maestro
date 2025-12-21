@@ -258,7 +258,8 @@
                         </div>
                         <div class="form-group">
                             <label for="token-group-path">Group Path *</label>
-                            <input type="text" id="token-group-path" name="group_path" required placeholder="e.g., platform, frontend, infrastructure">
+                            <input type="text" id="token-group-path" name="group_path" required placeholder="e.g., platform, frontend, infrastructure" list="token-group-path-options">
+                            <datalist id="token-group-path-options"></datalist>
                         </div>
                     </div>
 
@@ -315,7 +316,8 @@
                         </div>
                         <div class="form-group">
                             <label for="group-defaults-group-path">Group Path *</label>
-                            <input type="text" id="group-defaults-group-path" name="group_path" required placeholder="e.g., platform, platform/core">
+                            <input type="text" id="group-defaults-group-path" name="group_path" required placeholder="e.g., platform, platform/core" list="group-defaults-group-path-options">
+                            <datalist id="group-defaults-group-path-options"></datalist>
                         </div>
                     </div>
 
@@ -426,15 +428,19 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label for="mirror-source-project">Source Project *</label>
+                            <input type="text" id="mirror-source-project-search" placeholder="Type to search (min 2 chars)…">
                             <select id="mirror-source-project" required>
                                 <option value="">Select source project...</option>
                             </select>
+                            <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
                         </div>
                         <div class="form-group">
                             <label for="mirror-target-project">Target Project *</label>
+                            <input type="text" id="mirror-target-project-search" placeholder="Type to search (min 2 chars)…">
                             <select id="mirror-target-project" required>
                                 <option value="">Select target project...</option>
                             </select>
+                            <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
                         </div>
                     </div>
                     <div class="form-group">
