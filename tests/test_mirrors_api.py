@@ -66,6 +66,7 @@ class FakeGitLabClient:
         trigger_builds=None,
         mirror_branch_regex=None,
         mirror_user_id=None,
+        mirror_direction=None,
     ):
         self.__class__.update_calls.append(
             (
@@ -77,6 +78,7 @@ class FakeGitLabClient:
                 trigger_builds,
                 mirror_branch_regex,
                 mirror_user_id,
+                mirror_direction,
             )
         )
         return {"id": mirror_id}
@@ -325,5 +327,6 @@ async def test_mirrors_update_applies_settings_to_gitlab(client, session_maker, 
         True,   # trigger_builds (pair default; pull only)
         "^main$",
         42,
+        "pull",
     )
 
