@@ -44,7 +44,13 @@
                         </div>
                         <div class="form-group">
                             <label for="token-group-path">Group Path *</label>
-                            <input type="text" id="token-group-path" name="group_path" required placeholder="e.g., platform, frontend, infrastructure">
+                            <input type="text" id="token-group-path" name="group_path" required placeholder="e.g., platform, frontend, infrastructure" list="token-group-path-options" value="platform/co">
+                            <datalist id="token-group-path-options">
+                                <option value="platform/core"></option>
+                                <option value="platform/core/platform-tools"></option>
+                                <option value="platform/edge"></option>
+                                <option value="platform/shared"></option>
+                            </datalist>
                         </div>
                     </div>
 
@@ -147,7 +153,13 @@
                         </div>
                         <div class="form-group">
                             <label>Group Path *</label>
-                            <input type="text" required placeholder="e.g., platform/core">
+                            <input type="text" required placeholder="e.g., platform/core" list="group-defaults-group-path-options" value="platform/core">
+                            <datalist id="group-defaults-group-path-options">
+                                <option value="platform/core"></option>
+                                <option value="platform/core/platform-tools"></option>
+                                <option value="platform/edge"></option>
+                                <option value="shared"></option>
+                            </datalist>
                         </div>
                     </div>
                     <div class="form-row">
