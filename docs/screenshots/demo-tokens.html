@@ -180,8 +180,8 @@
                                 <input type="text" placeholder="^main$|^release/.*$" value="^main$">
                             </div>
                             <div class="form-group">
-                                <label>Mirror user ID (pull only)</label>
-                                <input type="number" placeholder="GitLab user id" value="42">
+                                <label>Mirror user (pull only)</label>
+                                <input type="number" placeholder="Auto (from token) — optional override" value="42">
                             </div>
                         </div>
                     </div>
@@ -201,7 +201,7 @@
                             <th>Trigger</th>
                             <th>Only Protected</th>
                             <th>Regex</th>
-                            <th>User ID</th>
+                            <th>User</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -214,7 +214,7 @@
                             <td><span class="text-muted">inherit</span></td>
                             <td>true</td>
                             <td>^main$</td>
-                            <td>42</td>
+                            <td>mirror-bot <span class="text-muted">(#42)</span></td>
                             <td><button class="btn btn-danger btn-small">Delete</button></td>
                         </tr>
                         <tr>

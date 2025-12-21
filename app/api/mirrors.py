@@ -329,6 +329,9 @@ async def create_mirror(
         if mirror.mirror_user_id is not None
         else (group_defaults.mirror_user_id if group_defaults and group_defaults.mirror_user_id is not None else pair.mirror_user_id)
     )
+    # If nothing set anywhere, prefer the API token's user for pull mirrors.
+    if mirror_user_id is None and direction == "pull":
+        mirror_user_id = target_instance.api_user_id
 
     # Create the mirror in GitLab
     gitlab_mirror_id = None
@@ -546,6 +549,8 @@ async def update_mirror(
             if mirror.mirror_user_id is not None
             else (group_defaults.mirror_user_id if group_defaults and group_defaults.mirror_user_id is not None else pair.mirror_user_id)
         )
+        if mirror_user_id is None and direction == "pull":
+            mirror_user_id = instance.api_user_id
 
         try:
             client = GitLabClient(instance.url, instance.encrypted_token)

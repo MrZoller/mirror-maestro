@@ -41,6 +41,10 @@ async def _maybe_migrate_sqlite(conn) -> None:
 
     # Columns added after initial release.
     desired: dict[str, dict[str, str]] = {
+        "gitlab_instances": {
+            "api_user_id": "INTEGER",
+            "api_username": "VARCHAR(255)",
+        },
         "instance_pairs": {
             "mirror_branch_regex": "VARCHAR(255)",
             "mirror_user_id": "INTEGER",
