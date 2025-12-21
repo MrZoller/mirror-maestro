@@ -20,9 +20,9 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 ![Instance Pairs](docs/screenshots/03-pairs.png)
 *Configure pairs of GitLab instances for mirroring*
 
-### Group Access Tokens
+### Group Settings
 ![Group Tokens](docs/screenshots/04-tokens.png)
-*Manage group access tokens for HTTPS mirror authentication*
+*Manage group access tokens and group-level mirror default overrides*
 
 ### Mirrors Management
 ![Mirrors](docs/screenshots/05-mirrors.png)
@@ -37,7 +37,7 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 - **Easy Mirror Creation**: Create mirrors with minimal user input - project information is fetched automatically via the GitLab API
 - **Push & Pull Mirrors**: Support for both push and pull mirroring configurations
 - **HTTPS Mirroring**: Uses HTTPS URLs with group access tokens for secure authentication
-- **Flexible Configuration**: Define default mirror settings at the instance pair level, with optional per-mirror overrides
+- **Flexible Configuration**: Define default mirror settings at the instance pair level, override them per group, and optionally override per mirror
 
 ### Mirror Management
 - **View Mirrors**: See all configured mirrors and their current status at a glance
@@ -216,7 +216,7 @@ Define pairs of instances where mirrors will be created:
      - Trigger builds on update
      - Only mirror protected branches
 
-### 3. Configure Group Access Tokens
+### 3. Configure Group Settings
 
 **Important**: Group access tokens are required for mirrors to authenticate via HTTPS.
 
@@ -228,7 +228,7 @@ Define pairs of instances where mirrors will be created:
    - Save the token value (you won't be able to see it again)
 
 2. In GitLab Mirror Wizard:
-   - Go to the **Group Tokens** tab
+   - Go to the **Group Settings** tab
    - Click **Add Group Token**
    - Provide:
      - GitLab Instance (select from configured instances)
@@ -241,6 +241,14 @@ Define pairs of instances where mirrors will be created:
 - `platform` (top-level group) - will be used for all projects in platform/* if no more specific token exists
 
 The application automatically searches from most specific to least specific, so you can organize tokens at any level of your group hierarchy.
+
+#### Group-level mirror default overrides
+You can optionally define group-level overrides for mirror defaults (direction, overwrite divergent branches, only protected branches, and pull-only options like trigger builds / regex / mirror user id).
+
+Resolution order for mirror settings is:
+1. Per-mirror overrides (set during mirror creation)
+2. Group defaults (most specific matching group path)
+3. Instance pair defaults
 
 ### 4. Manage Mirrors
 
@@ -292,6 +300,11 @@ The application provides a RESTful API. Once running, visit:
 - `GET /api/tokens/{id}` - Get token details
 - `PUT /api/tokens/{id}` - Update token
 - `DELETE /api/tokens/{id}` - Delete token
+
+#### Group mirror defaults
+- `GET /api/group-defaults` - List all group mirror defaults (optionally filter by `instance_pair_id`)
+- `POST /api/group-defaults` - Create/update group mirror defaults (upsert)
+- `DELETE /api/group-defaults/{id}` - Delete group mirror defaults
 
 #### Mirrors
 - `GET /api/mirrors` - List all mirrors
