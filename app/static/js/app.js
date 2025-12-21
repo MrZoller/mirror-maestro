@@ -4,6 +4,7 @@ const state = {
     pairs: [],
     mirrors: [],
     tokens: [],
+    groupDefaults: [],
     selectedPair: null
 };
 
@@ -35,6 +36,7 @@ function initTabs() {
                 loadMirrors();
             } else if (targetId === 'tokens-tab') {
                 loadTokens();
+                loadGroupDefaults();
             }
         });
     });
@@ -78,6 +80,14 @@ function setupEventListeners() {
         }
     });
 
+    // Pair instance changes can affect token-user defaults
+    document.getElementById('pair-source-instance')?.addEventListener('change', () => {
+        applyPairTokenUserDefaultIfEmpty();
+    });
+    document.getElementById('pair-target-instance')?.addEventListener('change', () => {
+        applyPairTokenUserDefaultIfEmpty();
+    });
+
     // Mirror form
     document.getElementById('mirror-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -109,6 +119,19 @@ function setupEventListeners() {
     document.getElementById('token-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         await createToken();
+    });
+
+    // Group defaults form
+    document.getElementById('group-defaults-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await upsertGroupDefaults();
+    });
+
+    document.getElementById('group-defaults-pair')?.addEventListener('change', () => {
+        applyGroupDefaultsTokenUserDefaultIfEmpty();
+    });
+    document.getElementById('group-defaults-direction')?.addEventListener('change', () => {
+        applyGroupDefaultsTokenUserDefaultIfEmpty();
     });
 }
 
@@ -224,6 +247,7 @@ async function loadPairs() {
         const pairs = await apiRequest('/api/pairs');
         state.pairs = pairs;
         renderPairs(pairs);
+        renderPairDefaults(pairs);
         updatePairSelector();
     } catch (error) {
         console.error('Failed to load pairs:', error);
@@ -255,6 +279,65 @@ function renderPairs(pairs) {
             </tr>
         `;
     }).join('');
+}
+
+function renderPairDefaults(pairs) {
+    const tbody = document.getElementById('pair-defaults-list');
+    if (!tbody) return;
+
+    if (pairs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No instance pairs configured</td></tr>';
+        return;
+    }
+
+    const fmtBool = (v) => v ? 'true' : 'false';
+    const fmtStr = (v) => (v === null || v === undefined || String(v).trim() === '') ? '<span class="text-muted">N/A</span>' : escapeHtml(String(v));
+    const badge = (dir) => `<span class="badge badge-info">${escapeHtml((dir || '').toString().toLowerCase() || 'n/a')}</span>`;
+    const tokenUserForInstance = (instanceId) => state.instances.find(i => i.id === instanceId);
+    const fmtUser = (pair) => {
+        if (pair.mirror_user_id === null || pair.mirror_user_id === undefined) return '<span class="text-muted">auto</span>';
+        const direction = (pair.mirror_direction || '').toString().toLowerCase();
+        const ownerInstanceId = direction === 'push' ? pair.source_instance_id : pair.target_instance_id;
+        const inst = tokenUserForInstance(ownerInstanceId);
+        if (inst && inst.token_user_id === pair.mirror_user_id && inst.token_username) {
+            return `${escapeHtml(inst.token_username)} <span class="text-muted">(#${escapeHtml(String(pair.mirror_user_id))})</span>`;
+        }
+        return escapeHtml(String(pair.mirror_user_id));
+    };
+
+    tbody.innerHTML = pairs.map(pair => `
+        <tr>
+            <td><strong>${escapeHtml(pair.name)}</strong></td>
+            <td>${badge(pair.mirror_direction)}</td>
+            <td>${fmtBool(!!pair.mirror_protected_branches)}</td>
+            <td>${fmtBool(!!pair.mirror_overwrite_diverged)}</td>
+            <td>${fmtBool(!!pair.mirror_trigger_builds)}</td>
+            <td>${fmtBool(!!pair.only_mirror_protected_branches)}</td>
+            <td>${fmtStr(pair.mirror_branch_regex)}</td>
+            <td>${fmtUser(pair)}</td>
+        </tr>
+    `).join('');
+}
+
+function applyPairTokenUserDefaultIfEmpty() {
+    const dirEl = document.getElementById('pair-direction');
+    const srcEl = document.getElementById('pair-source-instance');
+    const tgtEl = document.getElementById('pair-target-instance');
+    const userIdEl = document.getElementById('pair-mirror-user-id');
+    if (!dirEl || !srcEl || !tgtEl || !userIdEl) return;
+
+    // Only apply if empty and field enabled
+    if (userIdEl.disabled) return;
+    if ((userIdEl.value || '').toString().trim()) return;
+
+    const direction = (dirEl.value || '').toString().toLowerCase();
+    const srcId = parseInt(srcEl.value || '0');
+    const tgtId = parseInt(tgtEl.value || '0');
+    const ownerInstanceId = direction === 'push' ? srcId : tgtId;
+    const inst = state.instances.find(i => i.id === ownerInstanceId);
+    if (inst && inst.token_user_id) {
+        userIdEl.value = String(inst.token_user_id);
+    }
 }
 
 async function createPair() {
@@ -321,6 +404,8 @@ async function loadTokens() {
         state.tokens = tokens;
         renderTokens(tokens);
         updateTokenInstanceSelector();
+        updateGroupDefaultsPairSelector();
+        resetGroupDefaultsOverrides();
     } catch (error) {
         console.error('Failed to load tokens:', error);
     }
@@ -398,6 +483,173 @@ function updateTokenInstanceSelector() {
         state.instances.map(inst =>
             `<option value="${inst.id}">${escapeHtml(inst.name)}</option>`
         ).join('');
+}
+
+// Group Mirror Defaults
+async function loadGroupDefaults() {
+    try {
+        const rows = await apiRequest('/api/group-defaults');
+        state.groupDefaults = rows;
+        renderGroupDefaults(rows);
+        updateGroupDefaultsPairSelector();
+        resetGroupDefaultsOverrides();
+    } catch (error) {
+        console.error('Failed to load group defaults:', error);
+    }
+}
+
+function renderGroupDefaults(rows) {
+    const tbody = document.getElementById('group-defaults-list');
+    if (!tbody) return;
+
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No group defaults configured</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = rows.map(r => {
+        const pair = state.pairs.find(p => p.id === r.instance_pair_id);
+        const b = (v) => (v === null || v === undefined) ? '<span class="text-muted">inherit</span>' : (v ? 'true' : 'false');
+        const s = (v) => (v === null || v === undefined || v === '') ? '<span class="text-muted">inherit</span>' : escapeHtml(String(v));
+        const dir = (r.mirror_direction || pair?.mirror_direction || '').toString().toLowerCase();
+        const ownerInstanceId = dir === 'push' ? pair?.source_instance_id : pair?.target_instance_id;
+        const inst = state.instances.find(i => i.id === ownerInstanceId);
+        const userCell = (() => {
+            if (r.mirror_user_id === null || r.mirror_user_id === undefined) return '<span class="text-muted">inherit</span>';
+            if (inst && inst.token_user_id === r.mirror_user_id && inst.token_username) {
+                return `${escapeHtml(inst.token_username)} <span class="text-muted">(#${escapeHtml(String(r.mirror_user_id))})</span>`;
+            }
+            return escapeHtml(String(r.mirror_user_id));
+        })();
+        return `
+            <tr>
+                <td><strong>${escapeHtml(pair?.name || 'Unknown')}</strong></td>
+                <td>${escapeHtml(r.group_path)}</td>
+                <td>${s(r.mirror_direction)}</td>
+                <td>${b(r.mirror_overwrite_diverged)}</td>
+                <td>${b(r.mirror_trigger_builds)}</td>
+                <td>${b(r.only_mirror_protected_branches)}</td>
+                <td>${s(r.mirror_branch_regex)}</td>
+                <td>${userCell}</td>
+                <td>
+                    <button class="btn btn-danger btn-small" onclick="deleteGroupDefaults(${r.id})">Delete</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function updateGroupDefaultsPairSelector() {
+    const select = document.getElementById('group-defaults-pair');
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Select instance pair...</option>' +
+        state.pairs.map(pair =>
+            `<option value="${pair.id}">${escapeHtml(pair.name)}</option>`
+        ).join('');
+}
+
+function resetGroupDefaultsOverrides() {
+    const triStateCheckboxIds = [
+        'group-defaults-overwrite',
+        'group-defaults-trigger',
+        'group-defaults-only-protected',
+    ];
+    triStateCheckboxIds.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.checked = false;
+        el.indeterminate = true;
+        el.title = 'Inherit pair default';
+        el.onchange = () => {
+            el.indeterminate = false;
+            el.title = '';
+        };
+    });
+
+    const dir = document.getElementById('group-defaults-direction');
+    if (dir) dir.value = '';
+
+    const regex = document.getElementById('group-defaults-branch-regex');
+    if (regex) regex.value = '';
+
+    const userId = document.getElementById('group-defaults-mirror-user-id');
+    if (userId) userId.value = '';
+}
+
+async function upsertGroupDefaults() {
+    const form = document.getElementById('group-defaults-form');
+    const formData = new FormData(form);
+
+    const overwriteEl = document.getElementById('group-defaults-overwrite');
+    const triggerEl = document.getElementById('group-defaults-trigger');
+    const onlyProtectedEl = document.getElementById('group-defaults-only-protected');
+
+    const branchRegexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
+    let mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
+    const dirRaw = (formData.get('mirror_direction') || '').toString().trim();
+
+    // Auto-fill mirror_user_id from the owning instance token user if empty
+    const pair = state.pairs.find(p => p.id === parseInt(formData.get('instance_pair_id')));
+    const effDir = (dirRaw || pair?.mirror_direction || '').toString().toLowerCase();
+    if (!mirrorUserIdRaw && pair && effDir !== 'push') {
+        const ownerInstanceId = pair.target_instance_id;
+        const inst = state.instances.find(i => i.id === ownerInstanceId);
+        if (inst && inst.token_user_id) {
+            mirrorUserIdRaw = String(inst.token_user_id);
+        }
+    }
+
+    const payload = {
+        instance_pair_id: parseInt(formData.get('instance_pair_id')),
+        group_path: (formData.get('group_path') || '').toString().trim(),
+        mirror_direction: dirRaw || null,
+        mirror_overwrite_diverged: overwriteEl && overwriteEl.indeterminate ? null : !!overwriteEl?.checked,
+        mirror_trigger_builds: triggerEl && triggerEl.indeterminate ? null : !!triggerEl?.checked,
+        only_mirror_protected_branches: onlyProtectedEl && onlyProtectedEl.indeterminate ? null : !!onlyProtectedEl?.checked,
+        mirror_branch_regex: branchRegexRaw || null,
+        mirror_user_id: mirrorUserIdRaw ? parseInt(mirrorUserIdRaw) : null,
+    };
+
+    try {
+        await apiRequest('/api/group-defaults', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        showMessage('Group defaults saved successfully', 'success');
+        form.reset();
+        await loadGroupDefaults();
+    } catch (error) {
+        console.error('Failed to save group defaults:', error);
+    }
+}
+
+function applyGroupDefaultsTokenUserDefaultIfEmpty() {
+    const pairSel = document.getElementById('group-defaults-pair');
+    const dirSel = document.getElementById('group-defaults-direction');
+    const userEl = document.getElementById('group-defaults-mirror-user-id');
+    if (!pairSel || !dirSel || !userEl) return;
+    if ((userEl.value || '').toString().trim()) return;
+
+    const pair = state.pairs.find(p => p.id === parseInt(pairSel.value || '0'));
+    if (!pair) return;
+    const effDir = ((dirSel.value || '') || pair.mirror_direction || '').toString().toLowerCase();
+    if (effDir === 'push') return;
+    const inst = state.instances.find(i => i.id === pair.target_instance_id);
+    if (inst && inst.token_user_id) {
+        userEl.value = String(inst.token_user_id);
+    }
+}
+
+async function deleteGroupDefaults(id) {
+    if (!confirm('Are you sure you want to delete these group defaults?')) return;
+    try {
+        await apiRequest(`/api/group-defaults/${id}`, { method: 'DELETE' });
+        showMessage('Group defaults deleted successfully', 'success');
+        await loadGroupDefaults();
+    } catch (error) {
+        console.error('Failed to delete group defaults:', error);
+    }
 }
 
 // Mirrors
