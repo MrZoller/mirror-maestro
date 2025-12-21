@@ -24,33 +24,44 @@ async def get_authenticated_url(
     """
     Build an authenticated Git URL for mirroring.
 
-    Looks up the group access token for the project's group and constructs
-    a URL like: https://token_name:token@gitlab.example.com/group/project.git
+    Supports multi-level group paths by searching for tokens from most specific
+    to least specific. For example, for "platform/core/api-gateway":
+    1. Try "platform/core" (parent group, excluding project name)
+    2. Try "platform" (top-level group)
 
-    If no group token is found, returns an unauthenticated URL and raises a warning.
+    This allows tokens to be created at any level of the group hierarchy.
     """
-    # Extract group path from project path (e.g., "platform/api-gateway" -> "platform")
-    path_parts = project_path.split("/")
-    if len(path_parts) < 2:
-        # No group in path, use project path as group (single-level projects)
-        group_path = path_parts[0]
-    else:
-        # Take the first part as the group (or could be full namespace)
-        group_path = path_parts[0]
-
-    # Look for a group access token
-    token_result = await db.execute(
-        select(GroupAccessToken).where(
-            GroupAccessToken.gitlab_instance_id == instance.id,
-            GroupAccessToken.group_path == group_path
-        )
-    )
-    group_token = token_result.scalar_one_or_none()
-
-    # Parse the instance URL
+    # Parse the instance URL first
     parsed = urlparse(instance.url)
     hostname = parsed.netloc
     scheme = parsed.scheme or "https"
+
+    # Extract group path from project path
+    # For "platform/core/api-gateway", parts are ["platform", "core", "api-gateway"]
+    path_parts = project_path.split("/")
+
+    # The last part is the project name, everything before is the namespace/group
+    if len(path_parts) < 2:
+        # Single-level project (no group), unlikely to have a token
+        return f"{scheme}://{hostname}/{project_path}.git"
+
+    # Try to find a token, starting from the most specific group path
+    # For "platform/core/api-gateway", try: "platform/core", then "platform"
+    group_token = None
+    for i in range(len(path_parts) - 1, 0, -1):
+        candidate_group_path = "/".join(path_parts[:i])
+
+        token_result = await db.execute(
+            select(GroupAccessToken).where(
+                GroupAccessToken.gitlab_instance_id == instance.id,
+                GroupAccessToken.group_path == candidate_group_path
+            )
+        )
+        group_token = token_result.scalar_one_or_none()
+
+        if group_token:
+            # Found a token at this level
+            break
 
     if group_token:
         # Decrypt the token
@@ -59,7 +70,7 @@ async def get_authenticated_url(
         auth_url = f"{scheme}://{group_token.token_name}:{token_value}@{hostname}/{project_path}.git"
         return auth_url
     else:
-        # No token found - return unauthenticated URL (will likely fail)
+        # No token found at any level - return unauthenticated URL
         # In production, you might want to raise an exception here
         return f"{scheme}://{hostname}/{project_path}.git"
 
