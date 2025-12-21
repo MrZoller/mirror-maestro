@@ -17,10 +17,10 @@ class FakeGitLabClient:
     def test_connection(self) -> bool:
         return self.test_ok
 
-    def get_projects(self, search=None, per_page=100):
+    def get_projects(self, search=None, *, per_page=50, page=1, get_all=False):
         return self.projects
 
-    def get_groups(self, search=None):
+    def get_groups(self, search=None, *, per_page=50, page=1, get_all=False):
         return self.groups
 
     def get_current_user(self):
