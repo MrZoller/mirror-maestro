@@ -411,6 +411,20 @@ Run it:
 pytest -m live_gitlab -q
 ```
 
+### Run Live GitLab E2E via GitHub Actions (manual)
+
+This repo includes a manual workflow: `.github/workflows/e2e-live-gitlab.yml`.
+
+Add these repository secrets:
+- `E2E_GITLAB_TOKEN` (required)
+- `E2E_GITLAB_URL` (recommended unless you want to type it each run)
+- `E2E_GITLAB_GROUP_PATH` (recommended unless you want to type it each run)
+
+Then trigger the workflow from the GitHub UI:
+- Actions → **Live GitLab E2E (manual)** → Run workflow
+
+You can optionally override `gitlab_url` / `gitlab_group_path` in the dispatch inputs.
+
 ### Code Style
 The project follows standard Python conventions:
 - Use Black for code formatting
