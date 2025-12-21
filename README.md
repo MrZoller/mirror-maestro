@@ -386,6 +386,45 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### Live GitLab End-to-End Test (opt-in)
+
+There is an end-to-end test that provisions temporary projects and configures a mirror against a **real GitLab instance**:
+- Test file: `tests/test_e2e_live_gitlab.py`
+- Markers: `e2e`, `live_gitlab`
+
+Required environment variables:
+```bash
+export E2E_LIVE_GITLAB=1
+export E2E_GITLAB_URL="https://gitlab.example.com"
+export E2E_GITLAB_TOKEN="glpat-..."              # must be able to create/delete projects and mirrors
+export E2E_GITLAB_GROUP_PATH="my-group/subgroup"  # group full_path / path
+```
+
+Optional:
+```bash
+export E2E_GITLAB_HTTP_USERNAME="oauth2"          # username used for HTTPS clone auth (PAT usually works with "oauth2")
+export E2E_GITLAB_MIRROR_TIMEOUT_S="60"           # polling timeout for mirror status visibility
+```
+
+Run it:
+```bash
+pytest -m live_gitlab -q
+```
+
+### Run Live GitLab E2E via GitHub Actions (manual)
+
+This repo includes a manual workflow: `.github/workflows/e2e-live-gitlab.yml`.
+
+Add these repository secrets:
+- `E2E_GITLAB_TOKEN` (required)
+- `E2E_GITLAB_URL` (recommended unless you want to type it each run)
+- `E2E_GITLAB_GROUP_PATH` (recommended unless you want to type it each run)
+
+Then trigger the workflow from the GitHub UI:
+- Actions → **Live GitLab E2E (manual)** → Run workflow
+
+You can optionally override `gitlab_url` / `gitlab_group_path` in the dispatch inputs.
+
 ### Code Style
 The project follows standard Python conventions:
 - Use Black for code formatting
