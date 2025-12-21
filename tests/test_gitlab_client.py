@@ -57,7 +57,8 @@ def test_gitlab_client_get_projects_shapes(monkeypatch):
 
     class Projects:
         def list(self, **kwargs):
-            assert kwargs["get_all"] is True
+            assert kwargs["get_all"] is False
+            assert kwargs["page"] == 1
             return [P(1, "n", "p", "g/p")]
 
     class FakeGL:

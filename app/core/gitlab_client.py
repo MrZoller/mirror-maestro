@@ -20,14 +20,33 @@ class GitLabClient:
         except Exception:
             return False
 
-    def get_projects(self, search: Optional[str] = None, per_page: int = 100) -> List[Dict[str, Any]]:
-        """Get list of projects from GitLab."""
+    def get_projects(
+        self,
+        search: Optional[str] = None,
+        *,
+        per_page: int = 50,
+        page: int = 1,
+        get_all: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get projects from GitLab.
+
+        IMPORTANT: By default this does NOT fetch all pages (get_all=False) to
+        avoid loading huge project lists in a single request. Set get_all=True
+        explicitly if you really want the full list.
+        """
         try:
-            projects = self.gl.projects.list(
-                search=search,
-                get_all=True,
-                per_page=per_page
-            )
+            # python-gitlab: when get_all=False, pagination is controlled by page/per_page.
+            # When get_all=True, python-gitlab will iterate through all pages.
+            kwargs: Dict[str, Any] = {
+                "search": search,
+                "get_all": get_all,
+                "per_page": per_page,
+            }
+            if not get_all:
+                kwargs["page"] = page
+
+            projects = self.gl.projects.list(**kwargs)
             return [
                 {
                     "id": p.id,
