@@ -6,6 +6,26 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)
 
+## Screenshots
+
+### Dashboard
+![Dashboard](docs/screenshots/01-dashboard.png)
+*Main dashboard with quick stats and getting started guide*
+
+### GitLab Instances
+![GitLab Instances](docs/screenshots/02-instances.png)
+*Manage GitLab instances with their access tokens*
+
+### Instance Pairs
+![Instance Pairs](docs/screenshots/03-pairs.png)
+*Configure pairs of GitLab instances for mirroring*
+
+### Mirrors Management
+![Mirrors](docs/screenshots/04-mirrors.png)
+*View and manage mirrors with real-time status updates*
+
+> **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
+
 ## Features
 
 ### Core Functionality
