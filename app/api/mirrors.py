@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 from app.database import get_db
@@ -10,10 +10,39 @@ from app.models import Mirror, InstancePair, GitLabInstance, GroupAccessToken
 from app.core.auth import verify_credentials
 from app.core.gitlab_client import GitLabClient
 from app.core.encryption import encryption
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 
 router = APIRouter(prefix="/api/mirrors", tags=["mirrors"])
+
+
+def _normalize_instance_url(url: str) -> str:
+    """
+    Ensure instance URLs parse correctly even if users omit the scheme.
+    Examples:
+      - "gitlab.example.com" -> "https://gitlab.example.com"
+      - "https://gitlab.example.com" -> unchanged
+    """
+    if "://" not in url:
+        return f"https://{url}"
+    return url
+
+
+def _build_git_url(*, scheme: str, hostname: str, port: int | None, project_path: str, username: str | None = None, password: str | None = None) -> str:
+    # Percent-encode userinfo to prevent URL corruption / host injection.
+    userinfo = ""
+    if username is not None and password is not None:
+        user = quote(username, safe="")
+        pw = quote(password, safe="")
+        userinfo = f"{user}:{pw}@"
+
+    hostport = hostname
+    if port is not None:
+        hostport = f"{hostname}:{port}"
+
+    # Keep slashes for namespaces, but escape other unsafe chars.
+    safe_path = quote(project_path, safe="/-._~")
+    return f"{scheme}://{userinfo}{hostport}/{safe_path}.git"
 
 
 async def get_authenticated_url(
@@ -32,9 +61,15 @@ async def get_authenticated_url(
     This allows tokens to be created at any level of the group hierarchy.
     """
     # Parse the instance URL first
-    parsed = urlparse(instance.url)
-    hostname = parsed.netloc
+    parsed = urlparse(_normalize_instance_url(instance.url))
     scheme = parsed.scheme or "https"
+    if scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="Invalid GitLab instance URL scheme")
+
+    hostname = parsed.hostname
+    port = parsed.port
+    if not hostname:
+        raise HTTPException(status_code=400, detail="Invalid GitLab instance URL")
 
     # Extract group path from project path
     # For "platform/core/api-gateway", parts are ["platform", "core", "api-gateway"]
@@ -43,7 +78,7 @@ async def get_authenticated_url(
     # The last part is the project name, everything before is the namespace/group
     if len(path_parts) < 2:
         # Single-level project (no group), unlikely to have a token
-        return f"{scheme}://{hostname}/{project_path}.git"
+        return _build_git_url(scheme=scheme, hostname=hostname, port=port, project_path=project_path)
 
     # Try to find a token, starting from the most specific group path
     # For "platform/core/api-gateway", try: "platform/core", then "platform"
@@ -67,12 +102,19 @@ async def get_authenticated_url(
         # Decrypt the token
         token_value = encryption.decrypt(group_token.encrypted_token)
         # Build authenticated URL: https://token_name:token@hostname/path.git
-        auth_url = f"{scheme}://{group_token.token_name}:{token_value}@{hostname}/{project_path}.git"
-        return auth_url
+        # NOTE: userinfo must be percent-encoded to avoid URL corruption/injection.
+        return _build_git_url(
+            scheme=scheme,
+            hostname=hostname,
+            port=port,
+            project_path=project_path,
+            username=group_token.token_name,
+            password=token_value,
+        )
     else:
         # No token found at any level - return unauthenticated URL
         # In production, you might want to raise an exception here
-        return f"{scheme}://{hostname}/{project_path}.git"
+        return _build_git_url(scheme=scheme, hostname=hostname, port=port, project_path=project_path)
 
 
 class MirrorCreate(BaseModel):
@@ -117,8 +159,7 @@ class MirrorResponse(BaseModel):
     created_at: str
     updated_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("", response_model=List[MirrorResponse])
