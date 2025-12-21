@@ -386,6 +386,31 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### Live GitLab End-to-End Test (opt-in)
+
+There is an end-to-end test that provisions temporary projects and configures a mirror against a **real GitLab instance**:
+- Test file: `tests/test_e2e_live_gitlab.py`
+- Markers: `e2e`, `live_gitlab`
+
+Required environment variables:
+```bash
+export E2E_LIVE_GITLAB=1
+export E2E_GITLAB_URL="https://gitlab.example.com"
+export E2E_GITLAB_TOKEN="glpat-..."              # must be able to create/delete projects and mirrors
+export E2E_GITLAB_GROUP_PATH="my-group/subgroup"  # group full_path / path
+```
+
+Optional:
+```bash
+export E2E_GITLAB_HTTP_USERNAME="oauth2"          # username used for HTTPS clone auth (PAT usually works with "oauth2")
+export E2E_GITLAB_MIRROR_TIMEOUT_S="60"           # polling timeout for mirror status visibility
+```
+
+Run it:
+```bash
+pytest -m live_gitlab -q
+```
+
 ### Code Style
 The project follows standard Python conventions:
 - Use Black for code formatting
