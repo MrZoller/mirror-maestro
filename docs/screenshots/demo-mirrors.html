@@ -129,6 +129,7 @@
                         <tr>
                             <th>Source Project</th>
                             <th>Target Project</th>
+                            <th>Effective Settings</th>
                             <th>Status</th>
                             <th>Sync Status</th>
                             <th>Last Sync</th>
@@ -139,6 +140,16 @@
                         <tr>
                             <td>platform/api-gateway</td>
                             <td>platform/api-gateway</td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> true<br>
+                                    <span class="text-muted">only_protected:</span> true<br>
+                                    <span class="text-muted">trigger:</span> true<br>
+                                    <span class="text-muted">regex:</span> <code>^main$</code><br>
+                                    <span class="text-muted">user:</span> 123
+                                </div>
+                            </td>
                             <td><span class="badge badge-success">Enabled</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>2 hours ago</td>
@@ -150,6 +161,16 @@
                         <tr>
                             <td>platform/user-service</td>
                             <td>platform/user-service</td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> false<br>
+                                    <span class="text-muted">only_protected:</span> false<br>
+                                    <span class="text-muted">trigger:</span> false<br>
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">user:</span> 123
+                                </div>
+                            </td>
                             <td><span class="badge badge-success">Enabled</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>1 hour ago</td>
@@ -161,6 +182,16 @@
                         <tr>
                             <td>platform/payment-processor</td>
                             <td>platform/payment-processor</td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> true<br>
+                                    <span class="text-muted">only_protected:</span> false<br>
+                                    <span class="text-muted">trigger:</span> true<br>
+                                    <span class="text-muted">regex:</span> <code>^release/.*$</code><br>
+                                    <span class="text-muted">user:</span> 77
+                                </div>
+                            </td>
                             <td><span class="badge badge-success">Enabled</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>30 minutes ago</td>
@@ -172,6 +203,16 @@
                         <tr>
                             <td>frontend/web-dashboard</td>
                             <td>frontend/web-dashboard</td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> false<br>
+                                    <span class="text-muted">only_protected:</span> true<br>
+                                    <span class="text-muted">trigger:</span> true<br>
+                                    <span class="text-muted">regex:</span> <code>^(main|release/.*)$</code><br>
+                                    <span class="text-muted">user:</span> 123
+                                </div>
+                            </td>
                             <td><span class="badge badge-success">Enabled</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>3 hours ago</td>
@@ -183,6 +224,16 @@
                         <tr>
                             <td>infrastructure/terraform-configs</td>
                             <td>infrastructure/terraform-configs</td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> true<br>
+                                    <span class="text-muted">only_protected:</span> true<br>
+                                    <span class="text-muted">trigger:</span> false<br>
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">user:</span> 123
+                                </div>
+                            </td>
                             <td><span class="badge badge-success">Enabled</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>45 minutes ago</td>
@@ -194,6 +245,16 @@
                         <tr>
                             <td>data/analytics-pipeline</td>
                             <td>data/analytics-pipeline</td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> false<br>
+                                    <span class="text-muted">only_protected:</span> false<br>
+                                    <span class="text-muted">trigger:</span> true<br>
+                                    <span class="text-muted">regex:</span> <code>^main$</code><br>
+                                    <span class="text-muted">user:</span> 123
+                                </div>
+                            </td>
                             <td><span class="badge badge-success">Enabled</span></td>
                             <td><span class="badge badge-danger">failed</span></td>
                             <td>5 hours ago</td>
@@ -205,6 +266,16 @@
                         <tr>
                             <td>mobile/ios-app</td>
                             <td>mobile/ios-app</td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> false<br>
+                                    <span class="text-muted">only_protected:</span> false<br>
+                                    <span class="text-muted">trigger:</span> false<br>
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">user:</span> 123
+                                </div>
+                            </td>
                             <td><span class="badge badge-success">Enabled</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>1 day ago</td>
@@ -216,6 +287,16 @@
                         <tr>
                             <td>mobile/android-app</td>
                             <td>mobile/android-app</td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">only_protected:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">trigger:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">user:</span> <span class="text-muted">n/a</span>
+                                </div>
+                            </td>
                             <td><span class="badge badge-warning">Disabled</span></td>
                             <td><span class="text-muted">N/A</span></td>
                             <td>Never</td>
