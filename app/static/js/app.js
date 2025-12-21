@@ -5,7 +5,8 @@ const state = {
     mirrors: [],
     tokens: [],
     groupDefaults: [],
-    selectedPair: null
+    selectedPair: null,
+    mirrorProjectInstances: { source: null, target: null }
 };
 
 // Initialize the application
@@ -115,11 +116,45 @@ function setupEventListeners() {
         }
     });
 
+    // Project typeahead for large instances (Mirrors tab)
+    const srcSearch = document.getElementById('mirror-source-project-search');
+    const tgtSearch = document.getElementById('mirror-target-project-search');
+    if (srcSearch) {
+        srcSearch.addEventListener('input', debounce(() => searchProjectsForMirror('source'), 250));
+    }
+    if (tgtSearch) {
+        tgtSearch.addEventListener('input', debounce(() => searchProjectsForMirror('target'), 250));
+    }
+
+    // Keep the search field synced with selection
+    document.getElementById('mirror-source-project')?.addEventListener('change', (e) => {
+        const opt = e.target.selectedOptions?.[0];
+        const path = opt?.dataset?.path;
+        if (srcSearch && path) srcSearch.value = path;
+    });
+    document.getElementById('mirror-target-project')?.addEventListener('change', (e) => {
+        const opt = e.target.selectedOptions?.[0];
+        const path = opt?.dataset?.path;
+        if (tgtSearch && path) tgtSearch.value = path;
+    });
+
     // Token form
     document.getElementById('token-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         await createToken();
     });
+
+    // Group path typeahead (token form)
+    const tokenInstanceSel = document.getElementById('token-instance');
+    const tokenGroupPathEl = document.getElementById('token-group-path');
+    if (tokenInstanceSel) {
+        tokenInstanceSel.addEventListener('change', () => {
+            clearDatalist('token-group-path-options');
+        });
+    }
+    if (tokenGroupPathEl) {
+        tokenGroupPathEl.addEventListener('input', debounce(() => searchGroupsForToken(), 250));
+    }
 
     // Group defaults form
     document.getElementById('group-defaults-form')?.addEventListener('submit', async (e) => {
@@ -129,10 +164,106 @@ function setupEventListeners() {
 
     document.getElementById('group-defaults-pair')?.addEventListener('change', () => {
         applyGroupDefaultsTokenUserDefaultIfEmpty();
+        clearDatalist('group-defaults-group-path-options');
     });
     document.getElementById('group-defaults-direction')?.addEventListener('change', () => {
         applyGroupDefaultsTokenUserDefaultIfEmpty();
     });
+
+    // Group path typeahead (group defaults form)
+    const groupDefaultsPathEl = document.getElementById('group-defaults-group-path');
+    if (groupDefaultsPathEl) {
+        groupDefaultsPathEl.addEventListener('input', debounce(() => searchGroupsForGroupDefaults(), 250));
+    }
+}
+
+function clearDatalist(datalistId) {
+    const dl = document.getElementById(datalistId);
+    if (!dl) return;
+    dl.innerHTML = '';
+}
+
+function setDatalistOptions(datalistId, values) {
+    const dl = document.getElementById(datalistId);
+    if (!dl) return;
+    dl.innerHTML = values.map(v => `<option value="${escapeHtml(String(v))}"></option>`).join('');
+}
+
+async function searchGroupsForToken() {
+    const instanceSel = document.getElementById('token-instance');
+    const input = document.getElementById('token-group-path');
+    if (!instanceSel || !input) return;
+
+    const instanceId = parseInt(instanceSel.value || '0');
+    if (!instanceId) {
+        clearDatalist('token-group-path-options');
+        return;
+    }
+
+    const q = (input.value || '').toString().trim();
+    if (q.length < 2) {
+        clearDatalist('token-group-path-options');
+        return;
+    }
+
+    const perPage = 50;
+    try {
+        const res = await apiRequest(
+            `/api/instances/${instanceId}/groups?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`
+        );
+        const groups = res?.groups || [];
+        const values = groups
+            .map(g => (g.full_path || g.path || g.name || '').toString())
+            .filter(v => v);
+        setDatalistOptions('token-group-path-options', values.slice(0, perPage));
+    } catch (e) {
+        // Suggestions are best-effort; ignore errors here.
+        clearDatalist('token-group-path-options');
+    }
+}
+
+async function searchGroupsForGroupDefaults() {
+    const pairSel = document.getElementById('group-defaults-pair');
+    const input = document.getElementById('group-defaults-group-path');
+    if (!pairSel || !input) return;
+
+    const pairId = parseInt(pairSel.value || '0');
+    const pair = state.pairs.find(p => p.id === pairId);
+    if (!pair) {
+        clearDatalist('group-defaults-group-path-options');
+        return;
+    }
+
+    const q = (input.value || '').toString().trim();
+    if (q.length < 2) {
+        clearDatalist('group-defaults-group-path-options');
+        return;
+    }
+
+    const perPage = 50;
+    const urls = [
+        `/api/instances/${pair.source_instance_id}/groups?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`,
+        `/api/instances/${pair.target_instance_id}/groups?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`,
+    ];
+
+    try {
+        const results = await Promise.allSettled(urls.map(u => apiRequest(u)));
+        const seen = new Set();
+        const values = [];
+        results.forEach(r => {
+            if (r.status !== 'fulfilled') return;
+            const groups = r.value?.groups || [];
+            groups.forEach(g => {
+                const v = (g.full_path || g.path || g.name || '').toString();
+                if (!v || seen.has(v)) return;
+                seen.add(v);
+                values.push(v);
+            });
+        });
+        setDatalistOptions('group-defaults-group-path-options', values.slice(0, perPage));
+    } catch (e) {
+        clearDatalist('group-defaults-group-path-options');
+    }
 }
 
 // API Helper
@@ -713,23 +844,66 @@ async function loadProjectsForPair() {
         resetMirrorOverrides();
         applyMirrorDirectionUI(pair.mirror_direction);
 
-        // Load source projects
-        const sourceProjects = await apiRequest(`/api/instances/${pair.source_instance_id}/projects`);
-        const sourceSelect = document.getElementById('mirror-source-project');
-        sourceSelect.innerHTML = '<option value="">Select source project...</option>' +
-            sourceProjects.projects.map(p =>
-                `<option value="${p.id}" data-path="${p.path_with_namespace}">${escapeHtml(p.path_with_namespace)}</option>`
-            ).join('');
+        // Avoid loading every project up-front (can be very large). Use
+        // a server-backed typeahead instead.
+        state.mirrorProjectInstances.source = pair.source_instance_id;
+        state.mirrorProjectInstances.target = pair.target_instance_id;
 
-        // Load target projects
-        const targetProjects = await apiRequest(`/api/instances/${pair.target_instance_id}/projects`);
+        const sourceSelect = document.getElementById('mirror-source-project');
         const targetSelect = document.getElementById('mirror-target-project');
-        targetSelect.innerHTML = '<option value="">Select target project...</option>' +
-            targetProjects.projects.map(p =>
-                `<option value="${p.id}" data-path="${p.path_with_namespace}">${escapeHtml(p.path_with_namespace)}</option>`
-            ).join('');
+        if (sourceSelect) sourceSelect.innerHTML = '<option value="">Type to search for a source project...</option>';
+        if (targetSelect) targetSelect.innerHTML = '<option value="">Type to search for a target project...</option>';
+
+        const srcSearch = document.getElementById('mirror-source-project-search');
+        const tgtSearch = document.getElementById('mirror-target-project-search');
+        if (srcSearch) srcSearch.value = '';
+        if (tgtSearch) tgtSearch.value = '';
     } catch (error) {
         console.error('Failed to load projects:', error);
+    }
+}
+
+async function searchProjectsForMirror(side) {
+    const instanceId = side === 'source' ? state.mirrorProjectInstances.source : state.mirrorProjectInstances.target;
+    const inputId = side === 'source' ? 'mirror-source-project-search' : 'mirror-target-project-search';
+    const selectId = side === 'source' ? 'mirror-source-project' : 'mirror-target-project';
+    const placeholder = side === 'source' ? 'Select source project...' : 'Select target project...';
+
+    const input = document.getElementById(inputId);
+    const select = document.getElementById(selectId);
+    if (!input || !select) return;
+
+    if (!instanceId) {
+        select.innerHTML = '<option value="">Select an instance pair first...</option>';
+        return;
+    }
+
+    const q = (input.value || '').toString().trim();
+    if (q.length < 2) {
+        select.innerHTML = '<option value="">Type at least 2 characters to search...</option>';
+        return;
+    }
+
+    const perPage = 50;
+    try {
+        const res = await apiRequest(
+            `/api/instances/${instanceId}/projects?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`
+        );
+        const projects = res?.projects || [];
+
+        const options = projects.map(p => {
+            const fullPath = (p.path_with_namespace || p.name || '').toString();
+            // Show full namespace path (supports multi-level groups).
+            return `<option value="${p.id}" data-path="${escapeHtml(fullPath)}">${escapeHtml(fullPath)}</option>`;
+        }).join('');
+
+        const moreHint = projects.length >= perPage
+            ? `<option value="" disabled>Showing first ${perPage} matches — refine search to narrow</option>`
+            : '';
+
+        select.innerHTML = `<option value="">${placeholder}</option>` + options + moreHint;
+    } catch (error) {
+        console.error('Failed to search projects:', error);
     }
 }
 
@@ -962,4 +1136,12 @@ function escapeHtml(text) {
         "'": '&#039;'
     };
     return text ? text.replace(/[&<>"']/g, m => map[m]) : '';
+}
+
+function debounce(fn, delayMs) {
+    let t = null;
+    return (...args) => {
+        if (t) clearTimeout(t);
+        t = setTimeout(() => fn(...args), delayMs);
+    };
 }

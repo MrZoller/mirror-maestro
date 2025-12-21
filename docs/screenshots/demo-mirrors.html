@@ -70,31 +70,27 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label for="mirror-source-project">Source Project *</label>
+                            <input type="text" id="mirror-source-project-search" placeholder="Type to search (min 2 chars)…" value="platform/core">
                             <select id="mirror-source-project" required>
                                 <option value="">Select source project...</option>
-                                <option value="123">platform/api-gateway</option>
-                                <option value="124">platform/user-service</option>
-                                <option value="125">platform/payment-processor</option>
-                                <option value="126">frontend/web-dashboard</option>
-                                <option value="127">infrastructure/terraform-configs</option>
-                                <option value="128">data/analytics-pipeline</option>
-                                <option value="129">mobile/ios-app</option>
-                                <option value="130">mobile/android-app</option>
+                                <option value="123" selected>platform/core/api-gateway</option>
+                                <option value="124">platform/core/user-service</option>
+                                <option value="125">platform/core/payment-processor</option>
+                                <option value="126">platform/edge/gateway-proxy</option>
                             </select>
+                            <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
                         </div>
                         <div class="form-group">
                             <label for="mirror-target-project">Target Project *</label>
+                            <input type="text" id="mirror-target-project-search" placeholder="Type to search (min 2 chars)…" value="platform/core">
                             <select id="mirror-target-project" required>
                                 <option value="">Select target project...</option>
-                                <option value="456">platform/api-gateway</option>
-                                <option value="457">platform/user-service</option>
-                                <option value="458">platform/payment-processor</option>
-                                <option value="459">frontend/web-dashboard</option>
-                                <option value="460">infrastructure/terraform-configs</option>
-                                <option value="461">data/analytics-pipeline</option>
-                                <option value="462">mobile/ios-app</option>
-                                <option value="463">mobile/android-app</option>
+                                <option value="456" selected>platform/core/api-gateway</option>
+                                <option value="457">platform/core/user-service</option>
+                                <option value="458">platform/core/payment-processor</option>
+                                <option value="459">platform/edge/gateway-proxy</option>
                             </select>
+                            <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
                         </div>
                     </div>
                     <div class="form-group">
