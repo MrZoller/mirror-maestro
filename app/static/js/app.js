@@ -787,7 +787,7 @@ async function deleteGroupDefaults(id) {
 async function loadMirrors() {
     if (!state.selectedPair) {
         document.getElementById('mirrors-list').innerHTML =
-            '<tr><td colspan="6" class="text-center text-muted">Select an instance pair to view mirrors</td></tr>';
+            '<tr><td colspan="7" class="text-center text-muted">Select an instance pair to view mirrors</td></tr>';
         return;
     }
 
@@ -805,9 +805,15 @@ function renderMirrors(mirrors) {
     if (!tbody) return;
 
     if (mirrors.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No mirrors configured for this pair</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No mirrors configured for this pair</td></tr>';
         return;
     }
+
+    const fmtBool = (v) => (v === null || v === undefined) ? '<span class="text-muted">n/a</span>' : (v ? 'true' : 'false');
+    const fmtStr = (v) => (v === null || v === undefined || String(v).trim() === '')
+        ? '<span class="text-muted">n/a</span>'
+        : `<code>${escapeHtml(String(v))}</code>`;
+    const fmtUser = (v) => (v === null || v === undefined) ? '<span class="text-muted">n/a</span>' : escapeHtml(String(v));
 
     tbody.innerHTML = mirrors.map(mirror => {
         const statusBadge = mirror.enabled ?
@@ -818,10 +824,29 @@ function renderMirrors(mirrors) {
             `<span class="badge badge-info">${mirror.last_update_status}</span>` :
             '<span class="text-muted">N/A</span>';
 
+        const dir = (mirror.effective_mirror_direction || mirror.mirror_direction || '').toString().toLowerCase();
+        const settingsCell = (() => {
+            const pieces = [];
+            if (dir) pieces.push(`<span class="badge badge-info">${escapeHtml(dir)}</span>`);
+            pieces.push(`<span class="text-muted">overwrite:</span> ${fmtBool(mirror.effective_mirror_overwrite_diverged)}`);
+            pieces.push(`<span class="text-muted">only_protected:</span> ${fmtBool(mirror.effective_only_mirror_protected_branches)}`);
+            if (dir === 'pull') {
+                pieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(mirror.effective_mirror_trigger_builds)}`);
+                pieces.push(`<span class="text-muted">regex:</span> ${fmtStr(mirror.effective_mirror_branch_regex)}`);
+                pieces.push(`<span class="text-muted">user:</span> ${fmtUser(mirror.effective_mirror_user_id)}`);
+            } else if (dir === 'push') {
+                pieces.push(`<span class="text-muted">trigger:</span> <span class="text-muted">n/a</span>`);
+                pieces.push(`<span class="text-muted">regex:</span> <span class="text-muted">n/a</span>`);
+                pieces.push(`<span class="text-muted">user:</span> <span class="text-muted">n/a</span>`);
+            }
+            return `<div style="line-height:1.35">${pieces.join('<br>')}</div>`;
+        })();
+
         return `
             <tr>
                 <td>${escapeHtml(mirror.source_project_path)}</td>
                 <td>${escapeHtml(mirror.target_project_path)}</td>
+                <td>${settingsCell}</td>
                 <td>${statusBadge}</td>
                 <td>${updateStatus}</td>
                 <td>${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}</td>
