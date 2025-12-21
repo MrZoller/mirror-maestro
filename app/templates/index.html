@@ -22,6 +22,7 @@
             <button class="tab active" data-tab="dashboard-tab">Dashboard</button>
             <button class="tab" data-tab="instances-tab">GitLab Instances</button>
             <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
+            <button class="tab" data-tab="tokens-tab">Group Tokens</button>
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
         </div>
 
@@ -41,11 +42,15 @@
                         <p class="text-muted">Define pairs of GitLab instances where mirrors will be created.</p>
                     </div>
                     <div>
-                        <h3>3. Configure Mirrors</h3>
+                        <h3>3. Add Group Tokens</h3>
+                        <p class="text-muted">Configure group access tokens for HTTPS authentication (required for mirrors).</p>
+                    </div>
+                    <div>
+                        <h3>4. Configure Mirrors</h3>
                         <p class="text-muted">Create and manage mirrors between projects in your instance pairs.</p>
                     </div>
                     <div>
-                        <h3>4. Monitor & Maintain</h3>
+                        <h3>5. Monitor & Maintain</h3>
                         <p class="text-muted">View mirror status, trigger updates, and import/export configurations.</p>
                     </div>
                 </div>
@@ -199,6 +204,66 @@
                         </tr>
                     </thead>
                     <tbody id="pairs-list">
+                        <tr><td colspan="5" class="text-center"><div class="spinner"></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Group Tokens Tab -->
+        <div id="tokens-tab" class="tab-content">
+            <div class="card">
+                <h2>Group Access Tokens</h2>
+                <p class="text-muted">Configure group access tokens for authenticating mirrors. Each group in your GitLab instances needs a token for HTTPS mirroring.</p>
+
+                <form id="token-form" class="mt-20">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="token-instance">GitLab Instance *</label>
+                            <select id="token-instance" name="gitlab_instance_id" required>
+                                <option value="">Select instance...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="token-group-path">Group Path *</label>
+                            <input type="text" id="token-group-path" name="group_path" required placeholder="e.g., platform, frontend, infrastructure">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="token-name">Token Name *</label>
+                            <input type="text" id="token-name" name="token_name" required placeholder="e.g., mirror-token">
+                        </div>
+                        <div class="form-group">
+                            <label for="token-value">Token Value *</label>
+                            <input type="password" id="token-value" name="token" required placeholder="Group access token">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Add Group Token</button>
+                </form>
+
+                <div class="message message-info mt-20">
+                    <strong>Note:</strong> Group access tokens are required for mirrors to authenticate via HTTPS.
+                    Create a token for each group that contains projects you want to mirror.
+                    The token must have <code>read_repository</code> and <code>write_repository</code> scopes.
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Configured Tokens</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>GitLab Instance</th>
+                            <th>Group Path</th>
+                            <th>Token Name</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tokens-list">
                         <tr><td colspan="5" class="text-center"><div class="spinner"></div></td></tr>
                     </tbody>
                 </table>
