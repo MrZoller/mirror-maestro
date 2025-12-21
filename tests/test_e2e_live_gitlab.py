@@ -45,7 +45,7 @@ def _required_env() -> dict[str, str]:
     return {"url": url, "token": token, "group_path": group_path}
 
 
-async def _poll_remote_mirror_status(*, gl, target_project_id: int, remote_mirror_id: int, timeout_s: float = 45.0) -> dict:
+async def _poll_remote_mirror_status(*, gl, project_id: int, remote_mirror_id: int, timeout_s: float = 45.0) -> dict:
     """
     Best-effort: wait until GitLab records any mirror update timestamp/status.
     Avoid asserting on exact status strings (they vary by GitLab version).
@@ -53,7 +53,7 @@ async def _poll_remote_mirror_status(*, gl, target_project_id: int, remote_mirro
     deadline = time.monotonic() + timeout_s
     last = None
     while time.monotonic() < deadline:
-        project = gl.projects.get(target_project_id)
+        project = gl.projects.get(project_id)
         rm = project.remote_mirrors.get(remote_mirror_id)
         last = {
             "enabled": getattr(rm, "enabled", None),
@@ -70,18 +70,19 @@ async def _poll_remote_mirror_status(*, gl, target_project_id: int, remote_mirro
 @pytest.mark.e2e
 @pytest.mark.live_gitlab
 @pytest.mark.asyncio
-async def test_e2e_live_gitlab_create_mirror_trigger_update_and_export(client):
+async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_export(client):
     """
     End-to-end test against a real GitLab instance.
 
     It provisions two temporary projects in a real group/namespace, then drives
     this app's HTTP API to configure:
       - a GitLab instance
-      - a pair
+      - pairs (pull + push)
       - a group access token (used for authenticated clone URLs)
       - a pull mirror on the target project
+      - a push mirror on the source project
       - a manual update trigger
-      - an export of the mirror configuration
+      - exports of mirror configurations
     """
     cfg = _required_env()
 
@@ -101,8 +102,8 @@ async def test_e2e_live_gitlab_create_mirror_trigger_update_and_export(client):
 
     source_project = None
     target_project = None
-    created_mirror_db_id = None
-    created_pair_id = None
+    created_mirror_db_ids: list[int] = []
+    created_pair_ids: list[int] = []
     created_instance_id = None
     created_token_id = None
 
@@ -145,60 +146,121 @@ async def test_e2e_live_gitlab_create_mirror_trigger_update_and_export(client):
         created_token_id = tok_resp.json()["id"]
 
         # 3) Create an instance pair (same instance for src and tgt).
-        pair_resp = await client.post("/api/pairs", json={
-            "name": f"e2e-pair-{run_id}",
+        pull_pair_resp = await client.post("/api/pairs", json={
+            "name": f"e2e-pair-pull-{run_id}",
             "source_instance_id": created_instance_id,
             "target_instance_id": created_instance_id,
             "mirror_direction": "pull",
             "description": "live GitLab E2E",
         })
-        assert pair_resp.status_code == 200, pair_resp.text
-        created_pair_id = pair_resp.json()["id"]
+        assert pull_pair_resp.status_code == 200, pull_pair_resp.text
+        pull_pair_id = pull_pair_resp.json()["id"]
+        created_pair_ids.append(pull_pair_id)
 
-        # 4) Create mirror via API
-        mirror_resp = await client.post("/api/mirrors", json={
-            "instance_pair_id": created_pair_id,
+        push_pair_resp = await client.post("/api/pairs", json={
+            "name": f"e2e-pair-push-{run_id}",
+            "source_instance_id": created_instance_id,
+            "target_instance_id": created_instance_id,
+            "mirror_direction": "push",
+            "description": "live GitLab E2E",
+        })
+        assert push_pair_resp.status_code == 200, push_pair_resp.text
+        push_pair_id = push_pair_resp.json()["id"]
+        created_pair_ids.append(push_pair_id)
+
+        timeout_s = float(_env("E2E_GITLAB_MIRROR_TIMEOUT_S") or "45")
+
+        # 4) Create pull mirror via API (target pulls from source)
+        pull_mirror_resp = await client.post("/api/mirrors", json={
+            "instance_pair_id": pull_pair_id,
             "source_project_id": source_project.id,
             "source_project_path": source_project.path_with_namespace,
             "target_project_id": target_project.id,
             "target_project_path": target_project.path_with_namespace,
             "enabled": True,
+            # Exercise pull-only settings
+            "mirror_trigger_builds": True,
+            "mirror_branch_regex": "^main$",
         })
-        assert mirror_resp.status_code == 200, mirror_resp.text
-        mirror_body = mirror_resp.json()
-        created_mirror_db_id = mirror_body["id"]
-        remote_mirror_id = mirror_body["mirror_id"]
-        assert remote_mirror_id, "Expected GitLab mirror id to be returned"
+        assert pull_mirror_resp.status_code == 200, pull_mirror_resp.text
+        pull_mirror_body = pull_mirror_resp.json()
+        pull_mirror_db_id = pull_mirror_body["id"]
+        created_mirror_db_ids.append(pull_mirror_db_id)
+        pull_remote_mirror_id = pull_mirror_body["mirror_id"]
+        assert pull_remote_mirror_id, "Expected GitLab mirror id to be returned"
 
         # 5) Trigger update (best-effort; GitLab may queue).
-        upd = await client.post(f"/api/mirrors/{created_mirror_db_id}/update")
-        assert upd.status_code == 200, upd.text
+        pull_upd = await client.post(f"/api/mirrors/{pull_mirror_db_id}/update")
+        assert pull_upd.status_code == 200, pull_upd.text
 
         # 6) Best-effort: verify GitLab has any mirror status/timestamp visible.
-        status = await _poll_remote_mirror_status(
+        pull_status = await _poll_remote_mirror_status(
             gl=gl,
-            target_project_id=target_project.id,
-            remote_mirror_id=remote_mirror_id,
-            timeout_s=float(_env("E2E_GITLAB_MIRROR_TIMEOUT_S") or "45"),
+            project_id=target_project.id,
+            remote_mirror_id=pull_remote_mirror_id,
+            timeout_s=timeout_s,
         )
-        assert isinstance(status, dict)
+        assert isinstance(pull_status, dict)
 
-        # 7) Export should include our mirror
-        export = await client.get(f"/api/export/pair/{created_pair_id}")
-        assert export.status_code == 200, export.text
-        export_data = json.loads(export.text)
-        assert export_data["pair_id"] == created_pair_id
+        # 7) Export should include our pull mirror
+        pull_export = await client.get(f"/api/export/pair/{pull_pair_id}")
+        assert pull_export.status_code == 200, pull_export.text
+        pull_export_data = json.loads(pull_export.text)
+        assert pull_export_data["pair_id"] == pull_pair_id
         assert any(
             m["source_project_path"] == source_project.path_with_namespace
             and m["target_project_path"] == target_project.path_with_namespace
-            for m in export_data["mirrors"]
+            for m in pull_export_data["mirrors"]
+        )
+
+        # 8) Create push mirror via API (source pushes to target)
+        push_mirror_resp = await client.post("/api/mirrors", json={
+            "instance_pair_id": push_pair_id,
+            "source_project_id": source_project.id,
+            "source_project_path": source_project.path_with_namespace,
+            "target_project_id": target_project.id,
+            "target_project_path": target_project.path_with_namespace,
+            "enabled": True,
+            # Include pull-only settings to validate the app filters them for push
+            "mirror_trigger_builds": True,
+            "mirror_branch_regex": "^main$",
+        })
+        assert push_mirror_resp.status_code == 200, push_mirror_resp.text
+        push_mirror_body = push_mirror_resp.json()
+        push_mirror_db_id = push_mirror_body["id"]
+        created_mirror_db_ids.append(push_mirror_db_id)
+        push_remote_mirror_id = push_mirror_body["mirror_id"]
+        assert push_remote_mirror_id, "Expected GitLab mirror id to be returned"
+
+        # 9) Trigger update for push mirror.
+        push_upd = await client.post(f"/api/mirrors/{push_mirror_db_id}/update")
+        assert push_upd.status_code == 200, push_upd.text
+
+        # 10) Best-effort: verify GitLab has any mirror status/timestamp visible (push mirror lives on source project).
+        push_status = await _poll_remote_mirror_status(
+            gl=gl,
+            project_id=source_project.id,
+            remote_mirror_id=push_remote_mirror_id,
+            timeout_s=timeout_s,
+        )
+        assert isinstance(push_status, dict)
+
+        # 11) Export should include our push mirror
+        push_export = await client.get(f"/api/export/pair/{push_pair_id}")
+        assert push_export.status_code == 200, push_export.text
+        push_export_data = json.loads(push_export.text)
+        assert push_export_data["pair_id"] == push_pair_id
+        assert any(
+            m["source_project_path"] == source_project.path_with_namespace
+            and m["target_project_path"] == target_project.path_with_namespace
+            for m in push_export_data["mirrors"]
         )
 
     finally:
         # Delete mirror in GitLab via app endpoint (best effort).
-        if created_mirror_db_id is not None:
+        for mid in created_mirror_db_ids:
             try:
-                await client.delete(f"/api/mirrors/{created_mirror_db_id}")
+                await client.delete(f"/api/mirrors/{mid}")
             except Exception:
                 pass
 
@@ -208,9 +270,9 @@ async def test_e2e_live_gitlab_create_mirror_trigger_update_and_export(client):
                 await client.delete(f"/api/tokens/{created_token_id}")
             except Exception:
                 pass
-        if created_pair_id is not None:
+        for pid in created_pair_ids:
             try:
-                await client.delete(f"/api/pairs/{created_pair_id}")
+                await client.delete(f"/api/pairs/{pid}")
             except Exception:
                 pass
         if created_instance_id is not None:
