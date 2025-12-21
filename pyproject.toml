@@ -32,3 +32,7 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "e2e: end-to-end tests (may be slow or require external services)",
+    "live_gitlab: tests that talk to a real GitLab instance (opt-in via env vars)",
+]
