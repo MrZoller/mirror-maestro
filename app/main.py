@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import instances, pairs, mirrors, export
+from app.api import instances, pairs, mirrors, export, tokens
 from app.core.auth import verify_credentials
 
 
@@ -36,6 +36,7 @@ templates = Jinja2Templates(directory="app/templates")
 app.include_router(instances.router)
 app.include_router(pairs.router)
 app.include_router(mirrors.router)
+app.include_router(tokens.router)
 app.include_router(export.router)
 
 
