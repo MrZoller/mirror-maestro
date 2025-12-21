@@ -144,6 +144,18 @@ function setupEventListeners() {
         await createToken();
     });
 
+    // Group path typeahead (token form)
+    const tokenInstanceSel = document.getElementById('token-instance');
+    const tokenGroupPathEl = document.getElementById('token-group-path');
+    if (tokenInstanceSel) {
+        tokenInstanceSel.addEventListener('change', () => {
+            clearDatalist('token-group-path-options');
+        });
+    }
+    if (tokenGroupPathEl) {
+        tokenGroupPathEl.addEventListener('input', debounce(() => searchGroupsForToken(), 250));
+    }
+
     // Group defaults form
     document.getElementById('group-defaults-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -152,10 +164,106 @@ function setupEventListeners() {
 
     document.getElementById('group-defaults-pair')?.addEventListener('change', () => {
         applyGroupDefaultsTokenUserDefaultIfEmpty();
+        clearDatalist('group-defaults-group-path-options');
     });
     document.getElementById('group-defaults-direction')?.addEventListener('change', () => {
         applyGroupDefaultsTokenUserDefaultIfEmpty();
     });
+
+    // Group path typeahead (group defaults form)
+    const groupDefaultsPathEl = document.getElementById('group-defaults-group-path');
+    if (groupDefaultsPathEl) {
+        groupDefaultsPathEl.addEventListener('input', debounce(() => searchGroupsForGroupDefaults(), 250));
+    }
+}
+
+function clearDatalist(datalistId) {
+    const dl = document.getElementById(datalistId);
+    if (!dl) return;
+    dl.innerHTML = '';
+}
+
+function setDatalistOptions(datalistId, values) {
+    const dl = document.getElementById(datalistId);
+    if (!dl) return;
+    dl.innerHTML = values.map(v => `<option value="${escapeHtml(String(v))}"></option>`).join('');
+}
+
+async function searchGroupsForToken() {
+    const instanceSel = document.getElementById('token-instance');
+    const input = document.getElementById('token-group-path');
+    if (!instanceSel || !input) return;
+
+    const instanceId = parseInt(instanceSel.value || '0');
+    if (!instanceId) {
+        clearDatalist('token-group-path-options');
+        return;
+    }
+
+    const q = (input.value || '').toString().trim();
+    if (q.length < 2) {
+        clearDatalist('token-group-path-options');
+        return;
+    }
+
+    const perPage = 50;
+    try {
+        const res = await apiRequest(
+            `/api/instances/${instanceId}/groups?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`
+        );
+        const groups = res?.groups || [];
+        const values = groups
+            .map(g => (g.full_path || g.path || g.name || '').toString())
+            .filter(v => v);
+        setDatalistOptions('token-group-path-options', values.slice(0, perPage));
+    } catch (e) {
+        // Suggestions are best-effort; ignore errors here.
+        clearDatalist('token-group-path-options');
+    }
+}
+
+async function searchGroupsForGroupDefaults() {
+    const pairSel = document.getElementById('group-defaults-pair');
+    const input = document.getElementById('group-defaults-group-path');
+    if (!pairSel || !input) return;
+
+    const pairId = parseInt(pairSel.value || '0');
+    const pair = state.pairs.find(p => p.id === pairId);
+    if (!pair) {
+        clearDatalist('group-defaults-group-path-options');
+        return;
+    }
+
+    const q = (input.value || '').toString().trim();
+    if (q.length < 2) {
+        clearDatalist('group-defaults-group-path-options');
+        return;
+    }
+
+    const perPage = 50;
+    const urls = [
+        `/api/instances/${pair.source_instance_id}/groups?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`,
+        `/api/instances/${pair.target_instance_id}/groups?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`,
+    ];
+
+    try {
+        const results = await Promise.allSettled(urls.map(u => apiRequest(u)));
+        const seen = new Set();
+        const values = [];
+        results.forEach(r => {
+            if (r.status !== 'fulfilled') return;
+            const groups = r.value?.groups || [];
+            groups.forEach(g => {
+                const v = (g.full_path || g.path || g.name || '').toString();
+                if (!v || seen.has(v)) return;
+                seen.add(v);
+                values.push(v);
+            });
+        });
+        setDatalistOptions('group-defaults-group-path-options', values.slice(0, perPage));
+    } catch (e) {
+        clearDatalist('group-defaults-group-path-options');
+    }
 }
 
 // API Helper
