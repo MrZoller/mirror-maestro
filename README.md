@@ -42,7 +42,7 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 ### Mirror Management
 - **View Mirrors**: See all configured mirrors and their current status at a glance
 - **Create Mirrors**: Quickly set up new mirrors between projects with dropdown selection
-- **Update Mirrors**: Force immediate mirror synchronization with a single click
+- **Sync Mirrors**: Force immediate mirror synchronization with a single click
 - **Edit/Remove Mirrors**: Modify or delete mirror configurations as needed
 - **Import/Export**: Bulk import and export mirror settings for specified groups
 
@@ -261,7 +261,7 @@ Create and manage mirrors between projects:
    - Select target project (auto-populated from GitLab)
    - Click **Create Mirror**
 4. To manage existing mirrors:
-   - **Update**: Force an immediate mirror synchronization
+   - **Sync**: Force an immediate mirror synchronization
    - **Delete**: Remove the mirror configuration
 
 ### 5. Import/Export
