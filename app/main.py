@@ -44,12 +44,12 @@ app.include_router(export.router)
 async def root(request: Request, _: str = Depends(verify_credentials)):
     """Serve the main web interface."""
     return templates.TemplateResponse(
+        request,
         "index.html",
         {
-            "request": request,
             "title": settings.app_title,
-            "auth_enabled": settings.auth_enabled
-        }
+            "auth_enabled": settings.auth_enabled,
+        },
     )
 
 
