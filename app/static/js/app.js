@@ -5,7 +5,8 @@ const state = {
     mirrors: [],
     tokens: [],
     groupDefaults: [],
-    selectedPair: null
+    selectedPair: null,
+    mirrorProjectInstances: { source: null, target: null }
 };
 
 // Initialize the application
@@ -113,6 +114,28 @@ function setupEventListeners() {
             loadMirrors();
             loadProjectsForPair();
         }
+    });
+
+    // Project typeahead for large instances (Mirrors tab)
+    const srcSearch = document.getElementById('mirror-source-project-search');
+    const tgtSearch = document.getElementById('mirror-target-project-search');
+    if (srcSearch) {
+        srcSearch.addEventListener('input', debounce(() => searchProjectsForMirror('source'), 250));
+    }
+    if (tgtSearch) {
+        tgtSearch.addEventListener('input', debounce(() => searchProjectsForMirror('target'), 250));
+    }
+
+    // Keep the search field synced with selection
+    document.getElementById('mirror-source-project')?.addEventListener('change', (e) => {
+        const opt = e.target.selectedOptions?.[0];
+        const path = opt?.dataset?.path;
+        if (srcSearch && path) srcSearch.value = path;
+    });
+    document.getElementById('mirror-target-project')?.addEventListener('change', (e) => {
+        const opt = e.target.selectedOptions?.[0];
+        const path = opt?.dataset?.path;
+        if (tgtSearch && path) tgtSearch.value = path;
     });
 
     // Token form
@@ -713,23 +736,66 @@ async function loadProjectsForPair() {
         resetMirrorOverrides();
         applyMirrorDirectionUI(pair.mirror_direction);
 
-        // Load source projects
-        const sourceProjects = await apiRequest(`/api/instances/${pair.source_instance_id}/projects`);
-        const sourceSelect = document.getElementById('mirror-source-project');
-        sourceSelect.innerHTML = '<option value="">Select source project...</option>' +
-            sourceProjects.projects.map(p =>
-                `<option value="${p.id}" data-path="${p.path_with_namespace}">${escapeHtml(p.path_with_namespace)}</option>`
-            ).join('');
+        // Avoid loading every project up-front (can be very large). Use
+        // a server-backed typeahead instead.
+        state.mirrorProjectInstances.source = pair.source_instance_id;
+        state.mirrorProjectInstances.target = pair.target_instance_id;
 
-        // Load target projects
-        const targetProjects = await apiRequest(`/api/instances/${pair.target_instance_id}/projects`);
+        const sourceSelect = document.getElementById('mirror-source-project');
         const targetSelect = document.getElementById('mirror-target-project');
-        targetSelect.innerHTML = '<option value="">Select target project...</option>' +
-            targetProjects.projects.map(p =>
-                `<option value="${p.id}" data-path="${p.path_with_namespace}">${escapeHtml(p.path_with_namespace)}</option>`
-            ).join('');
+        if (sourceSelect) sourceSelect.innerHTML = '<option value="">Type to search for a source project...</option>';
+        if (targetSelect) targetSelect.innerHTML = '<option value="">Type to search for a target project...</option>';
+
+        const srcSearch = document.getElementById('mirror-source-project-search');
+        const tgtSearch = document.getElementById('mirror-target-project-search');
+        if (srcSearch) srcSearch.value = '';
+        if (tgtSearch) tgtSearch.value = '';
     } catch (error) {
         console.error('Failed to load projects:', error);
+    }
+}
+
+async function searchProjectsForMirror(side) {
+    const instanceId = side === 'source' ? state.mirrorProjectInstances.source : state.mirrorProjectInstances.target;
+    const inputId = side === 'source' ? 'mirror-source-project-search' : 'mirror-target-project-search';
+    const selectId = side === 'source' ? 'mirror-source-project' : 'mirror-target-project';
+    const placeholder = side === 'source' ? 'Select source project...' : 'Select target project...';
+
+    const input = document.getElementById(inputId);
+    const select = document.getElementById(selectId);
+    if (!input || !select) return;
+
+    if (!instanceId) {
+        select.innerHTML = '<option value="">Select an instance pair first...</option>';
+        return;
+    }
+
+    const q = (input.value || '').toString().trim();
+    if (q.length < 2) {
+        select.innerHTML = '<option value="">Type at least 2 characters to search...</option>';
+        return;
+    }
+
+    const perPage = 50;
+    try {
+        const res = await apiRequest(
+            `/api/instances/${instanceId}/projects?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`
+        );
+        const projects = res?.projects || [];
+
+        const options = projects.map(p => {
+            const fullPath = (p.path_with_namespace || p.name || '').toString();
+            // Show full namespace path (supports multi-level groups).
+            return `<option value="${p.id}" data-path="${escapeHtml(fullPath)}">${escapeHtml(fullPath)}</option>`;
+        }).join('');
+
+        const moreHint = projects.length >= perPage
+            ? `<option value="" disabled>Showing first ${perPage} matches — refine search to narrow</option>`
+            : '';
+
+        select.innerHTML = `<option value="">${placeholder}</option>` + options + moreHint;
+    } catch (error) {
+        console.error('Failed to search projects:', error);
     }
 }
 
@@ -962,4 +1028,12 @@ function escapeHtml(text) {
         "'": '&#039;'
     };
     return text ? text.replace(/[&<>"']/g, m => map[m]) : '';
+}
+
+function debounce(fn, delayMs) {
+    let t = null;
+    return (...args) => {
+        if (t) clearTimeout(t);
+        t = setTimeout(() => fn(...args), delayMs);
+    };
 }
