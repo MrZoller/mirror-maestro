@@ -115,6 +115,7 @@
                             <th>Source</th>
                             <th>Target</th>
                             <th>Direction</th>
+                            <th>Default Settings</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -125,6 +126,15 @@
                             <td>Backup GitLab</td>
                             <td><span class="badge badge-info">push</span></td>
                             <td>
+                                <div style="line-height:1.35">
+                                    <span class="text-muted">overwrite:</span> true<br>
+                                    <span class="text-muted">only_protected:</span> true<br>
+                                    <span class="text-muted">trigger:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">user:</span> <span class="text-muted">n/a</span>
+                                </div>
+                            </td>
+                            <td>
                                 <button class="btn btn-danger btn-small">Delete</button>
                             </td>
                         </tr>
@@ -133,6 +143,15 @@
                             <td>Production GitLab</td>
                             <td>Partner GitLab</td>
                             <td><span class="badge badge-info">pull</span></td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="text-muted">overwrite:</span> false<br>
+                                    <span class="text-muted">only_protected:</span> false<br>
+                                    <span class="text-muted">trigger:</span> true<br>
+                                    <span class="text-muted">regex:</span> <code>^main$|^release/.*$</code><br>
+                                    <span class="text-muted">user:</span> mirror-bot <span class="text-muted">(#42)</span>
+                                </div>
+                            </td>
                             <td>
                                 <button class="btn btn-danger btn-small">Delete</button>
                             </td>
@@ -143,59 +162,17 @@
                             <td>Production GitLab</td>
                             <td><span class="badge badge-info">push</span></td>
                             <td>
+                                <div style="line-height:1.35">
+                                    <span class="text-muted">overwrite:</span> false<br>
+                                    <span class="text-muted">only_protected:</span> false<br>
+                                    <span class="text-muted">trigger:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">user:</span> <span class="text-muted">n/a</span>
+                                </div>
+                            </td>
+                            <td>
                                 <button class="btn btn-danger btn-small">Delete</button>
                             </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="card">
-                <h3>Pair Default Mirror Settings</h3>
-                <p class="text-muted">View the default mirror settings configured on each instance pair.</p>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Pair</th>
-                            <th>Direction</th>
-                            <th>Protected</th>
-                            <th>Overwrite</th>
-                            <th>Trigger</th>
-                            <th>Only Protected</th>
-                            <th>Regex</th>
-                            <th>User</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>Prod → Backup</strong></td>
-                            <td><span class="badge badge-info">push</span></td>
-                            <td>true</td>
-                            <td>true</td>
-                            <td>false</td>
-                            <td>true</td>
-                            <td><span class="text-muted">N/A</span></td>
-                            <td><span class="text-muted">N/A</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>Prod → Partner</strong></td>
-                            <td><span class="badge badge-info">pull</span></td>
-                            <td>true</td>
-                            <td>false</td>
-                            <td>true</td>
-                            <td>false</td>
-                            <td>^main$|^release/.*$</td>
-                            <td>mirror-bot <span class="text-muted">(#42)</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>Dev → Prod</strong></td>
-                            <td><span class="badge badge-info">push</span></td>
-                            <td>true</td>
-                            <td>false</td>
-                            <td>false</td>
-                            <td>false</td>
-                            <td><span class="text-muted">N/A</span></td>
-                            <td><span class="text-muted">auto</span></td>
                         </tr>
                     </tbody>
                 </table>
