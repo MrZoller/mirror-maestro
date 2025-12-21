@@ -84,3 +84,25 @@ def test_gitlab_client_get_projects_shapes(monkeypatch):
         }
     ]
 
+
+def test_gitlab_client_get_current_user_shapes(monkeypatch):
+    from app.core import gitlab_client as mod
+
+    class FakeGL:
+        def __init__(self, url, private_token):
+            self.url = url
+            self.private_token = private_token
+
+        def http_get(self, path):
+            assert path == "/user"
+            return {"id": 7, "username": "bot", "name": "Bot"}
+
+    class FakeGitlabModule:
+        Gitlab = FakeGL
+
+    monkeypatch.setattr(mod, "gitlab", FakeGitlabModule())
+    monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
+
+    client = mod.GitLabClient("https://example.com", "enc:any")
+    assert client.get_current_user() == {"id": 7, "username": "bot", "name": "Bot"}
+
