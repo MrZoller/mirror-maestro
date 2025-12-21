@@ -186,8 +186,8 @@
                                 <input type="text" id="pair-branch-regex" name="mirror_branch_regex" placeholder="Optional (e.g., ^main$|^release/.*$)">
                             </div>
                             <div class="form-group">
-                                <label for="pair-mirror-user-id">Mirror user ID</label>
-                                <input type="number" id="pair-mirror-user-id" name="mirror_user_id" placeholder="Optional (GitLab user id)">
+                                <label for="pair-mirror-user-id">Mirror user</label>
+                                <input type="number" id="pair-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
                             </div>
                         </div>
                     </div>
@@ -232,7 +232,7 @@
                             <th>Trigger</th>
                             <th>Only Protected</th>
                             <th>Regex</th>
-                            <th>User ID</th>
+                            <th>User</th>
                         </tr>
                     </thead>
                     <tbody id="pair-defaults-list">
@@ -350,8 +350,8 @@
                                 <input type="text" id="group-defaults-branch-regex" name="mirror_branch_regex" placeholder="Optional (e.g., ^main$|^release/.*$)">
                             </div>
                             <div class="form-group">
-                                <label for="group-defaults-mirror-user-id">Mirror user ID (pull only)</label>
-                                <input type="number" id="group-defaults-mirror-user-id" name="mirror_user_id" placeholder="Optional (GitLab user id)">
+                                <label for="group-defaults-mirror-user-id">Mirror user (pull only)</label>
+                                <input type="number" id="group-defaults-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
                             </div>
                         </div>
                     </div>
@@ -372,7 +372,7 @@
                             <th>Trigger</th>
                             <th>Only Protected</th>
                             <th>Regex</th>
-                            <th>User ID</th>
+                            <th>User</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -457,8 +457,8 @@
                                 <input type="text" id="mirror-branch-regex" name="mirror_branch_regex" placeholder="Optional (e.g., ^main$|^release/.*$)">
                             </div>
                             <div class="form-group">
-                                <label for="mirror-mirror-user-id">Mirror user ID</label>
-                                <input type="number" id="mirror-mirror-user-id" name="mirror_user_id" placeholder="Optional (GitLab user id)">
+                                <label for="mirror-mirror-user-id">Mirror user</label>
+                                <input type="number" id="mirror-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
                             </div>
                         </div>
                     </div>

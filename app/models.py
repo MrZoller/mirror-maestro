@@ -17,6 +17,9 @@ class GitLabInstance(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     encrypted_token: Mapped[str] = mapped_column(Text, nullable=False)
+    # Best-effort: user identity of the stored API token (for friendly display / defaults).
+    api_user_id: Mapped[Optional[int]] = mapped_column(Integer)
+    api_username: Mapped[Optional[str]] = mapped_column(String(255))
     description: Mapped[Optional[str]] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

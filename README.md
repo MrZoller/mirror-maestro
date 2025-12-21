@@ -243,7 +243,7 @@ Define pairs of instances where mirrors will be created:
 The application automatically searches from most specific to least specific, so you can organize tokens at any level of your group hierarchy.
 
 #### Group-level mirror default overrides
-You can optionally define group-level overrides for mirror defaults (direction, overwrite divergent branches, only protected branches, and pull-only options like trigger builds / regex / mirror user id).
+You can optionally define group-level overrides for mirror defaults (direction, overwrite divergent branches, only protected branches, and pull-only options like trigger builds / regex / mirror user).
 
 Resolution order for mirror settings is:
 1. Per-mirror overrides (set during mirror creation)

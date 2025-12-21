@@ -80,6 +80,14 @@ function setupEventListeners() {
         }
     });
 
+    // Pair instance changes can affect token-user defaults
+    document.getElementById('pair-source-instance')?.addEventListener('change', () => {
+        applyPairTokenUserDefaultIfEmpty();
+    });
+    document.getElementById('pair-target-instance')?.addEventListener('change', () => {
+        applyPairTokenUserDefaultIfEmpty();
+    });
+
     // Mirror form
     document.getElementById('mirror-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -117,6 +125,13 @@ function setupEventListeners() {
     document.getElementById('group-defaults-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         await upsertGroupDefaults();
+    });
+
+    document.getElementById('group-defaults-pair')?.addEventListener('change', () => {
+        applyGroupDefaultsTokenUserDefaultIfEmpty();
+    });
+    document.getElementById('group-defaults-direction')?.addEventListener('change', () => {
+        applyGroupDefaultsTokenUserDefaultIfEmpty();
     });
 }
 
@@ -278,6 +293,17 @@ function renderPairDefaults(pairs) {
     const fmtBool = (v) => v ? 'true' : 'false';
     const fmtStr = (v) => (v === null || v === undefined || String(v).trim() === '') ? '<span class="text-muted">N/A</span>' : escapeHtml(String(v));
     const badge = (dir) => `<span class="badge badge-info">${escapeHtml((dir || '').toString().toLowerCase() || 'n/a')}</span>`;
+    const tokenUserForInstance = (instanceId) => state.instances.find(i => i.id === instanceId);
+    const fmtUser = (pair) => {
+        if (pair.mirror_user_id === null || pair.mirror_user_id === undefined) return '<span class="text-muted">auto</span>';
+        const direction = (pair.mirror_direction || '').toString().toLowerCase();
+        const ownerInstanceId = direction === 'push' ? pair.source_instance_id : pair.target_instance_id;
+        const inst = tokenUserForInstance(ownerInstanceId);
+        if (inst && inst.token_user_id === pair.mirror_user_id && inst.token_username) {
+            return `${escapeHtml(inst.token_username)} <span class="text-muted">(#${escapeHtml(String(pair.mirror_user_id))})</span>`;
+        }
+        return escapeHtml(String(pair.mirror_user_id));
+    };
 
     tbody.innerHTML = pairs.map(pair => `
         <tr>
@@ -288,9 +314,30 @@ function renderPairDefaults(pairs) {
             <td>${fmtBool(!!pair.mirror_trigger_builds)}</td>
             <td>${fmtBool(!!pair.only_mirror_protected_branches)}</td>
             <td>${fmtStr(pair.mirror_branch_regex)}</td>
-            <td>${fmtStr(pair.mirror_user_id)}</td>
+            <td>${fmtUser(pair)}</td>
         </tr>
     `).join('');
+}
+
+function applyPairTokenUserDefaultIfEmpty() {
+    const dirEl = document.getElementById('pair-direction');
+    const srcEl = document.getElementById('pair-source-instance');
+    const tgtEl = document.getElementById('pair-target-instance');
+    const userIdEl = document.getElementById('pair-mirror-user-id');
+    if (!dirEl || !srcEl || !tgtEl || !userIdEl) return;
+
+    // Only apply if empty and field enabled
+    if (userIdEl.disabled) return;
+    if ((userIdEl.value || '').toString().trim()) return;
+
+    const direction = (dirEl.value || '').toString().toLowerCase();
+    const srcId = parseInt(srcEl.value || '0');
+    const tgtId = parseInt(tgtEl.value || '0');
+    const ownerInstanceId = direction === 'push' ? srcId : tgtId;
+    const inst = state.instances.find(i => i.id === ownerInstanceId);
+    if (inst && inst.token_user_id) {
+        userIdEl.value = String(inst.token_user_id);
+    }
 }
 
 async function createPair() {
@@ -464,6 +511,16 @@ function renderGroupDefaults(rows) {
         const pair = state.pairs.find(p => p.id === r.instance_pair_id);
         const b = (v) => (v === null || v === undefined) ? '<span class="text-muted">inherit</span>' : (v ? 'true' : 'false');
         const s = (v) => (v === null || v === undefined || v === '') ? '<span class="text-muted">inherit</span>' : escapeHtml(String(v));
+        const dir = (r.mirror_direction || pair?.mirror_direction || '').toString().toLowerCase();
+        const ownerInstanceId = dir === 'push' ? pair?.source_instance_id : pair?.target_instance_id;
+        const inst = state.instances.find(i => i.id === ownerInstanceId);
+        const userCell = (() => {
+            if (r.mirror_user_id === null || r.mirror_user_id === undefined) return '<span class="text-muted">inherit</span>';
+            if (inst && inst.token_user_id === r.mirror_user_id && inst.token_username) {
+                return `${escapeHtml(inst.token_username)} <span class="text-muted">(#${escapeHtml(String(r.mirror_user_id))})</span>`;
+            }
+            return escapeHtml(String(r.mirror_user_id));
+        })();
         return `
             <tr>
                 <td><strong>${escapeHtml(pair?.name || 'Unknown')}</strong></td>
@@ -473,7 +530,7 @@ function renderGroupDefaults(rows) {
                 <td>${b(r.mirror_trigger_builds)}</td>
                 <td>${b(r.only_mirror_protected_branches)}</td>
                 <td>${s(r.mirror_branch_regex)}</td>
-                <td>${s(r.mirror_user_id)}</td>
+                <td>${userCell}</td>
                 <td>
                     <button class="btn btn-danger btn-small" onclick="deleteGroupDefaults(${r.id})">Delete</button>
                 </td>
@@ -529,8 +586,19 @@ async function upsertGroupDefaults() {
     const onlyProtectedEl = document.getElementById('group-defaults-only-protected');
 
     const branchRegexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
-    const mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
+    let mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
     const dirRaw = (formData.get('mirror_direction') || '').toString().trim();
+
+    // Auto-fill mirror_user_id from the owning instance token user if empty
+    const pair = state.pairs.find(p => p.id === parseInt(formData.get('instance_pair_id')));
+    const effDir = (dirRaw || pair?.mirror_direction || '').toString().toLowerCase();
+    if (!mirrorUserIdRaw && pair && effDir !== 'push') {
+        const ownerInstanceId = pair.target_instance_id;
+        const inst = state.instances.find(i => i.id === ownerInstanceId);
+        if (inst && inst.token_user_id) {
+            mirrorUserIdRaw = String(inst.token_user_id);
+        }
+    }
 
     const payload = {
         instance_pair_id: parseInt(formData.get('instance_pair_id')),
@@ -553,6 +621,23 @@ async function upsertGroupDefaults() {
         await loadGroupDefaults();
     } catch (error) {
         console.error('Failed to save group defaults:', error);
+    }
+}
+
+function applyGroupDefaultsTokenUserDefaultIfEmpty() {
+    const pairSel = document.getElementById('group-defaults-pair');
+    const dirSel = document.getElementById('group-defaults-direction');
+    const userEl = document.getElementById('group-defaults-mirror-user-id');
+    if (!pairSel || !dirSel || !userEl) return;
+    if ((userEl.value || '').toString().trim()) return;
+
+    const pair = state.pairs.find(p => p.id === parseInt(pairSel.value || '0'));
+    if (!pair) return;
+    const effDir = ((dirSel.value || '') || pair.mirror_direction || '').toString().toLowerCase();
+    if (effDir === 'push') return;
+    const inst = state.instances.find(i => i.id === pair.target_instance_id);
+    if (inst && inst.token_user_id) {
+        userEl.value = String(inst.token_user_id);
     }
 }
 

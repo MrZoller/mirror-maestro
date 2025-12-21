@@ -87,7 +87,7 @@ class FakeGitLabClient:
 
 async def seed_instance(session_maker, *, name: str, url: str) -> int:
     async with session_maker() as s:
-        inst = GitLabInstance(name=name, url=url, encrypted_token="enc:t", description="")
+        inst = GitLabInstance(name=name, url=url, encrypted_token="enc:t", description="", api_user_id=None, api_username=None)
         s.add(inst)
         await s.commit()
         await s.refresh(inst)
@@ -413,6 +413,40 @@ async def test_mirrors_create_pull_uses_group_defaults_over_pair(client, session
     assert trigger is True
     assert regex == "^main$"
     assert user_id == 7
+
+
+@pytest.mark.asyncio
+async def test_mirrors_create_pull_defaults_mirror_user_to_token_user(client, session_maker, monkeypatch):
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.pull_calls.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+
+    # Store token user identity on the target instance (pull mirror lives on target).
+    async with session_maker() as s:
+        tgt = (await s.execute(select(GitLabInstance).where(GitLabInstance.id == tgt_id))).scalar_one()
+        tgt.api_user_id = 123
+        tgt.api_username = "mirror-bot"
+        await s.commit()
+
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    payload = {
+        "instance_pair_id": pair_id,
+        "source_project_id": 1,
+        "source_project_path": "platform/proj",
+        "target_project_id": 2,
+        "target_project_path": "platform/proj",
+        "enabled": True,
+    }
+    resp = await client.post("/api/mirrors", json=payload)
+    assert resp.status_code == 200, resp.text
+
+    *_head, mirror_user_id = FakeGitLabClient.pull_calls[-1]
+    assert mirror_user_id == 123
 
 
 @pytest.mark.asyncio
