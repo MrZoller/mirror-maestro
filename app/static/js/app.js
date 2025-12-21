@@ -232,6 +232,7 @@ async function loadPairs() {
         const pairs = await apiRequest('/api/pairs');
         state.pairs = pairs;
         renderPairs(pairs);
+        renderPairDefaults(pairs);
         updatePairSelector();
     } catch (error) {
         console.error('Failed to load pairs:', error);
@@ -263,6 +264,33 @@ function renderPairs(pairs) {
             </tr>
         `;
     }).join('');
+}
+
+function renderPairDefaults(pairs) {
+    const tbody = document.getElementById('pair-defaults-list');
+    if (!tbody) return;
+
+    if (pairs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No instance pairs configured</td></tr>';
+        return;
+    }
+
+    const fmtBool = (v) => v ? 'true' : 'false';
+    const fmtStr = (v) => (v === null || v === undefined || String(v).trim() === '') ? '<span class="text-muted">N/A</span>' : escapeHtml(String(v));
+    const badge = (dir) => `<span class="badge badge-info">${escapeHtml((dir || '').toString().toLowerCase() || 'n/a')}</span>`;
+
+    tbody.innerHTML = pairs.map(pair => `
+        <tr>
+            <td><strong>${escapeHtml(pair.name)}</strong></td>
+            <td>${badge(pair.mirror_direction)}</td>
+            <td>${fmtBool(!!pair.mirror_protected_branches)}</td>
+            <td>${fmtBool(!!pair.mirror_overwrite_diverged)}</td>
+            <td>${fmtBool(!!pair.mirror_trigger_builds)}</td>
+            <td>${fmtBool(!!pair.only_mirror_protected_branches)}</td>
+            <td>${fmtStr(pair.mirror_branch_regex)}</td>
+            <td>${fmtStr(pair.mirror_user_id)}</td>
+        </tr>
+    `).join('');
 }
 
 async function createPair() {
