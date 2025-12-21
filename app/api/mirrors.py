@@ -260,8 +260,6 @@ async def create_mirror(
                 enabled=mirror.enabled,
                 keep_divergent_refs=not overwrite_diverged,
                 only_protected_branches=only_protected,
-                mirror_branch_regex=branch_regex,
-                mirror_user_id=mirror_user_id,
             )
             gitlab_mirror_id = result.get("id")
         else:  # pull
@@ -442,8 +440,9 @@ async def update_mirror(
                 only_protected_branches=only_protected,
                 keep_divergent_refs=not overwrite_diverged,
                 trigger_builds=trigger_builds if direction == "pull" else None,
-                mirror_branch_regex=branch_regex,
-                mirror_user_id=mirror_user_id,
+                mirror_branch_regex=branch_regex if direction == "pull" else None,
+                mirror_user_id=mirror_user_id if direction == "pull" else None,
+                mirror_direction=direction,
             )
         except Exception as e:
             await db.rollback()

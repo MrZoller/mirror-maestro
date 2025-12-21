@@ -54,10 +54,46 @@ function setupEventListeners() {
         await createPair();
     });
 
+    // Pair direction changes should toggle which settings apply
+    document.getElementById('pair-direction')?.addEventListener('change', (e) => {
+        const direction = (e.target.value || '').toString().toLowerCase();
+        const isPush = direction === 'push';
+
+        const trigger = document.getElementById('pair-trigger');
+        if (trigger) {
+            trigger.disabled = isPush;
+            if (isPush) trigger.checked = false;
+        }
+
+        const regex = document.getElementById('pair-branch-regex');
+        if (regex) {
+            regex.disabled = isPush;
+            if (isPush) regex.value = '';
+        }
+
+        const userId = document.getElementById('pair-mirror-user-id');
+        if (userId) {
+            userId.disabled = isPush;
+            if (isPush) userId.value = '';
+        }
+    });
+
     // Mirror form
     document.getElementById('mirror-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         await createMirror();
+    });
+
+    // Mirror direction override (or "use pair default") toggles applicable fields
+    document.getElementById('mirror-direction')?.addEventListener('change', (e) => {
+        const selected = (e.target.value || '').toString().toLowerCase();
+        if (selected) {
+            applyMirrorDirectionUI(selected);
+            return;
+        }
+        // Use pair default if present
+        const pair = state.pairs.find(p => p.id === state.selectedPair);
+        applyMirrorDirectionUI(pair?.mirror_direction);
     });
 
     // Pair selector for mirrors
@@ -423,6 +459,7 @@ async function loadProjectsForPair() {
 
     try {
         resetMirrorOverrides();
+        applyMirrorDirectionUI(pair.mirror_direction);
 
         // Load source projects
         const sourceProjects = await apiRequest(`/api/instances/${pair.source_instance_id}/projects`);
@@ -476,6 +513,33 @@ function resetMirrorOverrides() {
     if (enabled) enabled.checked = true;
 }
 
+function applyMirrorDirectionUI(direction) {
+    const effective = (direction || '').toString().toLowerCase();
+    const isPush = effective === 'push';
+
+    const triggerEl = document.getElementById('mirror-trigger');
+    if (triggerEl) {
+        triggerEl.disabled = isPush;
+        if (isPush) {
+            triggerEl.checked = false;
+            triggerEl.indeterminate = true;
+            triggerEl.title = 'Not applicable for push mirrors';
+        }
+    }
+
+    const regex = document.getElementById('mirror-branch-regex');
+    if (regex) {
+        regex.disabled = isPush;
+        if (isPush) regex.value = '';
+    }
+
+    const userId = document.getElementById('mirror-mirror-user-id');
+    if (userId) {
+        userId.disabled = isPush;
+        if (isPush) userId.value = '';
+    }
+}
+
 async function createMirror() {
     if (!state.selectedPair) {
         showMessage('Please select an instance pair first', 'error');
@@ -501,6 +565,9 @@ async function createMirror() {
     };
 
     const mirrorDirection = (formData.get('mirror_direction') || '').toString().trim();
+    const pair = state.pairs.find(p => p.id === state.selectedPair);
+    const effectiveDirection = (mirrorDirection || pair?.mirror_direction || '').toString().toLowerCase();
+    const isPush = effectiveDirection === 'push';
     if (mirrorDirection) {
         data.mirror_direction = mirrorDirection;
     }
@@ -510,7 +577,7 @@ async function createMirror() {
         data.mirror_overwrite_diverged = overwriteEl.checked;
     }
     const triggerEl = document.getElementById('mirror-trigger');
-    if (triggerEl && !triggerEl.indeterminate) {
+    if (triggerEl && !triggerEl.indeterminate && !isPush) {
         data.mirror_trigger_builds = triggerEl.checked;
     }
     const onlyProtectedEl = document.getElementById('mirror-only-protected');
@@ -519,11 +586,11 @@ async function createMirror() {
     }
 
     const regexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
-    if (regexRaw) {
+    if (regexRaw && !isPush) {
         data.mirror_branch_regex = regexRaw;
     }
     const mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
-    if (mirrorUserIdRaw) {
+    if (mirrorUserIdRaw && !isPush) {
         data.mirror_user_id = parseInt(mirrorUserIdRaw);
     }
 

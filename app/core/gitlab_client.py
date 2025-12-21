@@ -184,6 +184,7 @@ class GitLabClient:
         trigger_builds: Optional[bool] = None,
         mirror_branch_regex: Optional[str] = None,
         mirror_user_id: Optional[int] = None,
+        mirror_direction: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Update mirror settings."""
         try:
@@ -201,6 +202,10 @@ class GitLabClient:
             if mirror_user_id is not None:
                 data["mirror_user_id"] = mirror_user_id
 
+            if not data:
+                return {"id": mirror_id}
+
+            data = self._filter_remote_mirror_payload(mirror_direction, data)
             if not data:
                 return {"id": mirror_id}
 
@@ -244,4 +249,25 @@ class GitLabClient:
         if mirror_direction is not None:
             data["mirror_direction"] = mirror_direction
 
+        data = self._filter_remote_mirror_payload(mirror_direction, data)
         return self.gl.http_post(f"/projects/{project_id}/remote_mirrors", post_data=data)
+
+    @staticmethod
+    def _filter_remote_mirror_payload(mirror_direction: str | None, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        GitLab supports different remote mirror settings depending on direction.
+
+        We filter here so we don't send unsupported fields and cause 4xx errors.
+        """
+        if not mirror_direction:
+            return data
+
+        direction = mirror_direction.lower()
+        # Conservative direction-aware support:
+        # - Pull mirrors: all options supported.
+        # - Push mirrors: GitLab typically doesn't support trigger_builds / branch regex / mirror user.
+        if direction == "push":
+            data.pop("trigger_builds", None)
+            data.pop("mirror_branch_regex", None)
+            data.pop("mirror_user_id", None)
+        return data
