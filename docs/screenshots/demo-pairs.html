@@ -20,7 +20,7 @@
             <button class="tab" data-tab="dashboard-tab">Dashboard</button>
             <button class="tab" data-tab="instances-tab">GitLab Instances</button>
             <button class="tab active" data-tab="pairs-tab">Instance Pairs</button>
-            <button class="tab" data-tab="tokens-tab">Group Tokens</button>
+            <button class="tab" data-tab="tokens-tab">Group Settings</button>
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
         </div>
 
@@ -91,8 +91,8 @@
                                 <input type="text" id="pair-branch-regex" name="mirror_branch_regex" value="^main$|^release/.*$" placeholder="Optional (e.g., ^main$|^release/.*$)">
                             </div>
                             <div class="form-group">
-                                <label for="pair-mirror-user-id">Mirror user ID</label>
-                                <input type="number" id="pair-mirror-user-id" name="mirror_user_id" value="42" placeholder="Optional (GitLab user id)">
+                                <label for="pair-mirror-user-id">Mirror user</label>
+                                <input type="number" id="pair-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
                             </div>
                         </div>
                     </div>
@@ -145,6 +145,57 @@
                             <td>
                                 <button class="btn btn-danger btn-small">Delete</button>
                             </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>Pair Default Mirror Settings</h3>
+                <p class="text-muted">View the default mirror settings configured on each instance pair.</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pair</th>
+                            <th>Direction</th>
+                            <th>Protected</th>
+                            <th>Overwrite</th>
+                            <th>Trigger</th>
+                            <th>Only Protected</th>
+                            <th>Regex</th>
+                            <th>User</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Prod → Backup</strong></td>
+                            <td><span class="badge badge-info">push</span></td>
+                            <td>true</td>
+                            <td>true</td>
+                            <td>false</td>
+                            <td>true</td>
+                            <td><span class="text-muted">N/A</span></td>
+                            <td><span class="text-muted">N/A</span></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Prod → Partner</strong></td>
+                            <td><span class="badge badge-info">pull</span></td>
+                            <td>true</td>
+                            <td>false</td>
+                            <td>true</td>
+                            <td>false</td>
+                            <td>^main$|^release/.*$</td>
+                            <td>mirror-bot <span class="text-muted">(#42)</span></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Dev → Prod</strong></td>
+                            <td><span class="badge badge-info">push</span></td>
+                            <td>true</td>
+                            <td>false</td>
+                            <td>false</td>
+                            <td>false</td>
+                            <td><span class="text-muted">N/A</span></td>
+                            <td><span class="text-muted">auto</span></td>
                         </tr>
                     </tbody>
                 </table>

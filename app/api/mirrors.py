@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
 from app.database import get_db
-from app.models import Mirror, InstancePair, GitLabInstance, GroupAccessToken
+from app.models import Mirror, InstancePair, GitLabInstance, GroupAccessToken, GroupMirrorDefaults
 from app.core.auth import verify_credentials
 from app.core.gitlab_client import GitLabClient
 from app.core.encryption import encryption
@@ -115,6 +115,55 @@ async def get_authenticated_url(
         # No token found at any level - return unauthenticated URL
         # In production, you might want to raise an exception here
         return _build_git_url(scheme=scheme, hostname=hostname, port=port, project_path=project_path)
+
+
+def _namespace_candidates(project_path: str) -> list[str]:
+    """
+    For "platform/core/api-gateway" return ["platform/core", "platform"].
+    Returns [] for projects without a namespace.
+    """
+    parts = [p for p in (project_path or "").split("/") if p]
+    if len(parts) < 2:
+        return []
+    ns_parts = parts[:-1]
+    out: list[str] = []
+    for i in range(len(ns_parts), 0, -1):
+        out.append("/".join(ns_parts[:i]))
+    return out
+
+
+async def _get_group_defaults(
+    db: AsyncSession,
+    *,
+    instance_pair_id: int,
+    source_project_path: str,
+    target_project_path: str,
+) -> GroupMirrorDefaults | None:
+    """
+    Find the most specific group defaults for this pair.
+
+    We check both source and target namespaces (most specific -> least), since
+    users may mirror across different namespaces.
+    """
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for c in _namespace_candidates(source_project_path) + _namespace_candidates(target_project_path):
+        if c in seen:
+            continue
+        seen.add(c)
+        candidates.append(c)
+
+    for group_path in candidates:
+        res = await db.execute(
+            select(GroupMirrorDefaults).where(
+                GroupMirrorDefaults.instance_pair_id == instance_pair_id,
+                GroupMirrorDefaults.group_path == group_path,
+            )
+        )
+        row = res.scalar_one_or_none()
+        if row:
+            return row
+    return None
 
 
 class MirrorCreate(BaseModel):
@@ -237,14 +286,52 @@ async def create_mirror(
     if not source_instance or not target_instance:
         raise HTTPException(status_code=404, detail="Source or target instance not found")
 
-    # Use pair defaults if mirror-specific settings not provided
-    direction = mirror.mirror_direction or pair.mirror_direction
-    protected_branches = mirror.mirror_protected_branches if mirror.mirror_protected_branches is not None else pair.mirror_protected_branches
-    overwrite_diverged = mirror.mirror_overwrite_diverged if mirror.mirror_overwrite_diverged is not None else pair.mirror_overwrite_diverged
-    trigger_builds = mirror.mirror_trigger_builds if mirror.mirror_trigger_builds is not None else pair.mirror_trigger_builds
-    only_protected = mirror.only_mirror_protected_branches if mirror.only_mirror_protected_branches is not None else pair.only_mirror_protected_branches
-    branch_regex = mirror.mirror_branch_regex if mirror.mirror_branch_regex is not None else pair.mirror_branch_regex
-    mirror_user_id = mirror.mirror_user_id if mirror.mirror_user_id is not None else pair.mirror_user_id
+    group_defaults = await _get_group_defaults(
+        db,
+        instance_pair_id=pair.id,
+        source_project_path=mirror.source_project_path,
+        target_project_path=mirror.target_project_path,
+    )
+
+    # Effective defaults: mirror overrides -> group overrides -> pair defaults
+    direction = (
+        mirror.mirror_direction
+        or (group_defaults.mirror_direction if group_defaults else None)
+        or pair.mirror_direction
+    )
+    protected_branches = (
+        mirror.mirror_protected_branches
+        if mirror.mirror_protected_branches is not None
+        else (group_defaults.mirror_protected_branches if group_defaults and group_defaults.mirror_protected_branches is not None else pair.mirror_protected_branches)
+    )
+    overwrite_diverged = (
+        mirror.mirror_overwrite_diverged
+        if mirror.mirror_overwrite_diverged is not None
+        else (group_defaults.mirror_overwrite_diverged if group_defaults and group_defaults.mirror_overwrite_diverged is not None else pair.mirror_overwrite_diverged)
+    )
+    trigger_builds = (
+        mirror.mirror_trigger_builds
+        if mirror.mirror_trigger_builds is not None
+        else (group_defaults.mirror_trigger_builds if group_defaults and group_defaults.mirror_trigger_builds is not None else pair.mirror_trigger_builds)
+    )
+    only_protected = (
+        mirror.only_mirror_protected_branches
+        if mirror.only_mirror_protected_branches is not None
+        else (group_defaults.only_mirror_protected_branches if group_defaults and group_defaults.only_mirror_protected_branches is not None else pair.only_mirror_protected_branches)
+    )
+    branch_regex = (
+        mirror.mirror_branch_regex
+        if mirror.mirror_branch_regex is not None
+        else (group_defaults.mirror_branch_regex if group_defaults and group_defaults.mirror_branch_regex is not None else pair.mirror_branch_regex)
+    )
+    mirror_user_id = (
+        mirror.mirror_user_id
+        if mirror.mirror_user_id is not None
+        else (group_defaults.mirror_user_id if group_defaults and group_defaults.mirror_user_id is not None else pair.mirror_user_id)
+    )
+    # If nothing set anywhere, prefer the API token's user for pull mirrors.
+    if mirror_user_id is None and direction == "pull":
+        mirror_user_id = target_instance.api_user_id
 
     # Create the mirror in GitLab
     gitlab_mirror_id = None
@@ -288,7 +375,8 @@ async def create_mirror(
         source_project_path=mirror.source_project_path,
         target_project_id=mirror.target_project_id,
         target_project_path=mirror.target_project_path,
-        mirror_direction=mirror.mirror_direction,
+        # Persist resolved direction to avoid ambiguity if pair/group defaults change later.
+        mirror_direction=direction,
         mirror_protected_branches=mirror.mirror_protected_branches,
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=mirror.mirror_trigger_builds,
@@ -411,7 +499,18 @@ async def update_mirror(
         if not pair:
             raise HTTPException(status_code=404, detail="Instance pair not found")
 
-        direction = mirror.mirror_direction or pair.mirror_direction
+        group_defaults = await _get_group_defaults(
+            db,
+            instance_pair_id=pair.id,
+            source_project_path=mirror.source_project_path,
+            target_project_path=mirror.target_project_path,
+        )
+
+        direction = (
+            mirror.mirror_direction
+            or (group_defaults.mirror_direction if group_defaults else None)
+            or pair.mirror_direction
+        )
 
         # Resolve which GitLab project holds the remote mirror entry.
         instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
@@ -424,12 +523,34 @@ async def update_mirror(
         if not instance:
             raise HTTPException(status_code=404, detail="GitLab instance not found")
 
-        # Effective settings: mirror overrides fall back to pair defaults.
-        overwrite_diverged = mirror.mirror_overwrite_diverged if mirror.mirror_overwrite_diverged is not None else pair.mirror_overwrite_diverged
-        only_protected = mirror.only_mirror_protected_branches if mirror.only_mirror_protected_branches is not None else pair.only_mirror_protected_branches
-        trigger_builds = mirror.mirror_trigger_builds if mirror.mirror_trigger_builds is not None else pair.mirror_trigger_builds
-        branch_regex = mirror.mirror_branch_regex if mirror.mirror_branch_regex is not None else pair.mirror_branch_regex
-        mirror_user_id = mirror.mirror_user_id if mirror.mirror_user_id is not None else pair.mirror_user_id
+        # Effective settings: mirror overrides -> group overrides -> pair defaults.
+        overwrite_diverged = (
+            mirror.mirror_overwrite_diverged
+            if mirror.mirror_overwrite_diverged is not None
+            else (group_defaults.mirror_overwrite_diverged if group_defaults and group_defaults.mirror_overwrite_diverged is not None else pair.mirror_overwrite_diverged)
+        )
+        only_protected = (
+            mirror.only_mirror_protected_branches
+            if mirror.only_mirror_protected_branches is not None
+            else (group_defaults.only_mirror_protected_branches if group_defaults and group_defaults.only_mirror_protected_branches is not None else pair.only_mirror_protected_branches)
+        )
+        trigger_builds = (
+            mirror.mirror_trigger_builds
+            if mirror.mirror_trigger_builds is not None
+            else (group_defaults.mirror_trigger_builds if group_defaults and group_defaults.mirror_trigger_builds is not None else pair.mirror_trigger_builds)
+        )
+        branch_regex = (
+            mirror.mirror_branch_regex
+            if mirror.mirror_branch_regex is not None
+            else (group_defaults.mirror_branch_regex if group_defaults and group_defaults.mirror_branch_regex is not None else pair.mirror_branch_regex)
+        )
+        mirror_user_id = (
+            mirror.mirror_user_id
+            if mirror.mirror_user_id is not None
+            else (group_defaults.mirror_user_id if group_defaults and group_defaults.mirror_user_id is not None else pair.mirror_user_id)
+        )
+        if mirror_user_id is None and direction == "pull":
+            mirror_user_id = instance.api_user_id
 
         try:
             client = GitLabClient(instance.url, instance.encrypted_token)
@@ -498,7 +619,17 @@ async def delete_mirror(
             pair = pair_result.scalar_one_or_none()
 
             if pair:
-                direction = mirror.mirror_direction or pair.mirror_direction
+                group_defaults = await _get_group_defaults(
+                    db,
+                    instance_pair_id=pair.id,
+                    source_project_path=mirror.source_project_path,
+                    target_project_path=mirror.target_project_path,
+                )
+                direction = (
+                    mirror.mirror_direction
+                    or (group_defaults.mirror_direction if group_defaults else None)
+                    or pair.mirror_direction
+                )
                 instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
                 project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
 
@@ -546,7 +677,17 @@ async def trigger_mirror_update(
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
 
-    direction = mirror.mirror_direction or pair.mirror_direction
+    group_defaults = await _get_group_defaults(
+        db,
+        instance_pair_id=pair.id,
+        source_project_path=mirror.source_project_path,
+        target_project_path=mirror.target_project_path,
+    )
+    direction = (
+        mirror.mirror_direction
+        or (group_defaults.mirror_direction if group_defaults else None)
+        or pair.mirror_direction
+    )
     instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
     project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
 

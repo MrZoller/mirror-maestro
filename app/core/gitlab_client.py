@@ -76,6 +76,20 @@ class GitLabClient:
         except Exception as e:
             raise Exception(f"Failed to fetch groups: {str(e)}")
 
+    def get_current_user(self) -> Dict[str, Any]:
+        """Get the user associated with the API token."""
+        try:
+            u = self.gl.http_get("/user")
+            if not isinstance(u, dict):
+                raise Exception("Unexpected /user response")
+            return {
+                "id": u.get("id"),
+                "username": u.get("username"),
+                "name": u.get("name"),
+            }
+        except Exception as e:
+            raise Exception(f"Failed to fetch current user: {str(e)}")
+
     def create_pull_mirror(
         self,
         project_id: int,

@@ -32,6 +32,8 @@ class GitLabInstanceResponse(BaseModel):
     id: int
     name: str
     url: str
+    token_user_id: int | None = None
+    token_username: str | None = None
     description: str | None
     created_at: str
     updated_at: str
@@ -52,6 +54,8 @@ async def list_instances(
             id=inst.id,
             name=inst.name,
             url=inst.url,
+            token_user_id=inst.api_user_id,
+            token_username=inst.api_username,
             description=inst.description,
             created_at=inst.created_at.isoformat(),
             updated_at=inst.updated_at.isoformat()
@@ -67,22 +71,34 @@ async def create_instance(
     _: str = Depends(verify_credentials)
 ):
     """Create a new GitLab instance."""
+    # Encrypt the token
+    encrypted_token = encryption.encrypt(instance.token)
+
     # Test connection first
     try:
-        client = GitLabClient(instance.url, encryption.encrypt(instance.token))
+        client = GitLabClient(instance.url, encrypted_token)
         if not client.test_connection():
             raise HTTPException(status_code=400, detail="Failed to connect to GitLab instance")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to connect to GitLab: {str(e)}")
 
-    # Encrypt the token
-    encrypted_token = encryption.encrypt(instance.token)
+    # Best-effort: resolve token user for a friendly display / defaults
+    token_user_id = None
+    token_username = None
+    try:
+        u = client.get_current_user()
+        token_user_id = u.get("id")
+        token_username = u.get("username")
+    except Exception:
+        pass
 
     # Create the instance
     db_instance = GitLabInstance(
         name=instance.name,
         url=instance.url,
         encrypted_token=encrypted_token,
+        api_user_id=token_user_id,
+        api_username=token_username,
         description=instance.description
     )
     db.add(db_instance)
@@ -93,6 +109,8 @@ async def create_instance(
         id=db_instance.id,
         name=db_instance.name,
         url=db_instance.url,
+        token_user_id=db_instance.api_user_id,
+        token_username=db_instance.api_username,
         description=db_instance.description,
         created_at=db_instance.created_at.isoformat(),
         updated_at=db_instance.updated_at.isoformat()
@@ -118,6 +136,8 @@ async def get_instance(
         id=instance.id,
         name=instance.name,
         url=instance.url,
+        token_user_id=instance.api_user_id,
+        token_username=instance.api_username,
         description=instance.description,
         created_at=instance.created_at.isoformat(),
         updated_at=instance.updated_at.isoformat()
@@ -147,6 +167,15 @@ async def update_instance(
         instance.url = instance_update.url
     if instance_update.token is not None:
         instance.encrypted_token = encryption.encrypt(instance_update.token)
+        # Best-effort: refresh token user identity
+        try:
+            client = GitLabClient(instance.url, instance.encrypted_token)
+            u = client.get_current_user()
+            instance.api_user_id = u.get("id")
+            instance.api_username = u.get("username")
+        except Exception:
+            instance.api_user_id = None
+            instance.api_username = None
     if instance_update.description is not None:
         instance.description = instance_update.description
 
@@ -157,6 +186,8 @@ async def update_instance(
         id=instance.id,
         name=instance.name,
         url=instance.url,
+        token_user_id=instance.api_user_id,
+        token_username=instance.api_username,
         description=instance.description,
         created_at=instance.created_at.isoformat(),
         updated_at=instance.updated_at.isoformat()
