@@ -62,8 +62,8 @@
                     <div class="form-group">
                         <label for="pair-direction">Mirror Direction *</label>
                         <select id="pair-direction" name="mirror_direction" required>
-                            <option value="pull">Pull (Target pulls from Source)</option>
-                            <option value="push" selected>Push (Source pushes to Target)</option>
+                            <option value="pull" selected>Pull (Target pulls from Source)</option>
+                            <option value="push">Push (Source pushes to Target)</option>
                         </select>
                     </div>
 
@@ -84,6 +84,16 @@
                         <div class="checkbox-group">
                             <input type="checkbox" id="pair-only-protected" name="only_mirror_protected_branches">
                             <label for="pair-only-protected">Only mirror protected branches</label>
+                        </div>
+                        <div class="form-row mt-10">
+                            <div class="form-group">
+                                <label for="pair-branch-regex">Mirror branch regex</label>
+                                <input type="text" id="pair-branch-regex" name="mirror_branch_regex" value="^main$|^release/.*$" placeholder="Optional (e.g., ^main$|^release/.*$)">
+                            </div>
+                            <div class="form-group">
+                                <label for="pair-mirror-user-id">Mirror user ID</label>
+                                <input type="number" id="pair-mirror-user-id" name="mirror_user_id" value="42" placeholder="Optional (GitLab user id)">
+                            </div>
                         </div>
                     </div>
 
