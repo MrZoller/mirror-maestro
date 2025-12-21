@@ -78,10 +78,31 @@ class GitLabClient:
         except Exception as e:
             raise Exception(f"Failed to fetch project: {str(e)}")
 
-    def get_groups(self, search: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get list of groups from GitLab."""
+    def get_groups(
+        self,
+        search: Optional[str] = None,
+        *,
+        per_page: int = 50,
+        page: int = 1,
+        get_all: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get groups from GitLab.
+
+        IMPORTANT: By default this does NOT fetch all pages (get_all=False) to
+        avoid loading huge group lists in a single request. Set get_all=True
+        explicitly if you really want the full list.
+        """
         try:
-            groups = self.gl.groups.list(search=search, get_all=True)
+            kwargs: Dict[str, Any] = {
+                "search": search,
+                "get_all": get_all,
+                "per_page": per_page,
+            }
+            if not get_all:
+                kwargs["page"] = page
+
+            groups = self.gl.groups.list(**kwargs)
             return [
                 {
                     "id": g.id,
