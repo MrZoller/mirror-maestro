@@ -90,3 +90,32 @@ class GroupAccessToken(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class GroupMirrorDefaults(Base):
+    """
+    Group-level mirror default overrides for a specific instance pair.
+
+    These settings sit between:
+      per-mirror overrides (Mirror.*) -> group overrides (this table) -> pair defaults (InstancePair.*)
+
+    `group_path` is the GitLab namespace path (e.g. "platform/core") that matches
+    the namespace portion of `path_with_namespace` (project name excluded).
+    """
+    __tablename__ = "group_mirror_defaults"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instance_pair_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    group_path: Mapped[str] = mapped_column(String(500), nullable=False)
+
+    # Optional overrides (None => inherit from pair defaults)
+    mirror_direction: Mapped[Optional[str]] = mapped_column(String(10))  # "pull" or "push"
+    mirror_protected_branches: Mapped[Optional[bool]] = mapped_column(Boolean)
+    mirror_overwrite_diverged: Mapped[Optional[bool]] = mapped_column(Boolean)
+    mirror_trigger_builds: Mapped[Optional[bool]] = mapped_column(Boolean)
+    only_mirror_protected_branches: Mapped[Optional[bool]] = mapped_column(Boolean)
+    mirror_branch_regex: Mapped[Optional[str]] = mapped_column(String(255))
+    mirror_user_id: Mapped[Optional[int]] = mapped_column(Integer)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
