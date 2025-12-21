@@ -54,10 +54,46 @@ function setupEventListeners() {
         await createPair();
     });
 
+    // Pair direction changes should toggle which settings apply
+    document.getElementById('pair-direction')?.addEventListener('change', (e) => {
+        const direction = (e.target.value || '').toString().toLowerCase();
+        const isPush = direction === 'push';
+
+        const trigger = document.getElementById('pair-trigger');
+        if (trigger) {
+            trigger.disabled = isPush;
+            if (isPush) trigger.checked = false;
+        }
+
+        const regex = document.getElementById('pair-branch-regex');
+        if (regex) {
+            regex.disabled = isPush;
+            if (isPush) regex.value = '';
+        }
+
+        const userId = document.getElementById('pair-mirror-user-id');
+        if (userId) {
+            userId.disabled = isPush;
+            if (isPush) userId.value = '';
+        }
+    });
+
     // Mirror form
     document.getElementById('mirror-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         await createMirror();
+    });
+
+    // Mirror direction override (or "use pair default") toggles applicable fields
+    document.getElementById('mirror-direction')?.addEventListener('change', (e) => {
+        const selected = (e.target.value || '').toString().toLowerCase();
+        if (selected) {
+            applyMirrorDirectionUI(selected);
+            return;
+        }
+        // Use pair default if present
+        const pair = state.pairs.find(p => p.id === state.selectedPair);
+        applyMirrorDirectionUI(pair?.mirror_direction);
     });
 
     // Pair selector for mirrors
@@ -225,6 +261,9 @@ async function createPair() {
     const form = document.getElementById('pair-form');
     const formData = new FormData(form);
 
+    const branchRegexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
+    const mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
+
     const data = {
         name: formData.get('name'),
         source_instance_id: parseInt(formData.get('source_instance_id')),
@@ -234,6 +273,8 @@ async function createPair() {
         mirror_overwrite_diverged: formData.get('mirror_overwrite_diverged') === 'on',
         mirror_trigger_builds: formData.get('mirror_trigger_builds') === 'on',
         only_mirror_protected_branches: formData.get('only_mirror_protected_branches') === 'on',
+        mirror_branch_regex: branchRegexRaw || null,
+        mirror_user_id: mirrorUserIdRaw ? parseInt(mirrorUserIdRaw) : null,
         description: formData.get('description') || ''
     };
 
@@ -417,6 +458,9 @@ async function loadProjectsForPair() {
     if (!pair) return;
 
     try {
+        resetMirrorOverrides();
+        applyMirrorDirectionUI(pair.mirror_direction);
+
         // Load source projects
         const sourceProjects = await apiRequest(`/api/instances/${pair.source_instance_id}/projects`);
         const sourceSelect = document.getElementById('mirror-source-project');
@@ -437,11 +481,73 @@ async function loadProjectsForPair() {
     }
 }
 
+function resetMirrorOverrides() {
+    // Tri-state checkboxes (indeterminate => "use pair default" / don't send)
+    const triStateCheckboxIds = [
+        'mirror-overwrite',
+        'mirror-trigger',
+        'mirror-only-protected',
+    ];
+    triStateCheckboxIds.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.checked = false;
+        el.indeterminate = true;
+        el.title = 'Use pair default';
+        el.onchange = () => {
+            // Once the user interacts, treat it as an explicit override.
+            el.indeterminate = false;
+            el.title = '';
+        };
+    });
+
+    const regex = document.getElementById('mirror-branch-regex');
+    if (regex) regex.value = '';
+    const userId = document.getElementById('mirror-mirror-user-id');
+    if (userId) userId.value = '';
+
+    const dir = document.getElementById('mirror-direction');
+    if (dir) dir.value = '';
+
+    const enabled = document.getElementById('mirror-enabled');
+    if (enabled) enabled.checked = true;
+}
+
+function applyMirrorDirectionUI(direction) {
+    const effective = (direction || '').toString().toLowerCase();
+    const isPush = effective === 'push';
+
+    const triggerEl = document.getElementById('mirror-trigger');
+    if (triggerEl) {
+        triggerEl.disabled = isPush;
+        if (isPush) {
+            triggerEl.checked = false;
+            triggerEl.indeterminate = true;
+            triggerEl.title = 'Not applicable for push mirrors';
+        }
+    }
+
+    const regex = document.getElementById('mirror-branch-regex');
+    if (regex) {
+        regex.disabled = isPush;
+        if (isPush) regex.value = '';
+    }
+
+    const userId = document.getElementById('mirror-mirror-user-id');
+    if (userId) {
+        userId.disabled = isPush;
+        if (isPush) userId.value = '';
+    }
+}
+
 async function createMirror() {
     if (!state.selectedPair) {
         showMessage('Please select an instance pair first', 'error');
         return;
     }
+
+    const form = document.getElementById('mirror-form');
+    const formData = new FormData(form);
 
     const sourceSelect = document.getElementById('mirror-source-project');
     const targetSelect = document.getElementById('mirror-target-project');
@@ -455,8 +561,38 @@ async function createMirror() {
         source_project_path: sourceOption.dataset.path,
         target_project_id: parseInt(targetSelect.value),
         target_project_path: targetOption.dataset.path,
-        enabled: true
+        enabled: formData.get('enabled') === 'on'
     };
+
+    const mirrorDirection = (formData.get('mirror_direction') || '').toString().trim();
+    const pair = state.pairs.find(p => p.id === state.selectedPair);
+    const effectiveDirection = (mirrorDirection || pair?.mirror_direction || '').toString().toLowerCase();
+    const isPush = effectiveDirection === 'push';
+    if (mirrorDirection) {
+        data.mirror_direction = mirrorDirection;
+    }
+
+    const overwriteEl = document.getElementById('mirror-overwrite');
+    if (overwriteEl && !overwriteEl.indeterminate) {
+        data.mirror_overwrite_diverged = overwriteEl.checked;
+    }
+    const triggerEl = document.getElementById('mirror-trigger');
+    if (triggerEl && !triggerEl.indeterminate && !isPush) {
+        data.mirror_trigger_builds = triggerEl.checked;
+    }
+    const onlyProtectedEl = document.getElementById('mirror-only-protected');
+    if (onlyProtectedEl && !onlyProtectedEl.indeterminate) {
+        data.only_mirror_protected_branches = onlyProtectedEl.checked;
+    }
+
+    const regexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
+    if (regexRaw && !isPush) {
+        data.mirror_branch_regex = regexRaw;
+    }
+    const mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
+    if (mirrorUserIdRaw && !isPush) {
+        data.mirror_user_id = parseInt(mirrorUserIdRaw);
+    }
 
     try {
         await apiRequest('/api/mirrors', {
