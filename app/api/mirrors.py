@@ -128,6 +128,8 @@ class MirrorCreate(BaseModel):
     mirror_overwrite_diverged: bool | None = None
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
+    mirror_branch_regex: str | None = None
+    mirror_user_id: int | None = None
     enabled: bool = True
 
 
@@ -137,6 +139,8 @@ class MirrorUpdate(BaseModel):
     mirror_overwrite_diverged: bool | None = None
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
+    mirror_branch_regex: str | None = None
+    mirror_user_id: int | None = None
     enabled: bool | None = None
 
 
@@ -152,6 +156,8 @@ class MirrorResponse(BaseModel):
     mirror_overwrite_diverged: bool | None
     mirror_trigger_builds: bool | None
     only_mirror_protected_branches: bool | None
+    mirror_branch_regex: str | None
+    mirror_user_id: int | None
     mirror_id: int | None
     last_successful_update: str | None
     last_update_status: str | None
@@ -189,6 +195,8 @@ async def list_mirrors(
             mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
             mirror_trigger_builds=mirror.mirror_trigger_builds,
             only_mirror_protected_branches=mirror.only_mirror_protected_branches,
+            mirror_branch_regex=mirror.mirror_branch_regex,
+            mirror_user_id=mirror.mirror_user_id,
             mirror_id=mirror.mirror_id,
             last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
             last_update_status=mirror.last_update_status,
@@ -235,6 +243,8 @@ async def create_mirror(
     overwrite_diverged = mirror.mirror_overwrite_diverged if mirror.mirror_overwrite_diverged is not None else pair.mirror_overwrite_diverged
     trigger_builds = mirror.mirror_trigger_builds if mirror.mirror_trigger_builds is not None else pair.mirror_trigger_builds
     only_protected = mirror.only_mirror_protected_branches if mirror.only_mirror_protected_branches is not None else pair.only_mirror_protected_branches
+    branch_regex = mirror.mirror_branch_regex if mirror.mirror_branch_regex is not None else pair.mirror_branch_regex
+    mirror_user_id = mirror.mirror_user_id if mirror.mirror_user_id is not None else pair.mirror_user_id
 
     # Create the mirror in GitLab
     gitlab_mirror_id = None
@@ -249,9 +259,9 @@ async def create_mirror(
                 target_url,
                 enabled=mirror.enabled,
                 keep_divergent_refs=not overwrite_diverged,
-                only_protected_branches=only_protected
+                only_protected_branches=only_protected,
             )
-            gitlab_mirror_id = result.get("project_id")
+            gitlab_mirror_id = result.get("id")
         else:  # pull
             # For pull mirrors, configure on target to pull from source
             client = GitLabClient(target_instance.url, target_instance.encrypted_token)
@@ -261,7 +271,11 @@ async def create_mirror(
                 mirror.target_project_id,
                 source_url,
                 enabled=mirror.enabled,
-                only_protected_branches=only_protected
+                only_protected_branches=only_protected,
+                keep_divergent_refs=not overwrite_diverged,
+                trigger_builds=trigger_builds,
+                mirror_branch_regex=branch_regex,
+                mirror_user_id=mirror_user_id,
             )
             gitlab_mirror_id = result.get("id")
     except Exception as e:
@@ -279,6 +293,8 @@ async def create_mirror(
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,
+        mirror_branch_regex=mirror.mirror_branch_regex,
+        mirror_user_id=mirror.mirror_user_id,
         mirror_id=gitlab_mirror_id,
         enabled=mirror.enabled,
         last_update_status="pending"
@@ -299,6 +315,8 @@ async def create_mirror(
         mirror_overwrite_diverged=db_mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=db_mirror.mirror_trigger_builds,
         only_mirror_protected_branches=db_mirror.only_mirror_protected_branches,
+        mirror_branch_regex=db_mirror.mirror_branch_regex,
+        mirror_user_id=db_mirror.mirror_user_id,
         mirror_id=db_mirror.mirror_id,
         last_successful_update=db_mirror.last_successful_update.isoformat() if db_mirror.last_successful_update else None,
         last_update_status=db_mirror.last_update_status,
@@ -335,6 +353,8 @@ async def get_mirror(
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,
+        mirror_branch_regex=mirror.mirror_branch_regex,
+        mirror_user_id=mirror.mirror_user_id,
         mirror_id=mirror.mirror_id,
         last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
         last_update_status=mirror.last_update_status,
@@ -360,6 +380,10 @@ async def update_mirror(
     if not mirror:
         raise HTTPException(status_code=404, detail="Mirror not found")
 
+    if mirror_update.mirror_direction is not None and mirror.mirror_id:
+        # GitLab doesn't support switching direction in-place; UI expects delete/re-add.
+        raise HTTPException(status_code=400, detail="Mirror direction cannot be changed after creation. Delete and recreate the mirror.")
+
     # Update database fields
     if mirror_update.mirror_direction is not None:
         mirror.mirror_direction = mirror_update.mirror_direction
@@ -371,8 +395,58 @@ async def update_mirror(
         mirror.mirror_trigger_builds = mirror_update.mirror_trigger_builds
     if mirror_update.only_mirror_protected_branches is not None:
         mirror.only_mirror_protected_branches = mirror_update.only_mirror_protected_branches
+    if mirror_update.mirror_branch_regex is not None:
+        mirror.mirror_branch_regex = mirror_update.mirror_branch_regex
+    if mirror_update.mirror_user_id is not None:
+        mirror.mirror_user_id = mirror_update.mirror_user_id
     if mirror_update.enabled is not None:
         mirror.enabled = mirror_update.enabled
+
+    # Best-effort: if this mirror is configured in GitLab, apply settings there too.
+    if mirror.mirror_id:
+        pair_result = await db.execute(
+            select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+        )
+        pair = pair_result.scalar_one_or_none()
+        if not pair:
+            raise HTTPException(status_code=404, detail="Instance pair not found")
+
+        direction = mirror.mirror_direction or pair.mirror_direction
+
+        # Resolve which GitLab project holds the remote mirror entry.
+        instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
+        project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
+
+        instance_result = await db.execute(
+            select(GitLabInstance).where(GitLabInstance.id == instance_id)
+        )
+        instance = instance_result.scalar_one_or_none()
+        if not instance:
+            raise HTTPException(status_code=404, detail="GitLab instance not found")
+
+        # Effective settings: mirror overrides fall back to pair defaults.
+        overwrite_diverged = mirror.mirror_overwrite_diverged if mirror.mirror_overwrite_diverged is not None else pair.mirror_overwrite_diverged
+        only_protected = mirror.only_mirror_protected_branches if mirror.only_mirror_protected_branches is not None else pair.only_mirror_protected_branches
+        trigger_builds = mirror.mirror_trigger_builds if mirror.mirror_trigger_builds is not None else pair.mirror_trigger_builds
+        branch_regex = mirror.mirror_branch_regex if mirror.mirror_branch_regex is not None else pair.mirror_branch_regex
+        mirror_user_id = mirror.mirror_user_id if mirror.mirror_user_id is not None else pair.mirror_user_id
+
+        try:
+            client = GitLabClient(instance.url, instance.encrypted_token)
+            client.update_mirror(
+                project_id=project_id,
+                mirror_id=mirror.mirror_id,
+                enabled=mirror.enabled,
+                only_protected_branches=only_protected,
+                keep_divergent_refs=not overwrite_diverged,
+                trigger_builds=trigger_builds if direction == "pull" else None,
+                mirror_branch_regex=branch_regex if direction == "pull" else None,
+                mirror_user_id=mirror_user_id if direction == "pull" else None,
+                mirror_direction=direction,
+            )
+        except Exception as e:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to update mirror in GitLab: {str(e)}")
 
     await db.commit()
     await db.refresh(mirror)
@@ -389,6 +463,8 @@ async def update_mirror(
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,
+        mirror_branch_regex=mirror.mirror_branch_regex,
+        mirror_user_id=mirror.mirror_user_id,
         mirror_id=mirror.mirror_id,
         last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
         last_update_status=mirror.last_update_status,
