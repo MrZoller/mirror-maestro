@@ -378,7 +378,6 @@ async function loadPairs() {
         const pairs = await apiRequest('/api/pairs');
         state.pairs = pairs;
         renderPairs(pairs);
-        renderPairDefaults(pairs);
         updatePairSelector();
     } catch (error) {
         console.error('Failed to load pairs:', error);
@@ -390,64 +389,62 @@ function renderPairs(pairs) {
     if (!tbody) return;
 
     if (pairs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No instance pairs configured</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No instance pairs configured</td></tr>';
         return;
     }
+
+    const fmtBool = (v) => v ? 'true' : 'false';
+    const fmtStr = (v) => (v === null || v === undefined || String(v).trim() === '')
+        ? '<span class="text-muted">n/a</span>'
+        : `<code>${escapeHtml(String(v))}</code>`;
+    const badge = (dir) => `<span class="badge badge-info">${escapeHtml((dir || '').toString().toLowerCase() || 'n/a')}</span>`;
 
     tbody.innerHTML = pairs.map(pair => {
         const source = state.instances.find(i => i.id === pair.source_instance_id);
         const target = state.instances.find(i => i.id === pair.target_instance_id);
+
+        const direction = (pair.mirror_direction || '').toString().toLowerCase();
+        const ownerInstanceId = direction === 'push' ? pair.source_instance_id : pair.target_instance_id;
+        const ownerInst = state.instances.find(i => i.id === ownerInstanceId);
+
+        const fmtUser = () => {
+            if (direction === 'push') return '<span class="text-muted">n/a</span>';
+            if (pair.mirror_user_id === null || pair.mirror_user_id === undefined) return '<span class="text-muted">auto</span>';
+            if (ownerInst && ownerInst.token_user_id === pair.mirror_user_id && ownerInst.token_username) {
+                return `${escapeHtml(ownerInst.token_username)} <span class="text-muted">(#${escapeHtml(String(pair.mirror_user_id))})</span>`;
+            }
+            return escapeHtml(String(pair.mirror_user_id));
+        };
+
+        const settingsCell = (() => {
+            const pieces = [];
+            pieces.push(`<span class="text-muted">overwrite:</span> ${fmtBool(!!pair.mirror_overwrite_diverged)}`);
+            pieces.push(`<span class="text-muted">only_protected:</span> ${fmtBool(!!pair.only_mirror_protected_branches)}`);
+            if (direction === 'pull') {
+                pieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(!!pair.mirror_trigger_builds)}`);
+                pieces.push(`<span class="text-muted">regex:</span> ${fmtStr(pair.mirror_branch_regex)}`);
+                pieces.push(`<span class="text-muted">user:</span> ${fmtUser()}`);
+            } else {
+                pieces.push(`<span class="text-muted">trigger:</span> <span class="text-muted">n/a</span>`);
+                pieces.push(`<span class="text-muted">regex:</span> <span class="text-muted">n/a</span>`);
+                pieces.push(`<span class="text-muted">user:</span> <span class="text-muted">n/a</span>`);
+            }
+            return `<div style="line-height:1.35">${pieces.join('<br>')}</div>`;
+        })();
 
         return `
             <tr>
                 <td><strong>${escapeHtml(pair.name)}</strong></td>
                 <td>${escapeHtml(source?.name || 'Unknown')}</td>
                 <td>${escapeHtml(target?.name || 'Unknown')}</td>
-                <td><span class="badge badge-info">${pair.mirror_direction}</span></td>
+                <td>${badge(pair.mirror_direction)}</td>
+                <td>${settingsCell}</td>
                 <td>
                     <button class="btn btn-danger btn-small" onclick="deletePair(${pair.id})">Delete</button>
                 </td>
             </tr>
         `;
     }).join('');
-}
-
-function renderPairDefaults(pairs) {
-    const tbody = document.getElementById('pair-defaults-list');
-    if (!tbody) return;
-
-    if (pairs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No instance pairs configured</td></tr>';
-        return;
-    }
-
-    const fmtBool = (v) => v ? 'true' : 'false';
-    const fmtStr = (v) => (v === null || v === undefined || String(v).trim() === '') ? '<span class="text-muted">N/A</span>' : escapeHtml(String(v));
-    const badge = (dir) => `<span class="badge badge-info">${escapeHtml((dir || '').toString().toLowerCase() || 'n/a')}</span>`;
-    const tokenUserForInstance = (instanceId) => state.instances.find(i => i.id === instanceId);
-    const fmtUser = (pair) => {
-        if (pair.mirror_user_id === null || pair.mirror_user_id === undefined) return '<span class="text-muted">auto</span>';
-        const direction = (pair.mirror_direction || '').toString().toLowerCase();
-        const ownerInstanceId = direction === 'push' ? pair.source_instance_id : pair.target_instance_id;
-        const inst = tokenUserForInstance(ownerInstanceId);
-        if (inst && inst.token_user_id === pair.mirror_user_id && inst.token_username) {
-            return `${escapeHtml(inst.token_username)} <span class="text-muted">(#${escapeHtml(String(pair.mirror_user_id))})</span>`;
-        }
-        return escapeHtml(String(pair.mirror_user_id));
-    };
-
-    tbody.innerHTML = pairs.map(pair => `
-        <tr>
-            <td><strong>${escapeHtml(pair.name)}</strong></td>
-            <td>${badge(pair.mirror_direction)}</td>
-            <td>${fmtBool(!!pair.mirror_protected_branches)}</td>
-            <td>${fmtBool(!!pair.mirror_overwrite_diverged)}</td>
-            <td>${fmtBool(!!pair.mirror_trigger_builds)}</td>
-            <td>${fmtBool(!!pair.only_mirror_protected_branches)}</td>
-            <td>${fmtStr(pair.mirror_branch_regex)}</td>
-            <td>${fmtUser(pair)}</td>
-        </tr>
-    `).join('');
 }
 
 function applyPairTokenUserDefaultIfEmpty() {
@@ -533,40 +530,13 @@ async function loadTokens() {
     try {
         const tokens = await apiRequest('/api/tokens');
         state.tokens = tokens;
-        renderTokens(tokens);
+        renderGroupSettings();
         updateTokenInstanceSelector();
         updateGroupDefaultsPairSelector();
         resetGroupDefaultsOverrides();
     } catch (error) {
         console.error('Failed to load tokens:', error);
     }
-}
-
-function renderTokens(tokens) {
-    const tbody = document.getElementById('tokens-list');
-    if (!tbody) return;
-
-    if (tokens.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No group access tokens configured</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = tokens.map(token => {
-        const instance = state.instances.find(i => i.id === token.gitlab_instance_id);
-        const created = new Date(token.created_at).toLocaleDateString();
-
-        return `
-            <tr>
-                <td><strong>${escapeHtml(instance?.name || 'Unknown')}</strong></td>
-                <td>${escapeHtml(token.group_path)}</td>
-                <td>${escapeHtml(token.token_name)}</td>
-                <td>${created}</td>
-                <td>
-                    <button class="btn btn-danger btn-small" onclick="deleteToken(${token.id})">Delete</button>
-                </td>
-            </tr>
-        `;
-    }).join('');
 }
 
 async function createToken() {
@@ -621,7 +591,7 @@ async function loadGroupDefaults() {
     try {
         const rows = await apiRequest('/api/group-defaults');
         state.groupDefaults = rows;
-        renderGroupDefaults(rows);
+        renderGroupSettings();
         updateGroupDefaultsPairSelector();
         resetGroupDefaultsOverrides();
     } catch (error) {
@@ -629,45 +599,130 @@ async function loadGroupDefaults() {
     }
 }
 
-function renderGroupDefaults(rows) {
-    const tbody = document.getElementById('group-defaults-list');
+function renderGroupSettings() {
+    const tbody = document.getElementById('group-settings-list');
     if (!tbody) return;
 
+    const pairs = (state.pairs || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    const tokens = state.tokens || [];
+    const groupDefaults = state.groupDefaults || [];
+
+    const tokenByKey = new Map();
+    tokens.forEach(t => {
+        tokenByKey.set(`${t.gitlab_instance_id}:${t.group_path}`, t);
+    });
+
+    const defaultsByKey = new Map();
+    groupDefaults.forEach(d => {
+        defaultsByKey.set(`${d.instance_pair_id}:${d.group_path}`, d);
+    });
+
+    const rows = [];
+
+    const fmtBool = (v) => (v === null || v === undefined) ? '<span class="text-muted">n/a</span>' : (v ? 'true' : 'false');
+    const fmtStr = (v) => (v === null || v === undefined || String(v).trim() === '')
+        ? '<span class="text-muted">n/a</span>'
+        : `<code>${escapeHtml(String(v))}</code>`;
+
+    pairs.forEach(pair => {
+        const srcInst = state.instances.find(i => i.id === pair.source_instance_id);
+        const tgtInst = state.instances.find(i => i.id === pair.target_instance_id);
+        const srcName = srcInst?.name || 'Source';
+        const tgtName = tgtInst?.name || 'Target';
+
+        const paths = new Set();
+        groupDefaults.forEach(d => {
+            if (d.instance_pair_id === pair.id) paths.add(d.group_path);
+        });
+        tokens.forEach(t => {
+            if (t.gitlab_instance_id === pair.source_instance_id || t.gitlab_instance_id === pair.target_instance_id) {
+                paths.add(t.group_path);
+            }
+        });
+
+        Array.from(paths).sort().forEach(groupPath => {
+            const gd = defaultsByKey.get(`${pair.id}:${groupPath}`);
+
+            const direction = ((gd?.mirror_direction || pair.mirror_direction || '') + '').toLowerCase();
+            const overwrite = (gd && gd.mirror_overwrite_diverged !== null && gd.mirror_overwrite_diverged !== undefined)
+                ? gd.mirror_overwrite_diverged
+                : pair.mirror_overwrite_diverged;
+            const onlyProtected = (gd && gd.only_mirror_protected_branches !== null && gd.only_mirror_protected_branches !== undefined)
+                ? gd.only_mirror_protected_branches
+                : pair.only_mirror_protected_branches;
+
+            let trigger = (gd && gd.mirror_trigger_builds !== null && gd.mirror_trigger_builds !== undefined)
+                ? gd.mirror_trigger_builds
+                : pair.mirror_trigger_builds;
+            let regex = (gd && gd.mirror_branch_regex !== null && gd.mirror_branch_regex !== undefined)
+                ? gd.mirror_branch_regex
+                : pair.mirror_branch_regex;
+            let userId = (gd && gd.mirror_user_id !== null && gd.mirror_user_id !== undefined)
+                ? gd.mirror_user_id
+                : pair.mirror_user_id;
+
+            if (direction === 'push') {
+                trigger = null;
+                regex = null;
+                userId = null;
+            }
+
+            const settingsCell = (() => {
+                const pieces = [];
+                if (direction) pieces.push(`<span class="badge badge-info">${escapeHtml(direction)}</span>`);
+                pieces.push(`<span class="text-muted">overwrite:</span> ${fmtBool(overwrite)}`);
+                pieces.push(`<span class="text-muted">only_protected:</span> ${fmtBool(onlyProtected)}`);
+                if (direction === 'pull') {
+                    pieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(trigger)}`);
+                    pieces.push(`<span class="text-muted">regex:</span> ${fmtStr(regex)}`);
+                    pieces.push(`<span class="text-muted">user:</span> ${userId === null || userId === undefined ? '<span class="text-muted">auto</span>' : escapeHtml(String(userId))}`);
+                } else if (direction === 'push') {
+                    pieces.push(`<span class="text-muted">trigger:</span> <span class="text-muted">n/a</span>`);
+                    pieces.push(`<span class="text-muted">regex:</span> <span class="text-muted">n/a</span>`);
+                    pieces.push(`<span class="text-muted">user:</span> <span class="text-muted">n/a</span>`);
+                } else {
+                    pieces.push(`<span class="text-muted">trigger:</span> <span class="text-muted">n/a</span>`);
+                    pieces.push(`<span class="text-muted">regex:</span> <span class="text-muted">n/a</span>`);
+                    pieces.push(`<span class="text-muted">user:</span> <span class="text-muted">n/a</span>`);
+                }
+                return `<div style="line-height:1.35">${pieces.join('<br>')}</div>`;
+            })();
+
+            const srcTok = tokenByKey.get(`${pair.source_instance_id}:${groupPath}`);
+            const tgtTok = tokenByKey.get(`${pair.target_instance_id}:${groupPath}`);
+            const tokenCell = `
+                <div style="line-height:1.35">
+                    <span class="text-muted">${escapeHtml(srcName)}:</span> ${srcTok ? escapeHtml(srcTok.token_name) : '<span class="text-muted">missing</span>'}<br>
+                    <span class="text-muted">${escapeHtml(tgtName)}:</span> ${tgtTok ? escapeHtml(tgtTok.token_name) : '<span class="text-muted">missing</span>'}
+                </div>
+            `;
+
+            const actions = [];
+            if (gd) actions.push(`<button class="btn btn-danger btn-small" onclick="deleteGroupDefaults(${gd.id})">Delete defaults</button>`);
+            if (srcTok) actions.push(`<button class="btn btn-danger btn-small" onclick="deleteToken(${srcTok.id})" title="Delete token on ${escapeHtml(srcName)}">Delete token</button>`);
+            if (tgtTok) actions.push(`<button class="btn btn-danger btn-small" onclick="deleteToken(${tgtTok.id})" title="Delete token on ${escapeHtml(tgtName)}">Delete token</button>`);
+            const actionsCell = actions.length
+                ? `<div class="flex" style="gap:6px; flex-wrap:wrap">${actions.join('')}</div>`
+                : '<span class="text-muted">N/A</span>';
+
+            rows.push(`
+                <tr>
+                    <td><strong>${escapeHtml(pair.name)}</strong></td>
+                    <td>${escapeHtml(groupPath)}</td>
+                    <td>${settingsCell}</td>
+                    <td>${tokenCell}</td>
+                    <td>${actionsCell}</td>
+                </tr>
+            `);
+        });
+    });
+
     if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No group defaults configured</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No group settings configured</td></tr>';
         return;
     }
 
-    tbody.innerHTML = rows.map(r => {
-        const pair = state.pairs.find(p => p.id === r.instance_pair_id);
-        const b = (v) => (v === null || v === undefined) ? '<span class="text-muted">inherit</span>' : (v ? 'true' : 'false');
-        const s = (v) => (v === null || v === undefined || v === '') ? '<span class="text-muted">inherit</span>' : escapeHtml(String(v));
-        const dir = (r.mirror_direction || pair?.mirror_direction || '').toString().toLowerCase();
-        const ownerInstanceId = dir === 'push' ? pair?.source_instance_id : pair?.target_instance_id;
-        const inst = state.instances.find(i => i.id === ownerInstanceId);
-        const userCell = (() => {
-            if (r.mirror_user_id === null || r.mirror_user_id === undefined) return '<span class="text-muted">inherit</span>';
-            if (inst && inst.token_user_id === r.mirror_user_id && inst.token_username) {
-                return `${escapeHtml(inst.token_username)} <span class="text-muted">(#${escapeHtml(String(r.mirror_user_id))})</span>`;
-            }
-            return escapeHtml(String(r.mirror_user_id));
-        })();
-        return `
-            <tr>
-                <td><strong>${escapeHtml(pair?.name || 'Unknown')}</strong></td>
-                <td>${escapeHtml(r.group_path)}</td>
-                <td>${s(r.mirror_direction)}</td>
-                <td>${b(r.mirror_overwrite_diverged)}</td>
-                <td>${b(r.mirror_trigger_builds)}</td>
-                <td>${b(r.only_mirror_protected_branches)}</td>
-                <td>${s(r.mirror_branch_regex)}</td>
-                <td>${userCell}</td>
-                <td>
-                    <button class="btn btn-danger btn-small" onclick="deleteGroupDefaults(${r.id})">Delete</button>
-                </td>
-            </tr>
-        `;
-    }).join('');
+    tbody.innerHTML = rows.join('');
 }
 
 function updateGroupDefaultsPairSelector() {
@@ -787,7 +842,7 @@ async function deleteGroupDefaults(id) {
 async function loadMirrors() {
     if (!state.selectedPair) {
         document.getElementById('mirrors-list').innerHTML =
-            '<tr><td colspan="6" class="text-center text-muted">Select an instance pair to view mirrors</td></tr>';
+            '<tr><td colspan="7" class="text-center text-muted">Select an instance pair to view mirrors</td></tr>';
         return;
     }
 
@@ -805,9 +860,15 @@ function renderMirrors(mirrors) {
     if (!tbody) return;
 
     if (mirrors.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No mirrors configured for this pair</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No mirrors configured for this pair</td></tr>';
         return;
     }
+
+    const fmtBool = (v) => (v === null || v === undefined) ? '<span class="text-muted">n/a</span>' : (v ? 'true' : 'false');
+    const fmtStr = (v) => (v === null || v === undefined || String(v).trim() === '')
+        ? '<span class="text-muted">n/a</span>'
+        : `<code>${escapeHtml(String(v))}</code>`;
+    const fmtUser = (v) => (v === null || v === undefined) ? '<span class="text-muted">n/a</span>' : escapeHtml(String(v));
 
     tbody.innerHTML = mirrors.map(mirror => {
         const statusBadge = mirror.enabled ?
@@ -818,10 +879,29 @@ function renderMirrors(mirrors) {
             `<span class="badge badge-info">${mirror.last_update_status}</span>` :
             '<span class="text-muted">N/A</span>';
 
+        const dir = (mirror.effective_mirror_direction || mirror.mirror_direction || '').toString().toLowerCase();
+        const settingsCell = (() => {
+            const pieces = [];
+            if (dir) pieces.push(`<span class="badge badge-info">${escapeHtml(dir)}</span>`);
+            pieces.push(`<span class="text-muted">overwrite:</span> ${fmtBool(mirror.effective_mirror_overwrite_diverged)}`);
+            pieces.push(`<span class="text-muted">only_protected:</span> ${fmtBool(mirror.effective_only_mirror_protected_branches)}`);
+            if (dir === 'pull') {
+                pieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(mirror.effective_mirror_trigger_builds)}`);
+                pieces.push(`<span class="text-muted">regex:</span> ${fmtStr(mirror.effective_mirror_branch_regex)}`);
+                pieces.push(`<span class="text-muted">user:</span> ${fmtUser(mirror.effective_mirror_user_id)}`);
+            } else if (dir === 'push') {
+                pieces.push(`<span class="text-muted">trigger:</span> <span class="text-muted">n/a</span>`);
+                pieces.push(`<span class="text-muted">regex:</span> <span class="text-muted">n/a</span>`);
+                pieces.push(`<span class="text-muted">user:</span> <span class="text-muted">n/a</span>`);
+            }
+            return `<div style="line-height:1.35">${pieces.join('<br>')}</div>`;
+        })();
+
         return `
             <tr>
                 <td>${escapeHtml(mirror.source_project_path)}</td>
                 <td>${escapeHtml(mirror.target_project_path)}</td>
+                <td>${settingsCell}</td>
                 <td>${statusBadge}</td>
                 <td>${updateStatus}</td>
                 <td>${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}</td>

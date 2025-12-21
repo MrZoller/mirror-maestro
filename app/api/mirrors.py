@@ -207,6 +207,13 @@ class MirrorResponse(BaseModel):
     only_mirror_protected_branches: bool | None
     mirror_branch_regex: str | None
     mirror_user_id: int | None
+    # Effective settings (mirror overrides -> group defaults -> pair defaults)
+    effective_mirror_direction: str | None = None
+    effective_mirror_overwrite_diverged: bool | None = None
+    effective_mirror_trigger_builds: bool | None = None
+    effective_only_mirror_protected_branches: bool | None = None
+    effective_mirror_branch_regex: str | None = None
+    effective_mirror_user_id: int | None = None
     mirror_id: int | None
     last_successful_update: str | None
     last_update_status: str | None
@@ -215,6 +222,106 @@ class MirrorResponse(BaseModel):
     updated_at: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+async def _resolve_effective_settings(
+    db: AsyncSession,
+    *,
+    mirror: Mirror,
+    pair: InstancePair,
+    source_instance: GitLabInstance | None = None,
+    target_instance: GitLabInstance | None = None,
+) -> dict[str, object]:
+    """
+    Compute the effective mirror settings as the tool will apply them:
+    mirror overrides -> group defaults -> pair defaults (+ pull mirror user fallback).
+
+    Note: some settings are pull-only in GitLab and are intentionally treated as
+    not applicable for push mirrors.
+    """
+    group_defaults = await _get_group_defaults(
+        db,
+        instance_pair_id=pair.id,
+        source_project_path=mirror.source_project_path,
+        target_project_path=mirror.target_project_path,
+    )
+
+    direction = (
+        mirror.mirror_direction
+        or (group_defaults.mirror_direction if group_defaults else None)
+        or pair.mirror_direction
+    )
+    direction = (direction or "").lower()
+
+    overwrite_diverged = (
+        mirror.mirror_overwrite_diverged
+        if mirror.mirror_overwrite_diverged is not None
+        else (
+            group_defaults.mirror_overwrite_diverged
+            if group_defaults and group_defaults.mirror_overwrite_diverged is not None
+            else pair.mirror_overwrite_diverged
+        )
+    )
+    only_protected = (
+        mirror.only_mirror_protected_branches
+        if mirror.only_mirror_protected_branches is not None
+        else (
+            group_defaults.only_mirror_protected_branches
+            if group_defaults and group_defaults.only_mirror_protected_branches is not None
+            else pair.only_mirror_protected_branches
+        )
+    )
+    trigger_builds = (
+        mirror.mirror_trigger_builds
+        if mirror.mirror_trigger_builds is not None
+        else (
+            group_defaults.mirror_trigger_builds
+            if group_defaults and group_defaults.mirror_trigger_builds is not None
+            else pair.mirror_trigger_builds
+        )
+    )
+    branch_regex = (
+        mirror.mirror_branch_regex
+        if mirror.mirror_branch_regex is not None
+        else (
+            group_defaults.mirror_branch_regex
+            if group_defaults and group_defaults.mirror_branch_regex is not None
+            else pair.mirror_branch_regex
+        )
+    )
+    mirror_user_id = (
+        mirror.mirror_user_id
+        if mirror.mirror_user_id is not None
+        else (
+            group_defaults.mirror_user_id
+            if group_defaults and group_defaults.mirror_user_id is not None
+            else pair.mirror_user_id
+        )
+    )
+
+    # Pull-only settings: if direction is push, treat as not applicable.
+    if direction == "push":
+        trigger_builds = None
+        branch_regex = None
+        mirror_user_id = None
+
+    # If nothing set anywhere, prefer the API token's user for pull mirrors.
+    if direction == "pull" and mirror_user_id is None:
+        owner = target_instance
+        if owner is None:
+            # Best-effort: fetch only if needed (avoid extra queries otherwise)
+            res = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id))
+            owner = res.scalar_one_or_none()
+        mirror_user_id = owner.api_user_id if owner else None
+
+    return {
+        "effective_mirror_direction": direction or None,
+        "effective_mirror_overwrite_diverged": overwrite_diverged,
+        "effective_only_mirror_protected_branches": only_protected,
+        "effective_mirror_trigger_builds": trigger_builds,
+        "effective_mirror_branch_regex": branch_regex,
+        "effective_mirror_user_id": mirror_user_id,
+    }
 
 
 @router.get("", response_model=List[MirrorResponse])
@@ -231,30 +338,63 @@ async def list_mirrors(
     result = await db.execute(query)
     mirrors = result.scalars().all()
 
-    return [
-        MirrorResponse(
-            id=mirror.id,
-            instance_pair_id=mirror.instance_pair_id,
-            source_project_id=mirror.source_project_id,
-            source_project_path=mirror.source_project_path,
-            target_project_id=mirror.target_project_id,
-            target_project_path=mirror.target_project_path,
-            mirror_direction=mirror.mirror_direction,
-            mirror_protected_branches=mirror.mirror_protected_branches,
-            mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
-            mirror_trigger_builds=mirror.mirror_trigger_builds,
-            only_mirror_protected_branches=mirror.only_mirror_protected_branches,
-            mirror_branch_regex=mirror.mirror_branch_regex,
-            mirror_user_id=mirror.mirror_user_id,
-            mirror_id=mirror.mirror_id,
-            last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
-            last_update_status=mirror.last_update_status,
-            enabled=mirror.enabled,
-            created_at=mirror.created_at.isoformat(),
-            updated_at=mirror.updated_at.isoformat()
+    # Best-effort caches to avoid N+1 on common paths (e.g., filtered by pair)
+    pair_cache: dict[int, InstancePair] = {}
+    instance_cache: dict[int, GitLabInstance] = {}
+
+    async def _get_pair(pid: int) -> InstancePair | None:
+        if pid in pair_cache:
+            return pair_cache[pid]
+        r = await db.execute(select(InstancePair).where(InstancePair.id == pid))
+        p = r.scalar_one_or_none()
+        if p:
+            pair_cache[pid] = p
+        return p
+
+    async def _get_instance(iid: int) -> GitLabInstance | None:
+        if iid in instance_cache:
+            return instance_cache[iid]
+        r = await db.execute(select(GitLabInstance).where(GitLabInstance.id == iid))
+        inst = r.scalar_one_or_none()
+        if inst:
+            instance_cache[iid] = inst
+        return inst
+
+    out: list[MirrorResponse] = []
+    for mirror in mirrors:
+        pair = await _get_pair(mirror.instance_pair_id)
+        eff: dict[str, object] = {}
+        if pair:
+            src = await _get_instance(pair.source_instance_id)
+            tgt = await _get_instance(pair.target_instance_id)
+            eff = await _resolve_effective_settings(db, mirror=mirror, pair=pair, source_instance=src, target_instance=tgt)
+
+        out.append(
+            MirrorResponse(
+                id=mirror.id,
+                instance_pair_id=mirror.instance_pair_id,
+                source_project_id=mirror.source_project_id,
+                source_project_path=mirror.source_project_path,
+                target_project_id=mirror.target_project_id,
+                target_project_path=mirror.target_project_path,
+                mirror_direction=mirror.mirror_direction,
+                mirror_protected_branches=mirror.mirror_protected_branches,
+                mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
+                mirror_trigger_builds=mirror.mirror_trigger_builds,
+                only_mirror_protected_branches=mirror.only_mirror_protected_branches,
+                mirror_branch_regex=mirror.mirror_branch_regex,
+                mirror_user_id=mirror.mirror_user_id,
+                mirror_id=mirror.mirror_id,
+                last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
+                last_update_status=mirror.last_update_status,
+                enabled=mirror.enabled,
+                created_at=mirror.created_at.isoformat(),
+                updated_at=mirror.updated_at.isoformat(),
+                **eff,
+            )
         )
-        for mirror in mirrors
-    ]
+
+    return out
 
 
 @router.post("", response_model=MirrorResponse)
@@ -405,6 +545,12 @@ async def create_mirror(
         only_mirror_protected_branches=db_mirror.only_mirror_protected_branches,
         mirror_branch_regex=db_mirror.mirror_branch_regex,
         mirror_user_id=db_mirror.mirror_user_id,
+        effective_mirror_direction=direction,
+        effective_mirror_overwrite_diverged=overwrite_diverged,
+        effective_mirror_trigger_builds=trigger_builds if direction == "pull" else None,
+        effective_only_mirror_protected_branches=only_protected,
+        effective_mirror_branch_regex=branch_regex if direction == "pull" else None,
+        effective_mirror_user_id=mirror_user_id if direction == "pull" else None,
         mirror_id=db_mirror.mirror_id,
         last_successful_update=db_mirror.last_successful_update.isoformat() if db_mirror.last_successful_update else None,
         last_update_status=db_mirror.last_update_status,
@@ -429,6 +575,20 @@ async def get_mirror(
     if not mirror:
         raise HTTPException(status_code=404, detail="Mirror not found")
 
+    pair_result = await db.execute(select(InstancePair).where(InstancePair.id == mirror.instance_pair_id))
+    pair = pair_result.scalar_one_or_none()
+    eff: dict[str, object] = {}
+    if pair:
+        src_result = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id))
+        tgt_result = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id))
+        eff = await _resolve_effective_settings(
+            db,
+            mirror=mirror,
+            pair=pair,
+            source_instance=src_result.scalar_one_or_none(),
+            target_instance=tgt_result.scalar_one_or_none(),
+        )
+
     return MirrorResponse(
         id=mirror.id,
         instance_pair_id=mirror.instance_pair_id,
@@ -448,7 +608,8 @@ async def get_mirror(
         last_update_status=mirror.last_update_status,
         enabled=mirror.enabled,
         created_at=mirror.created_at.isoformat(),
-        updated_at=mirror.updated_at.isoformat()
+        updated_at=mirror.updated_at.isoformat(),
+        **eff,
     )
 
 
@@ -572,6 +733,20 @@ async def update_mirror(
     await db.commit()
     await db.refresh(mirror)
 
+    pair_result = await db.execute(select(InstancePair).where(InstancePair.id == mirror.instance_pair_id))
+    pair = pair_result.scalar_one_or_none()
+    eff: dict[str, object] = {}
+    if pair:
+        src_result = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id))
+        tgt_result = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id))
+        eff = await _resolve_effective_settings(
+            db,
+            mirror=mirror,
+            pair=pair,
+            source_instance=src_result.scalar_one_or_none(),
+            target_instance=tgt_result.scalar_one_or_none(),
+        )
+
     return MirrorResponse(
         id=mirror.id,
         instance_pair_id=mirror.instance_pair_id,
@@ -591,7 +766,8 @@ async def update_mirror(
         last_update_status=mirror.last_update_status,
         enabled=mirror.enabled,
         created_at=mirror.created_at.isoformat(),
-        updated_at=mirror.updated_at.isoformat()
+        updated_at=mirror.updated_at.isoformat(),
+        **eff,
     )
 
 

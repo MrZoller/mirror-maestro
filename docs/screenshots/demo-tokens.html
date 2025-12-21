@@ -76,68 +76,6 @@
             </div>
 
             <div class="card">
-                <h3>Configured Tokens</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>GitLab Instance</th>
-                            <th>Group Path</th>
-                            <th>Token Name</th>
-                            <th>Created</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tokens-list">
-                        <tr>
-                            <td><strong>Production GitLab</strong></td>
-                            <td>platform</td>
-                            <td>platform-mirror-token</td>
-                            <td>2 days ago</td>
-                            <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td><strong>Production GitLab</strong></td>
-                            <td>frontend</td>
-                            <td>frontend-mirror-token</td>
-                            <td>2 days ago</td>
-                            <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td><strong>Production GitLab</strong></td>
-                            <td>infrastructure</td>
-                            <td>infra-mirror-token</td>
-                            <td>1 day ago</td>
-                            <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td><strong>Backup GitLab</strong></td>
-                            <td>platform</td>
-                            <td>backup-platform-token</td>
-                            <td>2 days ago</td>
-                            <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td><strong>Partner GitLab</strong></td>
-                            <td>shared</td>
-                            <td>partner-shared-token</td>
-                            <td>3 hours ago</td>
-                            <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="card">
                 <h3>Group Mirror Default Overrides</h3>
                 <p class="text-muted">Override an instance pair's default mirror settings for a specific GitLab group path.</p>
 
@@ -202,18 +140,15 @@
             </div>
 
             <div class="card">
-                <h3>Configured Group Defaults</h3>
+                <h3>Configured Group Settings</h3>
+                <p class="text-muted">Group defaults (resolved with pair defaults) plus token coverage per instance pair.</p>
                 <table>
                     <thead>
                         <tr>
                             <th>Instance Pair</th>
                             <th>Group Path</th>
-                            <th>Direction</th>
-                            <th>Overwrite</th>
-                            <th>Trigger</th>
-                            <th>Only Protected</th>
-                            <th>Regex</th>
-                            <th>User</th>
+                            <th>Default Settings</th>
+                            <th>Tokens</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -221,24 +156,54 @@
                         <tr>
                             <td><strong>Prod → Backup</strong></td>
                             <td>platform/core</td>
-                            <td><span class="badge badge-info">pull</span></td>
-                            <td>true</td>
-                            <td><span class="text-muted">inherit</span></td>
-                            <td>true</td>
-                            <td>^main$</td>
-                            <td>mirror-bot <span class="text-muted">(#42)</span></td>
-                            <td><button class="btn btn-danger btn-small">Delete</button></td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> true<br>
+                                    <span class="text-muted">only_protected:</span> true<br>
+                                    <span class="text-muted">trigger:</span> true<br>
+                                    <span class="text-muted">regex:</span> <code>^main$</code><br>
+                                    <span class="text-muted">user:</span> <span class="text-muted">auto</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="text-muted">Production GitLab:</span> platform-mirror-token<br>
+                                    <span class="text-muted">Backup GitLab:</span> backup-platform-token
+                                </div>
+                            </td>
+                            <td>
+                                <div class="flex" style="gap:6px; flex-wrap:wrap">
+                                    <button class="btn btn-danger btn-small">Delete defaults</button>
+                                    <button class="btn btn-danger btn-small">Delete token</button>
+                                </div>
+                            </td>
                         </tr>
                         <tr>
                             <td><strong>Prod → Partner</strong></td>
                             <td>shared</td>
-                            <td><span class="text-muted">inherit</span></td>
-                            <td><span class="text-muted">inherit</span></td>
-                            <td><span class="text-muted">inherit</span></td>
-                            <td>true</td>
-                            <td><span class="text-muted">inherit</span></td>
-                            <td><span class="text-muted">inherit</span></td>
-                            <td><button class="btn btn-danger btn-small">Delete</button></td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> false<br>
+                                    <span class="text-muted">only_protected:</span> true<br>
+                                    <span class="text-muted">trigger:</span> false<br>
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
+                                    <span class="text-muted">user:</span> <span class="text-muted">auto</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div style="line-height:1.35">
+                                    <span class="text-muted">Production GitLab:</span> <span class="text-muted">missing</span><br>
+                                    <span class="text-muted">Partner GitLab:</span> partner-shared-token
+                                </div>
+                            </td>
+                            <td>
+                                <div class="flex" style="gap:6px; flex-wrap:wrap">
+                                    <button class="btn btn-danger btn-small">Delete defaults</button>
+                                    <button class="btn btn-danger btn-small">Delete token</button>
+                                </div>
+                            </td>
                         </tr>
                     </tbody>
                 </table>
