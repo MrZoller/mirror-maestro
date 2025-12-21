@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitLab Mirror Wizard - Instance Pairs</title>
+    <link rel="stylesheet" href="../../app/static/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>GitLab Mirror Wizard</h1>
+            <p>Manage GitLab mirrors across multiple instance pairs</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab" data-tab="dashboard-tab">Dashboard</button>
+            <button class="tab" data-tab="instances-tab">GitLab Instances</button>
+            <button class="tab active" data-tab="pairs-tab">Instance Pairs</button>
+            <button class="tab" data-tab="tokens-tab">Group Tokens</button>
+            <button class="tab" data-tab="mirrors-tab">Mirrors</button>
+        </div>
+
+        <!-- Instance Pairs Tab -->
+        <div id="pairs-tab" class="tab-content active">
+            <div class="card">
+                <h2>Instance Pairs</h2>
+                <p class="text-muted">Define pairs of GitLab instances for mirroring with default settings.</p>
+
+                <form id="pair-form" class="mt-20">
+                    <div class="form-group">
+                        <label for="pair-name">Pair Name *</label>
+                        <input type="text" id="pair-name" name="name" required placeholder="e.g., Prod to Backup">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pair-source-instance">Source Instance *</label>
+                            <select id="pair-source-instance" name="source_instance_id" required>
+                                <option value="">Select instance...</option>
+                                <option value="1">Production GitLab</option>
+                                <option value="2">Backup GitLab</option>
+                                <option value="3">Development GitLab</option>
+                                <option value="4">Partner GitLab</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="pair-target-instance">Target Instance *</label>
+                            <select id="pair-target-instance" name="target_instance_id" required>
+                                <option value="">Select instance...</option>
+                                <option value="1">Production GitLab</option>
+                                <option value="2">Backup GitLab</option>
+                                <option value="3">Development GitLab</option>
+                                <option value="4">Partner GitLab</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="pair-direction">Mirror Direction *</label>
+                        <select id="pair-direction" name="mirror_direction" required>
+                            <option value="pull">Pull (Target pulls from Source)</option>
+                            <option value="push" selected>Push (Source pushes to Target)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Default Mirror Settings</label>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="pair-protected" name="mirror_protected_branches" checked>
+                            <label for="pair-protected">Mirror protected branches</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="pair-overwrite" name="mirror_overwrite_diverged">
+                            <label for="pair-overwrite">Overwrite divergent branches</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="pair-trigger" name="mirror_trigger_builds">
+                            <label for="pair-trigger">Trigger builds on mirror update</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="pair-only-protected" name="only_mirror_protected_branches">
+                            <label for="pair-only-protected">Only mirror protected branches</label>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="pair-description">Description</label>
+                        <textarea id="pair-description" name="description" placeholder="Optional description"></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Create Pair</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>Configured Pairs</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Source</th>
+                            <th>Target</th>
+                            <th>Direction</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pairs-list">
+                        <tr>
+                            <td><strong>Prod → Backup</strong></td>
+                            <td>Production GitLab</td>
+                            <td>Backup GitLab</td>
+                            <td><span class="badge badge-info">push</span></td>
+                            <td>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Prod → Partner</strong></td>
+                            <td>Production GitLab</td>
+                            <td>Partner GitLab</td>
+                            <td><span class="badge badge-info">pull</span></td>
+                            <td>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Dev → Prod</strong></td>
+                            <td>Development GitLab</td>
+                            <td>Production GitLab</td>
+                            <td><span class="badge badge-info">push</span></td>
+                            <td>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

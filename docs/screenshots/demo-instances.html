@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitLab Mirror Wizard - Instances</title>
+    <link rel="stylesheet" href="../../app/static/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>GitLab Mirror Wizard</h1>
+            <p>Manage GitLab mirrors across multiple instance pairs</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab" data-tab="dashboard-tab">Dashboard</button>
+            <button class="tab active" data-tab="instances-tab">GitLab Instances</button>
+            <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
+            <button class="tab" data-tab="tokens-tab">Group Tokens</button>
+            <button class="tab" data-tab="mirrors-tab">Mirrors</button>
+        </div>
+
+        <!-- GitLab Instances Tab -->
+        <div id="instances-tab" class="tab-content active">
+            <div class="card">
+                <h2>GitLab Instances</h2>
+                <p class="text-muted">Configure GitLab instances that will be used for mirroring.</p>
+
+                <form id="instance-form" class="mt-20">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="instance-name">Name *</label>
+                            <input type="text" id="instance-name" name="name" required placeholder="e.g., Production GitLab">
+                        </div>
+                        <div class="form-group">
+                            <label for="instance-url">URL *</label>
+                            <input type="url" id="instance-url" name="url" required placeholder="https://gitlab.example.com">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="instance-token">Access Token *</label>
+                        <input type="password" id="instance-token" name="token" required placeholder="Personal or group access token">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="instance-description">Description</label>
+                        <textarea id="instance-description" name="description" placeholder="Optional description"></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Add Instance</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>Configured Instances</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>URL</th>
+                            <th>Description</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="instances-list">
+                        <tr>
+                            <td><strong>Production GitLab</strong></td>
+                            <td>https://gitlab.company.com</td>
+                            <td><span class="text-muted">Main production GitLab instance</span></td>
+                            <td>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Backup GitLab</strong></td>
+                            <td>https://backup.gitlab.company.com</td>
+                            <td><span class="text-muted">Backup GitLab instance for disaster recovery</span></td>
+                            <td>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Development GitLab</strong></td>
+                            <td>https://gitlab-dev.company.com</td>
+                            <td><span class="text-muted">Development and testing environment</span></td>
+                            <td>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Partner GitLab</strong></td>
+                            <td>https://gitlab.partner.com</td>
+                            <td><span class="text-muted">Partner organization GitLab instance</span></td>
+                            <td>
+                                <button class="btn btn-danger btn-small">Delete</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

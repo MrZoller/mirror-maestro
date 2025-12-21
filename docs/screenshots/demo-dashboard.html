@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitLab Mirror Wizard - Dashboard</title>
+    <link rel="stylesheet" href="../../app/static/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>GitLab Mirror Wizard</h1>
+            <p>Manage GitLab mirrors across multiple instance pairs</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab active" data-tab="dashboard-tab">Dashboard</button>
+            <button class="tab" data-tab="instances-tab">GitLab Instances</button>
+            <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
+            <button class="tab" data-tab="tokens-tab">Group Tokens</button>
+            <button class="tab" data-tab="mirrors-tab">Mirrors</button>
+        </div>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard-tab" class="tab-content active">
+            <div class="card">
+                <h2>Welcome to GitLab Mirror Wizard</h2>
+                <p>This tool helps you manage GitLab mirrors across multiple instance pairs. Here's how to get started:</p>
+
+                <div class="grid-2 mt-20">
+                    <div>
+                        <h3>1. Add GitLab Instances</h3>
+                        <p class="text-muted">Configure your source and target GitLab instances with their API tokens.</p>
+                    </div>
+                    <div>
+                        <h3>2. Create Instance Pairs</h3>
+                        <p class="text-muted">Define pairs of GitLab instances where mirrors will be created.</p>
+                    </div>
+                    <div>
+                        <h3>3. Configure Mirrors</h3>
+                        <p class="text-muted">Create and manage mirrors between projects in your instance pairs.</p>
+                    </div>
+                    <div>
+                        <h3>4. Monitor & Maintain</h3>
+                        <p class="text-muted">View mirror status, trigger updates, and import/export configurations.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <h3>Features</h3>
+                    <ul style="margin-left: 20px; margin-top: 10px;">
+                        <li>Easy mirror creation with minimal configuration</li>
+                        <li>Support for multiple GitLab instance pairs</li>
+                        <li>Push and pull mirror support</li>
+                        <li>Bulk import/export of mirror configurations</li>
+                        <li>Real-time status monitoring</li>
+                        <li>Force mirror updates on demand</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>Quick Stats</h3>
+                    <p><strong>GitLab Instances:</strong> <span id="stats-instances">4</span></p>
+                    <p><strong>Instance Pairs:</strong> <span id="stats-pairs">3</span></p>
+                    <p><strong>Total Mirrors:</strong> <span id="stats-mirrors">13</span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
