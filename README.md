@@ -20,8 +20,12 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 ![Instance Pairs](docs/screenshots/03-pairs.png)
 *Configure pairs of GitLab instances for mirroring*
 
+### Group Access Tokens
+![Group Tokens](docs/screenshots/04-tokens.png)
+*Manage group access tokens for HTTPS mirror authentication*
+
 ### Mirrors Management
-![Mirrors](docs/screenshots/04-mirrors.png)
+![Mirrors](docs/screenshots/05-mirrors.png)
 *View and manage mirrors with real-time status updates*
 
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
@@ -228,11 +232,15 @@ Define pairs of instances where mirrors will be created:
    - Click **Add Group Token**
    - Provide:
      - GitLab Instance (select from configured instances)
-     - Group Path (e.g., "platform", "frontend", "infrastructure")
+     - Group Path (e.g., "platform", "frontend", "infrastructure", or "platform/core" for subgroups)
      - Token Name (e.g., "mirror-token")
      - Token Value (the token you created in GitLab)
 
-**Note**: Each group needs its own token. If you have projects in multiple groups (e.g., `platform/api`, `frontend/web`), you'll need to create tokens for both the `platform` and `frontend` groups.
+**Multi-Level Group Support**: The application supports multi-level group paths. For a project at `platform/core/api-gateway`, you can create a token for either:
+- `platform/core` (subgroup level) - most specific
+- `platform` (top-level group) - will be used for all projects in platform/* if no more specific token exists
+
+The application automatically searches from most specific to least specific, so you can organize tokens at any level of your group hierarchy.
 
 ### 4. Manage Mirrors
 
@@ -306,12 +314,16 @@ All GitLab access tokens (both instance tokens and group access tokens) are encr
 
 ### Mirror Authentication
 Mirrors use group access tokens for HTTPS authentication. When creating a mirror, the application automatically:
-1. Extracts the group path from the project path (e.g., "platform/api-gateway" → "platform")
-2. Looks up the stored group access token for that group
+1. Extracts the group path from the project path (e.g., "platform/core/api-gateway" → tries "platform/core", then "platform")
+2. Looks up the stored group access token, checking from most specific to least specific group level
 3. Constructs an authenticated URL like: `https://token_name:token@gitlab.example.com/group/project.git`
 4. Passes this URL to GitLab for mirror configuration
 
-This ensures secure, token-based authentication without storing credentials in GitLab mirror configurations.
+**Multi-Level Group Support**: For nested groups like `platform/core/api-gateway`, the application searches for tokens in this order:
+- `platform/core` (subgroup) - if a token exists here, it's used
+- `platform` (parent group) - fallback if no subgroup token exists
+
+This ensures secure, token-based authentication without storing credentials in GitLab mirror configurations, and provides flexibility in token management across complex group hierarchies.
 
 ### Authentication
 HTTP Basic Authentication can be enabled to protect the web interface. Configure credentials in the `.env` file:
