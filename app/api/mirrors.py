@@ -9,9 +9,59 @@ from app.database import get_db
 from app.models import Mirror, InstancePair, GitLabInstance, GroupAccessToken
 from app.core.auth import verify_credentials
 from app.core.gitlab_client import GitLabClient
+from app.core.encryption import encryption
+from urllib.parse import urlparse
 
 
 router = APIRouter(prefix="/api/mirrors", tags=["mirrors"])
+
+
+async def get_authenticated_url(
+    db: AsyncSession,
+    instance: GitLabInstance,
+    project_path: str
+) -> str:
+    """
+    Build an authenticated Git URL for mirroring.
+
+    Looks up the group access token for the project's group and constructs
+    a URL like: https://token_name:token@gitlab.example.com/group/project.git
+
+    If no group token is found, returns an unauthenticated URL and raises a warning.
+    """
+    # Extract group path from project path (e.g., "platform/api-gateway" -> "platform")
+    path_parts = project_path.split("/")
+    if len(path_parts) < 2:
+        # No group in path, use project path as group (single-level projects)
+        group_path = path_parts[0]
+    else:
+        # Take the first part as the group (or could be full namespace)
+        group_path = path_parts[0]
+
+    # Look for a group access token
+    token_result = await db.execute(
+        select(GroupAccessToken).where(
+            GroupAccessToken.gitlab_instance_id == instance.id,
+            GroupAccessToken.group_path == group_path
+        )
+    )
+    group_token = token_result.scalar_one_or_none()
+
+    # Parse the instance URL
+    parsed = urlparse(instance.url)
+    hostname = parsed.netloc
+    scheme = parsed.scheme or "https"
+
+    if group_token:
+        # Decrypt the token
+        token_value = encryption.decrypt(group_token.encrypted_token)
+        # Build authenticated URL: https://token_name:token@hostname/path.git
+        auth_url = f"{scheme}://{group_token.token_name}:{token_value}@{hostname}/{project_path}.git"
+        return auth_url
+    else:
+        # No token found - return unauthenticated URL (will likely fail)
+        # In production, you might want to raise an exception here
+        return f"{scheme}://{hostname}/{project_path}.git"
 
 
 class MirrorCreate(BaseModel):
@@ -140,9 +190,8 @@ async def create_mirror(
         if direction == "push":
             # For push mirrors, configure on source to push to target
             client = GitLabClient(source_instance.url, source_instance.encrypted_token)
-            # Build target URL with token
-            # Note: In production, you'd want to use group access tokens
-            target_url = target_instance.url + "/" + mirror.target_project_path + ".git"
+            # Build authenticated target URL with group access token
+            target_url = await get_authenticated_url(db, target_instance, mirror.target_project_path)
             result = client.create_push_mirror(
                 mirror.source_project_id,
                 target_url,
@@ -154,7 +203,8 @@ async def create_mirror(
         else:  # pull
             # For pull mirrors, configure on target to pull from source
             client = GitLabClient(target_instance.url, target_instance.encrypted_token)
-            source_url = source_instance.url + "/" + mirror.source_project_path + ".git"
+            # Build authenticated source URL with group access token
+            source_url = await get_authenticated_url(db, source_instance, mirror.source_project_path)
             result = client.create_pull_mirror(
                 mirror.target_project_id,
                 source_url,

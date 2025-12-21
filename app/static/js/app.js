@@ -3,6 +3,7 @@ const state = {
     instances: [],
     pairs: [],
     mirrors: [],
+    tokens: [],
     selectedPair: null
 };
 
@@ -32,6 +33,8 @@ function initTabs() {
             // Load data when switching to specific tabs
             if (targetId === 'mirrors-tab') {
                 loadMirrors();
+            } else if (targetId === 'tokens-tab') {
+                loadTokens();
             }
         });
     });
@@ -64,6 +67,12 @@ function setupEventListeners() {
             loadMirrors();
             loadProjectsForPair();
         }
+    });
+
+    // Token form
+    document.getElementById('token-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await createToken();
     });
 }
 
@@ -261,6 +270,92 @@ function updatePairSelector() {
     select.innerHTML = '<option value="">Select instance pair...</option>' +
         state.pairs.map(pair =>
             `<option value="${pair.id}">${escapeHtml(pair.name)}</option>`
+        ).join('');
+}
+
+// Group Access Tokens
+async function loadTokens() {
+    try {
+        const tokens = await apiRequest('/api/tokens');
+        state.tokens = tokens;
+        renderTokens(tokens);
+        updateTokenInstanceSelector();
+    } catch (error) {
+        console.error('Failed to load tokens:', error);
+    }
+}
+
+function renderTokens(tokens) {
+    const tbody = document.getElementById('tokens-list');
+    if (!tbody) return;
+
+    if (tokens.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No group access tokens configured</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = tokens.map(token => {
+        const instance = state.instances.find(i => i.id === token.gitlab_instance_id);
+        const created = new Date(token.created_at).toLocaleDateString();
+
+        return `
+            <tr>
+                <td><strong>${escapeHtml(instance?.name || 'Unknown')}</strong></td>
+                <td>${escapeHtml(token.group_path)}</td>
+                <td>${escapeHtml(token.token_name)}</td>
+                <td>${created}</td>
+                <td>
+                    <button class="btn btn-danger btn-small" onclick="deleteToken(${token.id})">Delete</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function createToken() {
+    const form = document.getElementById('token-form');
+    const formData = new FormData(form);
+
+    const data = {
+        gitlab_instance_id: parseInt(formData.get('gitlab_instance_id')),
+        group_path: formData.get('group_path'),
+        token_name: formData.get('token_name'),
+        token: formData.get('token')
+    };
+
+    try {
+        await apiRequest('/api/tokens', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+
+        showMessage('Group access token added successfully', 'success');
+        form.reset();
+        await loadTokens();
+    } catch (error) {
+        console.error('Failed to create token:', error);
+    }
+}
+
+async function deleteToken(id) {
+    if (!confirm('Are you sure you want to delete this group access token?')) return;
+
+    try {
+        await apiRequest(`/api/tokens/${id}`, { method: 'DELETE' });
+        showMessage('Group access token deleted successfully', 'success');
+        await loadTokens();
+    } catch (error) {
+        console.error('Failed to delete token:', error);
+    }
+}
+
+function updateTokenInstanceSelector() {
+    const select = document.getElementById('token-instance');
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Select instance...</option>' +
+        state.instances.map(inst =>
+            `<option value="${inst.id}">${escapeHtml(inst.name)}</option>`
         ).join('');
 }
 

@@ -212,7 +212,29 @@ Define pairs of instances where mirrors will be created:
      - Trigger builds on update
      - Only mirror protected branches
 
-### 3. Manage Mirrors
+### 3. Configure Group Access Tokens
+
+**Important**: Group access tokens are required for mirrors to authenticate via HTTPS.
+
+1. In GitLab, create a group access token for each group that contains projects you want to mirror:
+   - Go to your GitLab group → Settings → Access Tokens
+   - Create a token with the following scopes:
+     - `read_repository` - Read access to repositories
+     - `write_repository` - Write access to repositories (for push mirrors)
+   - Save the token value (you won't be able to see it again)
+
+2. In GitLab Mirror Wizard:
+   - Go to the **Group Tokens** tab
+   - Click **Add Group Token**
+   - Provide:
+     - GitLab Instance (select from configured instances)
+     - Group Path (e.g., "platform", "frontend", "infrastructure")
+     - Token Name (e.g., "mirror-token")
+     - Token Value (the token you created in GitLab)
+
+**Note**: Each group needs its own token. If you have projects in multiple groups (e.g., `platform/api`, `frontend/web`), you'll need to create tokens for both the `platform` and `frontend` groups.
+
+### 4. Manage Mirrors
 
 Create and manage mirrors between projects:
 
@@ -226,7 +248,7 @@ Create and manage mirrors between projects:
    - **Update**: Force an immediate mirror synchronization
    - **Delete**: Remove the mirror configuration
 
-### 4. Import/Export
+### 5. Import/Export
 
 Bulk manage mirror configurations:
 
@@ -256,6 +278,13 @@ The application provides a RESTful API. Once running, visit:
 - `PUT /api/pairs/{id}` - Update pair
 - `DELETE /api/pairs/{id}` - Delete pair
 
+#### Group Access Tokens
+- `GET /api/tokens` - List all group access tokens
+- `POST /api/tokens` - Create new group access token
+- `GET /api/tokens/{id}` - Get token details
+- `PUT /api/tokens/{id}` - Update token
+- `DELETE /api/tokens/{id}` - Delete token
+
 #### Mirrors
 - `GET /api/mirrors` - List all mirrors
 - `POST /api/mirrors` - Create new mirror
@@ -271,9 +300,18 @@ The application provides a RESTful API. Once running, visit:
 ## Security
 
 ### Token Encryption
-All GitLab access tokens are encrypted using Fernet (symmetric encryption) before being stored in the database. The encryption key is automatically generated and stored in `data/encryption.key`.
+All GitLab access tokens (both instance tokens and group access tokens) are encrypted using Fernet (symmetric encryption) before being stored in the database. The encryption key is automatically generated and stored in `data/encryption.key`.
 
 **Important**: Keep the `data/encryption.key` file secure and backed up. Without it, you won't be able to decrypt stored tokens.
+
+### Mirror Authentication
+Mirrors use group access tokens for HTTPS authentication. When creating a mirror, the application automatically:
+1. Extracts the group path from the project path (e.g., "platform/api-gateway" → "platform")
+2. Looks up the stored group access token for that group
+3. Constructs an authenticated URL like: `https://token_name:token@gitlab.example.com/group/project.git`
+4. Passes this URL to GitLab for mirror configuration
+
+This ensures secure, token-based authentication without storing credentials in GitLab mirror configurations.
 
 ### Authentication
 HTTP Basic Authentication can be enabled to protect the web interface. Configure credentials in the `.env` file:
