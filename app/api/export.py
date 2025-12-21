@@ -1,15 +1,29 @@
 import json
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.models import Mirror, InstancePair, GitLabInstance
+from app.models import Mirror, InstancePair
 from app.core.auth import verify_credentials
-from app.core.encryption import encryption
+
+
+def _safe_download_filename(name: str) -> str:
+    """
+    Prevent header injection and generate a conservative filename.
+    Keep alphanumerics plus ._- ; map everything else to underscores.
+    """
+    cleaned = name.replace("\r", "").replace("\n", "").strip()
+    out = []
+    for ch in cleaned:
+        if ch.isalnum() or ch in {"_", "-", "."}:
+            out.append(ch)
+        else:
+            out.append("_")
+    safe = "".join(out).strip("._")
+    return safe or "mirrors"
 
 
 router = APIRouter(prefix="/api/export", tags=["export"])
@@ -85,7 +99,7 @@ async def export_pair_mirrors(
 
     # Return as downloadable JSON
     content = json.dumps(export_data.model_dump(), indent=2)
-    filename = f"mirrors_{pair.name.replace(' ', '_')}.json"
+    filename = f"mirrors_{_safe_download_filename(pair.name)}.json"
 
     return Response(
         content=content,
