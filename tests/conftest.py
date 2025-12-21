@@ -46,13 +46,27 @@ async def db_session(engine, session_maker: async_sessionmaker[AsyncSession]):
 
 
 @pytest.fixture()
-async def app(session_maker: async_sessionmaker[AsyncSession], monkeypatch):
+async def app(engine, session_maker: async_sessionmaker[AsyncSession], monkeypatch):
     """
     FastAPI app with:
     - DB dependency overridden to use a per-test SQLite DB
     - Auth dependency overridden to bypass HTTP basic
     - Encryption swapped to a deterministic in-memory fake
     """
+    # Track whether importing the app created ./data/encryption.key so we can
+    # clean it up (tests shouldn't dirty the repo working tree).
+    from pathlib import Path
+
+    data_dir = Path("data")
+    key_path = data_dir / "encryption.key"
+    data_dir_existed = data_dir.exists()
+    key_existed = key_path.exists()
+
+    # Ensure a clean schema for each test that uses the app.
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+
     from app.main import app as fastapi_app
 
     fake_encryption = FakeEncryption()
@@ -79,11 +93,23 @@ async def app(session_maker: async_sessionmaker[AsyncSession], monkeypatch):
         yield fastapi_app
     finally:
         fastapi_app.dependency_overrides.clear()
+        # Best-effort cleanup of encryption artifacts created on import.
+        try:
+            if not key_existed and key_path.exists():
+                key_path.unlink()
+            if not data_dir_existed and data_dir.exists():
+                # Remove dir only if empty.
+                try:
+                    data_dir.rmdir()
+                except OSError:
+                    pass
+        except Exception:
+            pass
 
 
 @pytest.fixture()
 async def client(app):
-    transport = ASGITransport(app=app, lifespan="off")
+    transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
