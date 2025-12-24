@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,10 @@ class TopologyNode(BaseModel):
     mirrors_out: int = 0
     pairs_in: int = 0
     pairs_out: int = 0
+    # health/status (computed, aggregated)
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    last_successful_update: str | None = None
+    health: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
 
 
 class TopologyLink(BaseModel):
@@ -37,7 +41,7 @@ class TopologyLink(BaseModel):
     disabled_count: int
     pair_count: int
     # health/status (computed, aggregated)
-    status_counts: dict[str, int] = {}
+    status_counts: dict[str, int] = Field(default_factory=dict)
     last_successful_update: str | None = None
     health: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
 
@@ -126,6 +130,11 @@ async def get_topology(
         }
     )
 
+    # Aggregate mirror status per node (instance)
+    node_agg: dict[int, dict[str, Any]] = defaultdict(
+        lambda: {"status_counts": defaultdict(int), "last_successful_update": None}
+    )
+
     for m in mirror_rows:
         pair = pairs_by_id.get(m.instance_pair_id)
         if not pair:
@@ -153,6 +162,14 @@ async def get_topology(
         if tgt in nodes:
             nodes[tgt].mirrors_in += 1
 
+        # Per-node health stats (count the same mirror status for both involved instances)
+        for iid in (src, tgt):
+            node_agg[iid]["status_counts"][_norm_status(m.last_update_status)] += 1
+            if m.last_successful_update is not None:
+                cur_n = node_agg[iid]["last_successful_update"]
+                if cur_n is None or m.last_successful_update > cur_n:
+                    node_agg[iid]["last_successful_update"] = m.last_successful_update
+
     links: list[TopologyLink] = []
     for (src, tgt, direction), v in agg.items():
         last = v["last_successful_update"]
@@ -172,6 +189,17 @@ async def get_topology(
                 health=health,
             )
         )
+
+    # Finalize node health fields
+    for iid, n in nodes.items():
+        a = node_agg.get(iid)
+        if not a:
+            continue
+        counts = dict(a["status_counts"])
+        last = a["last_successful_update"]
+        n.status_counts = counts
+        n.last_successful_update = last.isoformat() if last is not None else None
+        n.health = _health_from_status_counts(counts)
 
     # Keep output stable for UI diffs
     nodes_out = sorted(nodes.values(), key=lambda n: (n.name.lower(), n.id))

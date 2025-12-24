@@ -108,6 +108,14 @@
     return "topology-dot-unknown";
   }
 
+  function healthStrokeColor(h) {
+    const x = (h || "").toString().toLowerCase();
+    if (x === "error") return "rgba(221, 43, 14, 0.95)";
+    if (x === "warning") return "rgba(222, 126, 0, 0.95)";
+    if (x === "ok") return "rgba(16, 133, 72, 0.95)";
+    return "rgba(107, 114, 128, 0.70)";
+  }
+
   function linkWidth(count) {
     const c = Math.max(1, Number(count || 1));
     // 1..8-ish
@@ -133,6 +141,36 @@
     return io;
   }
 
+  function computeNodeHealth(nodes, links) {
+    // Prefer server-provided node health, but fall back to link-derived health for older payloads.
+    const out = new Map();
+    nodes.forEach((n) => {
+      if (n && n.health) {
+        out.set(n.id, { health: (n.health || "unknown").toString().toLowerCase(), last: n.last_successful_update || null });
+      } else {
+        out.set(n.id, { health: "unknown", last: null });
+      }
+    });
+
+    const sev = (h) => healthSeverity(h);
+    links.forEach((l) => {
+      const sid = typeof l.source === "object" && l.source ? l.source.id : l.source;
+      const tid = typeof l.target === "object" && l.target ? l.target.id : l.target;
+      const h = (l.health || "unknown").toString().toLowerCase();
+      const last = l.last_successful_update || null;
+      [sid, tid].forEach((id) => {
+        if (!out.has(id)) out.set(id, { health: "unknown", last: null });
+        const cur = out.get(id);
+        if (sev(h) > sev(cur.health)) cur.health = h;
+        if (last) {
+          if (!cur.last || Date.parse(last) > Date.parse(cur.last)) cur.last = last;
+        }
+        out.set(id, cur);
+      });
+    });
+    return out;
+  }
+
   function render() {
     ensureD3();
     const canvas = byId("topology-canvas");
@@ -143,6 +181,7 @@
     const { width, height } = canvasSize();
     const { nodes, links } = filteredGraph();
     const io = computeNodeIO(nodes, links);
+    const nodeHealth = computeNodeHealth(nodes, links);
 
     const renderKey = JSON.stringify({
       w: width,
@@ -303,8 +342,12 @@
         g.append("circle")
           .attr("r", (d) => nodeRadius(d, io.get(d.id) || { in: 0, out: 0 }))
           .attr("fill", "rgba(255, 255, 255, 0.92)")
-          .attr("stroke", "rgba(17, 24, 39, 0.22)")
-          .attr("stroke-width", 1.2);
+          .attr("stroke", (d) => healthStrokeColor((nodeHealth.get(d.id)?.health || d.health || "unknown")))
+          .attr("stroke-width", 2.2)
+          .attr("filter", (d) => {
+            const h = (nodeHealth.get(d.id)?.health || d.health || "unknown").toString().toLowerCase();
+            return healthSeverity(h) === 3 ? "url(#glow-error)" : healthSeverity(h) === 2 ? "url(#glow-warning)" : null;
+          });
 
         g.append("circle")
           .attr("r", (d) => Math.max(4, nodeRadius(d, io.get(d.id) || { in: 0, out: 0 }) - 6))
@@ -346,6 +389,24 @@
         showNodeDetails(d, nodes, links);
         highlightSelection();
       });
+
+    nodeSel
+      .on("mousemove", (event, d) => {
+        const h = (nodeHealth.get(d.id)?.health || d.health || "unknown").toString().toLowerCase();
+        const dot = healthDotClass(h);
+        const lastIso = nodeHealth.get(d.id)?.last || d.last_successful_update || null;
+        const last = lastIso ? new Date(lastIso).toLocaleString() : "Never";
+        const html = `
+          <div class="row" style="align-items:center">
+            <div><strong>${esc(d.name)}</strong></div>
+            <div class="pill"><span class="dot ${dot}"></span>${esc(h)}</div>
+          </div>
+          <div class="muted" style="margin-top:6px">${esc(String(d.mirrors_in || 0))} in • ${esc(String(d.mirrors_out || 0))} out</div>
+          <div class="muted" style="margin-top:6px">Last success: ${esc(last)}</div>
+        `;
+        setTooltip(html, event.offsetX, event.offsetY);
+      })
+      .on("mouseout", () => hideTooltip());
 
     svg.on("click", () => {
       topology.selected = null;
@@ -472,11 +533,26 @@
       return `<div style="display:grid; gap:10px">${rows}</div>`;
     };
 
+    const health = (n.health || "unknown").toString().toLowerCase();
+    const dot = healthDotClass(health);
+    const last = n.last_successful_update ? new Date(n.last_successful_update).toLocaleString() : "Never";
+    const counts = n.status_counts || {};
+    const fmtCounts = Object.keys(counts).length
+      ? Object.entries(counts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([k, v]) => `<span class="pill" style="margin-right:6px">${esc(k)}: <strong>${esc(String(v))}</strong></span>`)
+          .join("")
+      : '<span class="text-muted">n/a</span>';
+
     setPanel(
       n.name,
       "GitLab instance",
       `
         <div style="display:grid; gap:14px">
+          <div class="row" style="display:flex; justify-content:space-between; align-items:center">
+            <div class="pill"><span class="dot ${dot}"></span><strong>${esc(health)}</strong></div>
+            <div class="text-muted">Last success: ${esc(last)}</div>
+          </div>
           <div>
             <div class="text-muted">URL</div>
             <div><code>${esc(n.url)}</code></div>
@@ -486,6 +562,10 @@
             <div><div class="text-muted">Mirrors in</div><div><strong>${esc(String(n.mirrors_in || 0))}</strong></div></div>
             <div><div class="text-muted">Pairs out</div><div><strong>${esc(String(n.pairs_out || 0))}</strong></div></div>
             <div><div class="text-muted">Pairs in</div><div><strong>${esc(String(n.pairs_in || 0))}</strong></div></div>
+          </div>
+          <div>
+            <div class="text-muted" style="margin-bottom:6px">Status breakdown</div>
+            <div>${fmtCounts}</div>
           </div>
           <div>
             <div class="text-muted">Outgoing</div>
