@@ -18,10 +18,435 @@ const state = {
 // Initialize the application
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
-    loadInstances();
-    loadPairs();
     setupEventListeners();
+    initTableEnhancements();
+
+    // Demo screenshots open static HTML files via file://; avoid API calls there.
+    const isFileDemo = (window?.location?.protocol || '') === 'file:';
+    if (!isFileDemo) {
+        loadInstances();
+        loadPairs();
+    }
 });
+
+// ----------------------------
+// Table sorting + filtering
+// ----------------------------
+const tableEnhancers = new Map();
+
+function initTableEnhancements() {
+    const configsByTbodyId = {
+        'instances-list': {
+            tableLabel: 'Instances',
+            columns: [
+                { key: 'name', label: 'Name', sortable: true, filter: 'text' },
+                { key: 'url', label: 'URL', sortable: true, filter: 'text' },
+                { key: 'description', label: 'Description', sortable: true, filter: 'text' },
+                { key: 'token', label: 'Access Token', sortable: false, filter: 'none' },
+                { key: 'actions', label: 'Actions', sortable: false, filter: 'none' },
+            ],
+        },
+        'pairs-list': {
+            tableLabel: 'Instance Pairs',
+            columns: [
+                { key: 'name', label: 'Name', sortable: true, filter: 'text' },
+                { key: 'source', label: 'Source', sortable: true, filter: 'text' },
+                { key: 'target', label: 'Target', sortable: true, filter: 'text' },
+                { key: 'direction', label: 'Direction', sortable: true, filter: 'select' },
+                { key: 'defaults', label: 'Default Settings', sortable: false, filter: 'text' },
+                { key: 'actions', label: 'Actions', sortable: false, filter: 'none' },
+            ],
+        },
+        'group-settings-list': {
+            tableLabel: 'Group Settings',
+            columns: [
+                { key: 'pair', label: 'Instance Pair', sortable: true, filter: 'text' },
+                { key: 'group', label: 'Group Path', sortable: true, filter: 'text' },
+                { key: 'defaults', label: 'Default Settings', sortable: false, filter: 'text' },
+                { key: 'tokens', label: 'Tokens', sortable: false, filter: 'text' },
+                { key: 'actions', label: 'Actions', sortable: false, filter: 'none' },
+            ],
+        },
+        'mirrors-list': {
+            tableLabel: 'Mirrors',
+            columns: [
+                { key: 'source_project', label: 'Source Project', sortable: true, filter: 'text' },
+                { key: 'target_project', label: 'Target Project', sortable: true, filter: 'text' },
+                { key: 'settings', label: 'Effective Settings', sortable: false, filter: 'text' },
+                { key: 'status', label: 'Status', sortable: true, filter: 'select' },
+                { key: 'sync_status', label: 'Sync Status', sortable: true, filter: 'select' },
+                { key: 'last_sync', label: 'Last Sync', sortable: true, filter: 'text' },
+                { key: 'actions', label: 'Actions', sortable: false, filter: 'none' },
+            ],
+        },
+    };
+
+    Object.entries(configsByTbodyId).forEach(([tbodyId, config]) => {
+        const tbody = document.getElementById(tbodyId);
+        const table = tbody?.closest('table');
+        if (!tbody || !table) return;
+
+        const enhancer = createTableEnhancer(table, tbody, config);
+        tableEnhancers.set(table, enhancer);
+        enhancer.ensureUI();
+        enhancer.refresh();
+
+        // Auto-refresh when rows are re-rendered.
+        const debouncedRefresh = debounce(() => enhancer.refresh(), 50);
+        const obs = new MutationObserver(() => debouncedRefresh());
+        obs.observe(tbody, { childList: true, subtree: true });
+    });
+}
+
+function createTableEnhancer(table, tbody, config) {
+    const state = {
+        sort: { colIndex: null, dir: 'asc' },
+        filters: new Map(), // colIndex -> string
+        globalQuery: '',
+        controls: { filterRow: null, globalInput: null, clearBtn: null, selects: new Map() },
+    };
+
+    const normalize = (s) => (s || '').toString().trim().toLowerCase();
+    const getCellSortText = (cell) => {
+        if (!cell) return '';
+        const ds = (cell.dataset?.sort || '').toString();
+        if (ds) return ds;
+        // Prefer visible text; handles badges, nested spans, etc.
+        return (cell.innerText || cell.textContent || '').toString().trim();
+    };
+
+    const parseComparable = (raw) => {
+        const s = (raw || '').toString().trim();
+        if (!s) return { kind: 'empty', value: '' };
+
+        // ISO-ish timestamps sort well lexicographically, but we can parse too.
+        const ms = Date.parse(s);
+        if (!Number.isNaN(ms) && /[0-9]{4}-[0-9]{2}-[0-9]{2}/.test(s)) {
+            return { kind: 'number', value: ms };
+        }
+
+        // Numeric
+        const num = Number(s.replace(/,/g, ''));
+        if (!Number.isNaN(num) && /^[+-]?\d+(\.\d+)?$/.test(s.replace(/,/g, ''))) {
+            return { kind: 'number', value: num };
+        }
+
+        return { kind: 'string', value: s.toLowerCase() };
+    };
+
+    const getDataRows = () => {
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const meta = [];
+        const data = [];
+
+        rows.forEach((tr) => {
+            // Placeholder / info rows typically use colspan and should not be sorted/filtered.
+            const hasColspan = !!tr.querySelector('td[colspan]');
+            const isEditing = tr.dataset?.editing === 'true';
+            if (hasColspan) meta.push(tr);
+            else if (isEditing) data.unshift(tr); // pin editing row(s) to top
+            else data.push(tr);
+        });
+
+        return { meta, data };
+    };
+
+    const ensureToolsRow = () => {
+        if (table.dataset.enhancedTools === 'true') return;
+        table.dataset.enhancedTools = 'true';
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'table-tools';
+
+        const left = document.createElement('div');
+        left.className = 'table-tools-left';
+
+        const label = document.createElement('div');
+        label.className = 'table-tools-label';
+        label.textContent = `${config.tableLabel} — filter & sort`;
+
+        const globalInput = document.createElement('input');
+        globalInput.type = 'search';
+        globalInput.className = 'table-tools-search';
+        globalInput.placeholder = 'Search table…';
+        globalInput.value = state.globalQuery;
+        globalInput.addEventListener('input', () => {
+            state.globalQuery = (globalInput.value || '').toString();
+            refresh();
+        });
+
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'btn btn-secondary btn-small';
+        clearBtn.textContent = 'Clear filters';
+        clearBtn.addEventListener('click', () => {
+            state.globalQuery = '';
+            state.filters.clear();
+            if (state.controls.globalInput) state.controls.globalInput.value = '';
+            if (state.controls.filterRow) {
+                state.controls.filterRow.querySelectorAll('input, select').forEach((el) => {
+                    if (el.tagName.toLowerCase() === 'select') el.value = '';
+                    else el.value = '';
+                });
+            }
+            refresh();
+        });
+
+        left.appendChild(label);
+        left.appendChild(globalInput);
+
+        const right = document.createElement('div');
+        right.className = 'table-tools-right';
+        right.appendChild(clearBtn);
+
+        wrapper.appendChild(left);
+        wrapper.appendChild(right);
+
+        table.parentNode.insertBefore(wrapper, table);
+
+        state.controls.globalInput = globalInput;
+        state.controls.clearBtn = clearBtn;
+    };
+
+    const ensureFilterRow = () => {
+        const thead = table.querySelector('thead');
+        if (!thead) return;
+
+        // Ensure header cells are marked sortable as configured.
+        const headerRow = thead.querySelector('tr');
+        const ths = headerRow ? Array.from(headerRow.querySelectorAll('th')) : [];
+        ths.forEach((th, idx) => {
+            const colCfg = config.columns[idx];
+            if (!colCfg) return;
+            th.classList.toggle('sortable', !!colCfg.sortable);
+            th.dataset.colIndex = String(idx);
+            th.title = colCfg.sortable ? 'Click to sort' : '';
+            if (!th.dataset.sortBound) {
+                th.dataset.sortBound = 'true';
+                th.addEventListener('click', () => {
+                    if (!colCfg.sortable) return;
+                    if (state.sort.colIndex === idx) {
+                        state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        state.sort.colIndex = idx;
+                        state.sort.dir = 'asc';
+                    }
+                    refresh();
+                });
+            }
+        });
+
+        if (thead.querySelector('tr.table-filter-row')) {
+            state.controls.filterRow = thead.querySelector('tr.table-filter-row');
+            return;
+        }
+
+        const filterRow = document.createElement('tr');
+        filterRow.className = 'table-filter-row';
+
+        config.columns.forEach((colCfg, idx) => {
+            const th = document.createElement('th');
+            th.className = 'table-filter-cell';
+
+            if (colCfg.filter === 'text') {
+                const input = document.createElement('input');
+                input.type = 'search';
+                input.className = 'table-filter-input';
+                input.placeholder = 'Filter…';
+                input.value = state.filters.get(idx) || '';
+                input.addEventListener('input', () => {
+                    state.filters.set(idx, (input.value || '').toString());
+                    refresh();
+                });
+                th.appendChild(input);
+            } else if (colCfg.filter === 'select') {
+                const sel = document.createElement('select');
+                sel.className = 'table-filter-select';
+                sel.addEventListener('change', () => {
+                    state.filters.set(idx, (sel.value || '').toString());
+                    refresh();
+                });
+                th.appendChild(sel);
+                state.controls.selects.set(idx, sel);
+            } else {
+                // no filter control
+                const spacer = document.createElement('div');
+                spacer.className = 'table-filter-none';
+                spacer.textContent = '';
+                th.appendChild(spacer);
+            }
+
+            filterRow.appendChild(th);
+        });
+
+        thead.appendChild(filterRow);
+        state.controls.filterRow = filterRow;
+    };
+
+    const updateSelectOptions = () => {
+        const selects = state.controls.selects;
+        if (!selects || selects.size === 0) return;
+
+        const { data } = getDataRows();
+
+        selects.forEach((sel, idx) => {
+            const current = (sel.value || '').toString();
+            const values = new Set();
+            data.forEach((tr) => {
+                const td = tr.children?.[idx];
+                const v = normalize(getCellSortText(td));
+                if (v) values.add(v);
+            });
+            const sorted = Array.from(values).sort((a, b) => a.localeCompare(b));
+
+            sel.innerHTML = '';
+            const optAll = document.createElement('option');
+            optAll.value = '';
+            optAll.textContent = 'All';
+            sel.appendChild(optAll);
+            sorted.forEach((v) => {
+                const opt = document.createElement('option');
+                opt.value = v;
+                opt.textContent = v;
+                sel.appendChild(opt);
+            });
+            sel.value = sorted.includes(current) ? current : '';
+            state.filters.set(idx, sel.value);
+        });
+    };
+
+    const rowMatches = (tr) => {
+        const global = normalize(state.globalQuery);
+        if (global) {
+            const rowText = normalize(tr.innerText || tr.textContent || '');
+            if (!rowText.includes(global)) return false;
+        }
+
+        for (const [idx, qRaw] of state.filters.entries()) {
+            const colCfg = config.columns[idx];
+            if (!colCfg || colCfg.filter === 'none') continue;
+            const q = normalize(qRaw);
+            if (!q) continue;
+            const td = tr.children?.[idx];
+            const cellText = normalize(getCellSortText(td));
+
+            if (colCfg.filter === 'select') {
+                if (cellText !== q) return false;
+            } else {
+                if (!cellText.includes(q)) return false;
+            }
+        }
+        return true;
+    };
+
+    const applyFiltering = () => {
+        const { meta, data } = getDataRows();
+
+        // Meta rows (spinner / empty-state) remain visible if there are no data rows.
+        if (data.length === 0) {
+            meta.forEach((tr) => (tr.style.display = ''));
+            return;
+        }
+
+        meta.forEach((tr) => (tr.style.display = 'none'));
+        data.forEach((tr) => {
+            if (tr.dataset?.editing === 'true') {
+                tr.style.display = '';
+                return;
+            }
+            tr.style.display = rowMatches(tr) ? '' : 'none';
+        });
+    };
+
+    const applySorting = () => {
+        const colIndex = state.sort.colIndex;
+        if (colIndex === null || colIndex === undefined) return;
+        const colCfg = config.columns[colIndex];
+        if (!colCfg?.sortable) return;
+
+        const { meta, data } = getDataRows();
+
+        // Only sort non-editing rows that are not hidden by filtering.
+        const visible = [];
+        const hidden = [];
+        const pinned = [];
+
+        data.forEach((tr, i) => {
+            if (tr.dataset?.editing === 'true') {
+                pinned.push({ tr, i });
+                return;
+            }
+            const isHidden = tr.style.display === 'none';
+            const td = tr.children?.[colIndex];
+            const raw = getCellSortText(td);
+            const cmp = parseComparable(raw);
+            const rec = { tr, i, cmp };
+            if (isHidden) hidden.push(rec);
+            else visible.push(rec);
+        });
+
+        const dirMul = state.sort.dir === 'desc' ? -1 : 1;
+        const compare = (a, b) => {
+            if (a.cmp.kind === 'empty' && b.cmp.kind !== 'empty') return 1;
+            if (b.cmp.kind === 'empty' && a.cmp.kind !== 'empty') return -1;
+            if (a.cmp.kind === 'number' && b.cmp.kind === 'number') {
+                if (a.cmp.value < b.cmp.value) return -1 * dirMul;
+                if (a.cmp.value > b.cmp.value) return 1 * dirMul;
+                return a.i - b.i;
+            }
+            const av = a.cmp.value.toString();
+            const bv = b.cmp.value.toString();
+            const c = av.localeCompare(bv);
+            if (c !== 0) return c * dirMul;
+            return a.i - b.i;
+        };
+
+        visible.sort(compare);
+        hidden.sort(compare);
+
+        // Rebuild tbody order:
+        // - pinned editing row(s) first (original relative order)
+        // - visible (sorted)
+        // - hidden (sorted, but hidden via display)
+        // - meta rows last
+        const frag = document.createDocumentFragment();
+        pinned.sort((a, b) => a.i - b.i).forEach((r) => frag.appendChild(r.tr));
+        visible.forEach((r) => frag.appendChild(r.tr));
+        hidden.forEach((r) => frag.appendChild(r.tr));
+        meta.forEach((tr) => frag.appendChild(tr));
+        tbody.appendChild(frag);
+    };
+
+    const updateSortIndicators = () => {
+        const thead = table.querySelector('thead');
+        const headerRow = thead?.querySelector('tr');
+        if (!headerRow) return;
+        const ths = Array.from(headerRow.querySelectorAll('th'));
+        ths.forEach((th, idx) => {
+            th.classList.remove('sort-asc', 'sort-desc');
+            if (state.sort.colIndex === idx) {
+                th.classList.add(state.sort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+            }
+        });
+    };
+
+    function ensureUI() {
+        ensureToolsRow();
+        ensureFilterRow();
+        updateSelectOptions();
+        updateSortIndicators();
+    }
+
+    function refresh() {
+        ensureUI();
+        updateSelectOptions();
+        applyFiltering();
+        applySorting();
+        updateSortIndicators();
+    }
+
+    return { ensureUI, refresh };
+}
 
 // Tab management
 function initTabs() {
@@ -330,7 +755,7 @@ function renderInstances(instances) {
         const isEditing = editingId === instance.id;
         if (isEditing) {
             return `
-                <tr>
+                <tr data-editing="true">
                     <td>
                         <input class="table-input" id="edit-instance-name-${instance.id}" value="${escapeHtml(instance.name)}">
                     </td>
@@ -551,7 +976,7 @@ function renderPairs(pairs) {
         const isEditing = editingId === pair.id;
         if (isEditing) {
             return `
-                <tr>
+                <tr data-editing="true">
                     <td>
                         <div style="display:grid; gap:8px">
                             <input class="table-input" id="edit-pair-name-${pair.id}" value="${escapeHtml(pair.name)}">
@@ -1348,7 +1773,7 @@ function renderMirrors(mirrors) {
             const userMode = (mirror.mirror_user_id === null || mirror.mirror_user_id === undefined) ? '__inherit__' : '__override__';
 
             return `
-                <tr>
+                <tr data-editing="true">
                     <td class="cell-locked" title="Project paths cannot be edited">${escapeHtml(mirror.source_project_path)}</td>
                     <td class="cell-locked" title="Project paths cannot be edited">${escapeHtml(mirror.target_project_path)}</td>
                     <td>
@@ -1407,7 +1832,9 @@ function renderMirrors(mirrors) {
                         </div>
                     </td>
                     <td class="cell-locked">${updateStatus}</td>
-                    <td class="cell-locked">${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}</td>
+                    <td class="cell-locked" data-sort="${escapeHtml(mirror.last_successful_update || '')}">
+                        ${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}
+                    </td>
                     <td>
                         <div class="table-actions">
                             <button class="btn btn-primary btn-small" onclick="saveMirrorEdit(${mirror.id})">Save</button>
@@ -1426,7 +1853,9 @@ function renderMirrors(mirrors) {
                 <td>${settingsCell}</td>
                 <td>${statusBadge}</td>
                 <td>${updateStatus}</td>
-                <td>${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}</td>
+                <td data-sort="${escapeHtml(mirror.last_successful_update || '')}">
+                    ${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}
+                </td>
                 <td>
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
