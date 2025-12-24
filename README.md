@@ -14,7 +14,7 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 
 ### GitLab Instances
 ![GitLab Instances](docs/screenshots/02-instances.png)
-*Manage GitLab instances with their access tokens*
+*Manage GitLab instances and rotate their access tokens (tokens are never displayed)*
 
 ### Instance Pairs
 ![Instance Pairs](docs/screenshots/03-pairs.png)
@@ -22,11 +22,11 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 
 ### Group Settings
 ![Group Tokens](docs/screenshots/04-tokens.png)
-*Manage group access tokens and group-level mirror default overrides*
+*Manage group access tokens (rotate/update in place) and group-level mirror default overrides*
 
 ### Mirrors Management
 ![Mirrors](docs/screenshots/05-mirrors.png)
-*View and manage mirrors with real-time status updates*
+*View and manage mirrors with real-time status updates and safe per-mirror edits*
 
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
 
@@ -38,12 +38,14 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 - **Push & Pull Mirrors**: Support for both push and pull mirroring configurations
 - **HTTPS Mirroring**: Uses HTTPS URLs with group access tokens for secure authentication
 - **Flexible Configuration**: Define default mirror settings at the instance pair level, override them per group, and optionally override per mirror
+- **Safe Inline Editing**: Edit instances/pairs/mirrors in-table; fields that could break existing mirrors are locked/greyed out
+- **Token Rotation**: Rotate instance access tokens and group access tokens without deleting configuration
 
 ### Mirror Management
 - **View Mirrors**: See all configured mirrors and their current status at a glance
 - **Create Mirrors**: Quickly set up new mirrors between projects with dropdown selection
 - **Sync Mirrors**: Force immediate mirror synchronization with a single click
-- **Edit/Remove Mirrors**: Modify or delete mirror configurations as needed
+- **Edit/Remove Mirrors**: Modify safe mirror settings (and revert overrides back to “inherit”), or delete mirror configurations as needed
 - **Import/Export**: Bulk import and export mirror settings for specified groups
 
 ### Modern Web Interface
@@ -178,10 +180,17 @@ APP_DESCRIPTION=Manage GitLab mirrors across multiple instance pairs
 
 ### GitLab Access Tokens
 
-You'll need GitLab access tokens with the following scopes:
-- `api` - Full API access
-- `read_api` - Read API access
-- `write_repository` - Write access to repositories
+This app uses **two kinds of tokens**:
+
+- **Instance Access Token** (used to call the GitLab API)
+  - Recommended scope: `api`
+  - You can **rotate** this token from the **GitLab Instances** table (Edit → paste new token → Save).
+
+- **Group Access Token** (embedded into HTTPS clone URLs for mirrors)
+  - Recommended scopes:
+    - `read_repository`
+    - `write_repository` (needed for push mirrors)
+  - You can **rotate** these tokens from the **Group Settings** table (Update token → paste new token → Save).
 
 **Recommended**: Use Group Access Tokens for better security and management.
 
@@ -192,12 +201,20 @@ You'll need GitLab access tokens with the following scopes:
 First, configure the GitLab instances you want to mirror between:
 
 1. Go to the **GitLab Instances** tab
-2. Click **Add Instance**
+2. Fill the **Add Instance** form
 3. Provide:
    - Name (e.g., "Production GitLab")
    - URL (e.g., "https://gitlab.example.com")
    - Access Token (Personal or Group Access Token)
    - Description (optional)
+
+#### Rotating instance access tokens
+You can rotate the stored instance access token without changing the instance URL:
+- Click **Edit** on an instance row
+- Paste a new **Access Token**
+- Click **Save**
+
+> The token value is **never displayed** in the UI (only a masked placeholder is shown).
 
 #### Deletion behavior (important)
 To prevent broken configurations, the app performs **cascading deletes**:
@@ -243,6 +260,12 @@ Define pairs of instances where mirrors will be created:
      - Token Name (e.g., "mirror-token")
      - Token Value (the token you created in GitLab)
 
+#### Rotating group access tokens
+Because tokens expire, the UI supports **updating tokens in place**:
+- In **Configured Group Settings**, click **Update token**
+- Paste the new token value
+- Click **Update Token**
+
 **Multi-Level Group Support**: The application supports multi-level group paths. For a project at `platform/core/api-gateway`, you can create a token for either:
 - `platform/core` (subgroup level) - most specific
 - `platform` (top-level group) - will be used for all projects in platform/* if no more specific token exists
@@ -268,6 +291,7 @@ Create and manage mirrors between projects:
    - Select target project (auto-populated from GitLab)
    - Click **Create Mirror**
 4. To manage existing mirrors:
+   - **Edit**: Update safe per-mirror overrides (and optionally clear them back to “inherit”)
    - **Sync**: Force an immediate mirror synchronization
    - **Delete**: Remove the mirror configuration
 
@@ -480,7 +504,7 @@ MIT License - see LICENSE file for details
 ## Support
 
 For issues, questions, or contributions:
-- GitHub Issues: https://github.com/MrZoller/gitlab-mirror-wizard/issues
+- GitHub Issues: [MrZoller/gitlab-mirror-wizard issues](https://github.com/MrZoller/gitlab-mirror-wizard/issues)
 - Documentation: This README and inline code documentation
 
 ## Acknowledgments
