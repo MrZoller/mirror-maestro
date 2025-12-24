@@ -28,6 +28,10 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 ![Mirrors](docs/screenshots/05-mirrors.png)
 *View and manage mirrors with real-time status updates and safe per-mirror edits*
 
+### Topology
+![Topology](docs/screenshots/06-topology.png)
+*Visualize instance-to-instance mirror flows as an interactive graph (push vs pull, counts, enabled/disabled)*
+
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
 
 ## Features
