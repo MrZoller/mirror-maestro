@@ -117,6 +117,11 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
     assert nodes_by_name["B"]["mirrors_out"] == 2
     assert nodes_by_name["C"]["mirrors_in"] == 2
 
+    # Node health should aggregate mirror statuses for any incident mirrors.
+    assert nodes_by_name["A"]["health"] == "error"
+    assert nodes_by_name["B"]["health"] == "error"
+    assert nodes_by_name["C"]["health"] == "warning"
+
     links = body["links"]
     assert len(links) == 3
 
