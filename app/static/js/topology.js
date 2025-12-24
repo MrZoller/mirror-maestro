@@ -54,7 +54,10 @@
   }
 
   async function fetchTopology() {
-    topology.raw = await apiRequest("/api/topology");
+    const pairSel = byId("topology-pair-filter");
+    const pairId = (pairSel?.value || "").toString().trim();
+    const qs = pairId ? `?instance_pair_id=${encodeURIComponent(pairId)}` : "";
+    topology.raw = await apiRequest(`/api/topology${qs}`);
   }
 
   function filteredGraph() {
@@ -477,6 +480,11 @@
     const refreshBtn = byId("topology-refresh-btn");
     if (refreshBtn) refreshBtn.addEventListener("click", () => refresh());
 
+    const pairSel = byId("topology-pair-filter");
+    if (pairSel) {
+      pairSel.addEventListener("change", () => refresh());
+    }
+
     ["topology-show-pull", "topology-show-push", "topology-show-disabled"].forEach((id) => {
       const el = byId(id);
       if (!el) return;
@@ -507,6 +515,32 @@
         render();
       }
       return;
+    }
+
+    // Populate pair dropdown (best-effort) for overlay filtering.
+    try {
+      const pairSel = byId("topology-pair-filter");
+      if (pairSel && pairSel.options.length <= 1) {
+        const [pairs, instances] = await Promise.all([
+          apiRequest("/api/pairs").catch(() => []),
+          apiRequest("/api/instances").catch(() => []),
+        ]);
+        const instById = new Map((instances || []).map((i) => [i.id, i]));
+        const opts = [
+          `<option value="">All pairs</option>`,
+          ...(pairs || []).map((p) => {
+            const src = instById.get(p.source_instance_id);
+            const tgt = instById.get(p.target_instance_id);
+            const srcName = src?.name || `#${p.source_instance_id}`;
+            const tgtName = tgt?.name || `#${p.target_instance_id}`;
+            const dir = (p.mirror_direction || "").toString().toLowerCase() || "n/a";
+            return `<option value="${String(p.id)}">${esc(p.name)} — ${esc(srcName)} → ${esc(tgtName)} (${esc(dir)})</option>`;
+          }),
+        ].join("");
+        pairSel.innerHTML = opts;
+      }
+    } catch (e) {
+      // ignore (UI will still work without the filter list)
     }
 
     bindUIOnce();
