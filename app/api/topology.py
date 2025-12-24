@@ -33,6 +33,7 @@ class TopologyNode(BaseModel):
     health: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
     staleness: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
     staleness_age_seconds: int | None = None
+    never_succeeded_count: int = 0
 
 
 class TopologyLink(BaseModel):
@@ -49,6 +50,7 @@ class TopologyLink(BaseModel):
     health: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
     staleness: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
     staleness_age_seconds: int | None = None
+    never_succeeded_count: int = 0
 
 
 class TopologyResponse(BaseModel):
@@ -125,6 +127,13 @@ def _staleness_level(
     return "ok", age_s
 
 
+def _normalize_never_succeeded_level(level: str | None) -> str:
+    v = (level or "").strip().lower()
+    if v in {"warning", "error"}:
+        return v
+    return "warning"
+
+
 def _combine_health(*, base: str, staleness: str) -> str:
     """
     Combine status-based health with staleness-based health.
@@ -140,6 +149,7 @@ async def get_topology(
     instance_pair_id: int | None = None,
     stale_warning_seconds: int | None = None,
     stale_error_seconds: int | None = None,
+    never_succeeded_level: str | None = None,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials),
 ) -> TopologyResponse:
@@ -159,6 +169,7 @@ async def get_topology(
         stale_warning_seconds=stale_warning_seconds,
         stale_error_seconds=stale_error_seconds,
     )
+    never_level = _normalize_never_succeeded_level(never_succeeded_level)
     now = datetime.now(timezone.utc)
 
     inst_rows = (await db.execute(select(GitLabInstance))).scalars().all()
@@ -196,12 +207,13 @@ async def get_topology(
             "pair_ids": set(),
             "status_counts": defaultdict(int),
             "last_successful_update": None,
+            "never_succeeded_count": 0,
         }
     )
 
     # Aggregate mirror status per node (instance)
     node_agg: dict[int, dict[str, Any]] = defaultdict(
-        lambda: {"status_counts": defaultdict(int), "last_successful_update": None}
+        lambda: {"status_counts": defaultdict(int), "last_successful_update": None, "never_succeeded_count": 0}
     )
 
     for m in mirror_rows:
@@ -224,6 +236,8 @@ async def get_topology(
             cur = agg[key]["last_successful_update"]
             if cur is None or m.last_successful_update > cur:
                 agg[key]["last_successful_update"] = m.last_successful_update
+        else:
+            agg[key]["never_succeeded_count"] += 1
 
         # Per-node mirror flow counts
         if src in nodes:
@@ -238,26 +252,37 @@ async def get_topology(
                 cur_n = node_agg[iid]["last_successful_update"]
                 if cur_n is None or m.last_successful_update > cur_n:
                     node_agg[iid]["last_successful_update"] = m.last_successful_update
+            else:
+                node_agg[iid]["never_succeeded_count"] += 1
 
     links: list[TopologyLink] = []
     for (src, tgt, direction), v in agg.items():
         last = v["last_successful_update"]
         status_counts = dict(v["status_counts"])
         base_health = _health_from_status_counts(status_counts)
-        stale_level, stale_age_s = _staleness_level(
-            now=now,
-            last_successful_update=last,
-            mirror_count=int(v["mirror_count"]),
-            warn_s=warn_s,
-            err_s=err_s,
-        )
+
+        # Special case: if *all* mirrors in this edge have never succeeded, allow
+        # caller-configurable severity (warning vs error).
+        mirror_count = int(v["mirror_count"])
+        never_count = int(v["never_succeeded_count"])
+        if mirror_count > 0 and never_count == mirror_count:
+            stale_level = never_level
+            stale_age_s = None
+        else:
+            stale_level, stale_age_s = _staleness_level(
+                now=now,
+                last_successful_update=last,
+                mirror_count=mirror_count,
+                warn_s=warn_s,
+                err_s=err_s,
+            )
         health = _combine_health(base=base_health, staleness=stale_level)
         links.append(
             TopologyLink(
                 source=src,
                 target=tgt,
                 mirror_direction=direction,
-                mirror_count=int(v["mirror_count"]),
+                mirror_count=mirror_count,
                 enabled_count=int(v["enabled"]),
                 disabled_count=int(v["disabled"]),
                 pair_count=len(v["pair_ids"]),
@@ -266,6 +291,7 @@ async def get_topology(
                 health=health,
                 staleness=stale_level,
                 staleness_age_seconds=stale_age_s,
+                never_succeeded_count=never_count,
             )
         )
 
@@ -276,19 +302,26 @@ async def get_topology(
             continue
         counts = dict(a["status_counts"])
         last = a["last_successful_update"]
+        never_count = int(a.get("never_succeeded_count") or 0)
         n.status_counts = counts
         n.last_successful_update = last.isoformat() if last is not None else None
         base_health = _health_from_status_counts(counts)
-        stale_level, stale_age_s = _staleness_level(
-            now=now,
-            last_successful_update=last,
-            mirror_count=int(n.mirrors_in) + int(n.mirrors_out),
-            warn_s=warn_s,
-            err_s=err_s,
-        )
+        mirror_count = int(n.mirrors_in) + int(n.mirrors_out)
+        if mirror_count > 0 and never_count == mirror_count:
+            stale_level = never_level
+            stale_age_s = None
+        else:
+            stale_level, stale_age_s = _staleness_level(
+                now=now,
+                last_successful_update=last,
+                mirror_count=mirror_count,
+                warn_s=warn_s,
+                err_s=err_s,
+            )
         n.staleness = stale_level
         n.staleness_age_seconds = stale_age_s
         n.health = _combine_health(base=base_health, staleness=stale_level)
+        n.never_succeeded_count = never_count
 
     # Keep output stable for UI diffs
     nodes_out = sorted(nodes.values(), key=lambda n: (n.name.lower(), n.id))

@@ -60,11 +60,13 @@
     const errHours = parseInt((byId("topology-stale-error-hours")?.value || "168").toString(), 10);
     const warnS = Number.isFinite(warnHours) ? Math.max(0, warnHours) * 3600 : 24 * 3600;
     const errS = Number.isFinite(errHours) ? Math.max(0, errHours) * 3600 : 168 * 3600;
+    const neverAsError = !!byId("topology-never-succeeded-error")?.checked;
 
     const params = new URLSearchParams();
     if (pairId) params.set("instance_pair_id", pairId);
     params.set("stale_warning_seconds", String(warnS));
     params.set("stale_error_seconds", String(errS));
+    params.set("never_succeeded_level", neverAsError ? "error" : "warning");
 
     const qs = params.toString() ? `?${params.toString()}` : "";
     topology.raw = await apiRequest(`/api/topology${qs}`);
@@ -314,6 +316,7 @@
         const last = d.last_successful_update ? new Date(d.last_successful_update).toLocaleString() : "Never";
         const stale = (d.staleness || "").toString().toLowerCase();
         const staleAge = Number.isFinite(d.staleness_age_seconds) ? `${Math.round(d.staleness_age_seconds / 3600)}h` : "n/a";
+        const neverCount = Number.isFinite(d.never_succeeded_count) ? d.never_succeeded_count : 0;
         const health = (d.health || "unknown").toString();
         const dot = healthDotClass(health);
         const html = `
@@ -324,6 +327,7 @@
           <div class="muted" style="margin-top:6px">${esc(String(d.shown_count))} ${esc(d.mirror_direction)} mirror(s)</div>
           <div class="muted" style="margin-top:6px">Last success: ${esc(last)}</div>
           <div class="muted" style="margin-top:6px">Staleness: ${esc(stale || "n/a")} (${esc(staleAge)})</div>
+          <div class="muted" style="margin-top:6px">Never succeeded: ${esc(String(neverCount))}</div>
           <div class="muted" style="margin-top:8px">Status: ${Object.entries(counts).map(([k,v]) => `${esc(k)}=${esc(String(v))}`).join(", ") || "n/a"}</div>
         `;
         setTooltip(html, event.offsetX, event.offsetY);
@@ -411,6 +415,7 @@
         const last = lastIso ? new Date(lastIso).toLocaleString() : "Never";
         const stale = (d.staleness || "").toString().toLowerCase();
         const staleAge = Number.isFinite(d.staleness_age_seconds) ? `${Math.round(d.staleness_age_seconds / 3600)}h` : "n/a";
+        const neverCount = Number.isFinite(d.never_succeeded_count) ? d.never_succeeded_count : 0;
         const html = `
           <div class="row" style="align-items:center">
             <div><strong>${esc(d.name)}</strong></div>
@@ -419,6 +424,7 @@
           <div class="muted" style="margin-top:6px">${esc(String(d.mirrors_in || 0))} in • ${esc(String(d.mirrors_out || 0))} out</div>
           <div class="muted" style="margin-top:6px">Last success: ${esc(last)}</div>
           <div class="muted" style="margin-top:6px">Staleness: ${esc(stale || "n/a")} (${esc(staleAge)})</div>
+          <div class="muted" style="margin-top:6px">Never succeeded: ${esc(String(neverCount))}</div>
         `;
         setTooltip(html, event.offsetX, event.offsetY);
       })
@@ -554,6 +560,7 @@
     const last = n.last_successful_update ? new Date(n.last_successful_update).toLocaleString() : "Never";
     const stale = (n.staleness || "unknown").toString().toLowerCase();
     const staleAge = Number.isFinite(n.staleness_age_seconds) ? `${Math.round(n.staleness_age_seconds / 3600)}h` : "n/a";
+    const neverCount = Number.isFinite(n.never_succeeded_count) ? n.never_succeeded_count : 0;
     const counts = n.status_counts || {};
     const fmtCounts = Object.keys(counts).length
       ? Object.entries(counts)
@@ -572,6 +579,7 @@
             <div class="text-muted">Last success: ${esc(last)}</div>
           </div>
           <div class="text-muted">Staleness: <strong>${esc(stale)}</strong> <span class="text-muted">(${esc(staleAge)})</span></div>
+          <div class="text-muted">Never succeeded mirrors: <strong>${esc(String(neverCount))}</strong></div>
           <div>
             <div class="text-muted">URL</div>
             <div><code>${esc(n.url)}</code></div>
@@ -611,6 +619,7 @@
     const last = link.last_successful_update ? new Date(link.last_successful_update).toLocaleString() : "Never";
     const stale = (link.staleness || "unknown").toString().toLowerCase();
     const staleAge = Number.isFinite(link.staleness_age_seconds) ? `${Math.round(link.staleness_age_seconds / 3600)}h` : "n/a";
+    const neverCount = Number.isFinite(link.never_succeeded_count) ? link.never_succeeded_count : 0;
     const counts = link.status_counts || {};
     const fmtCounts = Object.keys(counts).length
       ? Object.entries(counts)
@@ -629,6 +638,7 @@
             <div class="text-muted">Last success: ${esc(last)}</div>
           </div>
           <div class="text-muted">Staleness: <strong>${esc(stale)}</strong> <span class="text-muted">(${esc(staleAge)})</span></div>
+          <div class="text-muted">Never succeeded mirrors: <strong>${esc(String(neverCount))}</strong></div>
           <div class="grid-2">
             <div><div class="text-muted">Mirrors shown</div><div><strong>${esc(String(countShown))}</strong></div></div>
             <div><div class="text-muted">Pairs</div><div><strong>${esc(String(link.pair_count || 0))}</strong></div></div>
@@ -682,6 +692,7 @@
 
     const warnEl = byId("topology-stale-warn-hours");
     const errEl = byId("topology-stale-error-hours");
+    const neverEl = byId("topology-never-succeeded-error");
     const normalize = () => {
       if (!warnEl || !errEl) return;
       const w = parseInt((warnEl.value || "0").toString(), 10);
@@ -694,6 +705,7 @@
     };
     if (warnEl) warnEl.addEventListener("change", () => { normalize(); refresh(); });
     if (errEl) errEl.addEventListener("change", () => { normalize(); refresh(); });
+    if (neverEl) neverEl.addEventListener("change", () => refresh());
 
     ["topology-show-pull", "topology-show-push", "topology-show-disabled"].forEach((id) => {
       const el = byId(id);
