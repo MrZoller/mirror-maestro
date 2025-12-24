@@ -321,7 +321,7 @@ function renderInstances(instances) {
     if (!tbody) return;
 
     if (instances.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No instances configured</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No instances configured</td></tr>';
         return;
     }
 
@@ -338,10 +338,10 @@ function renderInstances(instances) {
                         ${escapeHtml(instance.url)}
                     </td>
                     <td>
-                        <div style="display:grid; gap:8px">
-                            <input class="table-input" id="edit-instance-description-${instance.id}" value="${escapeHtml(instance.description || '')}" placeholder="Description (optional)">
-                            <input class="table-input" type="password" id="edit-instance-token-${instance.id}" value="" placeholder="New access token (leave blank to keep existing)">
-                        </div>
+                        <input class="table-input" id="edit-instance-description-${instance.id}" value="${escapeHtml(instance.description || '')}" placeholder="Description (optional)">
+                    </td>
+                    <td>
+                        <input class="table-input" type="password" id="edit-instance-token-${instance.id}" value="" placeholder="New token (leave blank to keep)">
                     </td>
                     <td>
                         <div class="table-actions">
@@ -358,6 +358,9 @@ function renderInstances(instances) {
                 <td><strong>${escapeHtml(instance.name)}</strong></td>
                 <td>${escapeHtml(instance.url)}</td>
                 <td><span class="text-muted">${escapeHtml(instance.description || 'N/A')}</span></td>
+                <td>
+                    <span class="text-muted" title="Token value is never displayed">••••••••</span>
+                </td>
                 <td>
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginInstanceEdit(${instance.id})">Edit</button>
