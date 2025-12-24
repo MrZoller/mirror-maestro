@@ -34,6 +34,8 @@ The demo HTML files are pre-populated with sample data and ready to screenshot:
    - `05-mirrors.png`
    - `06-topology.png`
 
+   For best results, click a link in the Topology graph before capturing so the drilldown mirror list is visible.
+
 ### Option 2: Automated with Playwright
 
 1. **Install dependencies:**
