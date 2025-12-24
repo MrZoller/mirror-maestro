@@ -69,11 +69,14 @@
                     </thead>
                     <tbody id="instances-list">
                         <tr>
-                            <td><strong>Production GitLab</strong></td>
-                            <td>https://gitlab.company.com</td>
-                            <td><span class="text-muted">Main production GitLab instance</span></td>
+                            <td><input class="table-input" value="Production GitLab"></td>
+                            <td class="cell-locked" title="Instance URL is locked once it is used by a pair">https://gitlab.company.com</td>
+                            <td><input class="table-input" value="Main production GitLab instance"></td>
                             <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-primary btn-small">Save</button>
+                                    <button class="btn btn-secondary btn-small">Cancel</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -81,7 +84,10 @@
                             <td>https://backup.gitlab.company.com</td>
                             <td><span class="text-muted">Backup GitLab instance for disaster recovery</span></td>
                             <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -89,7 +95,10 @@
                             <td>https://gitlab-dev.company.com</td>
                             <td><span class="text-muted">Development and testing environment</span></td>
                             <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -97,7 +106,10 @@
                             <td>https://gitlab.partner.com</td>
                             <td><span class="text-muted">Partner organization GitLab instance</span></td>
                             <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                     </tbody>
