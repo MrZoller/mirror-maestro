@@ -64,6 +64,7 @@
                             <th>Name</th>
                             <th>URL</th>
                             <th>Description</th>
+                            <th>API Token</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -71,11 +72,11 @@
                         <tr>
                             <td><input class="table-input" value="Production GitLab"></td>
                             <td class="cell-locked" title="Instance URL is locked once it is used by a pair">https://gitlab.company.com</td>
+                            <td><input class="table-input" value="Main production GitLab instance"></td>
                             <td>
-                                <div style="display:grid; gap:8px">
-                                    <input class="table-input" value="Main production GitLab instance">
+                                <div style="display:grid; gap:6px">
                                     <div class="text-muted" style="font-size:0.9rem">Rotate API token</div>
-                                    <input class="table-input" type="password" value="" placeholder="New access token (leave blank to keep existing)">
+                                    <input class="table-input" type="password" value="" placeholder="New token (leave blank to keep)">
                                 </div>
                             </td>
                             <td>
@@ -89,6 +90,7 @@
                             <td><strong>Backup GitLab</strong></td>
                             <td>https://backup.gitlab.company.com</td>
                             <td><span class="text-muted">Backup GitLab instance for disaster recovery</span></td>
+                            <td><span class="text-muted">••••••••</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
@@ -100,6 +102,7 @@
                             <td><strong>Development GitLab</strong></td>
                             <td>https://gitlab-dev.company.com</td>
                             <td><span class="text-muted">Development and testing environment</span></td>
+                            <td><span class="text-muted">••••••••</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
@@ -111,6 +114,7 @@
                             <td><strong>Partner GitLab</strong></td>
                             <td>https://gitlab.partner.com</td>
                             <td><span class="text-muted">Partner organization GitLab instance</span></td>
+                            <td><span class="text-muted">••••••••</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
