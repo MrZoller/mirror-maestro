@@ -341,7 +341,7 @@ function renderInstances(instances) {
                         <input class="table-input" id="edit-instance-description-${instance.id}" value="${escapeHtml(instance.description || '')}" placeholder="Description (optional)">
                     </td>
                     <td>
-                        <input class="table-input" type="password" id="edit-instance-token-${instance.id}" value="" placeholder="New token (leave blank to keep)">
+                        <input class="table-input" type="password" id="edit-instance-token-${instance.id}" value="" placeholder="New access token (leave blank to keep)">
                     </td>
                     <td>
                         <div class="table-actions">
