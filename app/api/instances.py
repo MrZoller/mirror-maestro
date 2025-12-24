@@ -160,23 +160,48 @@ async def update_instance(
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
 
-    # Update fields
-    if instance_update.name is not None:
+    # Update fields.
+    #
+    # Important: allow clearing fields by accepting explicit nulls in the payload
+    # (FastAPI/Pydantic v2 tracks presence via `model_fields_set`).
+    fields = getattr(instance_update, "model_fields_set", set())
+    if "name" in fields:
         instance.name = instance_update.name
-    if instance_update.url is not None:
+
+    if "url" in fields:
+        # Changing an instance URL can invalidate existing pairs/mirrors because
+        # the instance is identified by its DB id throughout the configuration.
+        # Keep this safe: don't allow changing the URL once the instance is used
+        # by any instance pair.
+        pair_res = await db.execute(
+            select(InstancePair.id).where(
+                or_(
+                    InstancePair.source_instance_id == instance_id,
+                    InstancePair.target_instance_id == instance_id,
+                )
+            ).limit(1)
+        )
+        if pair_res.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Instance URL cannot be changed once it is used by an instance pair. Create a new instance instead.",
+            )
         instance.url = instance_update.url
-    if instance_update.token is not None:
-        instance.encrypted_token = encryption.encrypt(instance_update.token)
-        # Best-effort: refresh token user identity
-        try:
-            client = GitLabClient(instance.url, instance.encrypted_token)
-            u = client.get_current_user()
-            instance.api_user_id = u.get("id")
-            instance.api_username = u.get("username")
-        except Exception:
-            instance.api_user_id = None
-            instance.api_username = None
-    if instance_update.description is not None:
+
+    if "token" in fields:
+        if instance_update.token is not None:
+            instance.encrypted_token = encryption.encrypt(instance_update.token)
+            # Best-effort: refresh token user identity
+            try:
+                client = GitLabClient(instance.url, instance.encrypted_token)
+                u = client.get_current_user()
+                instance.api_user_id = u.get("id")
+                instance.api_username = u.get("username")
+            except Exception:
+                instance.api_user_id = None
+                instance.api_username = None
+
+    if "description" in fields:
         instance.description = instance_update.description
 
     await db.commit()

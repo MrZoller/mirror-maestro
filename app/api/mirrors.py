@@ -633,22 +633,26 @@ async def update_mirror(
         # GitLab doesn't support switching direction in-place; UI expects delete/re-add.
         raise HTTPException(status_code=400, detail="Mirror direction cannot be changed after creation. Delete and recreate the mirror.")
 
-    # Update database fields
-    if mirror_update.mirror_direction is not None:
+    # Update database fields.
+    #
+    # Important: allow clearing overrides by accepting explicit nulls in the payload.
+    # (FastAPI/Pydantic v2 tracks presence via `model_fields_set`.)
+    fields = getattr(mirror_update, "model_fields_set", set())
+    if "mirror_direction" in fields:
         mirror.mirror_direction = mirror_update.mirror_direction
-    if mirror_update.mirror_protected_branches is not None:
+    if "mirror_protected_branches" in fields:
         mirror.mirror_protected_branches = mirror_update.mirror_protected_branches
-    if mirror_update.mirror_overwrite_diverged is not None:
+    if "mirror_overwrite_diverged" in fields:
         mirror.mirror_overwrite_diverged = mirror_update.mirror_overwrite_diverged
-    if mirror_update.mirror_trigger_builds is not None:
+    if "mirror_trigger_builds" in fields:
         mirror.mirror_trigger_builds = mirror_update.mirror_trigger_builds
-    if mirror_update.only_mirror_protected_branches is not None:
+    if "only_mirror_protected_branches" in fields:
         mirror.only_mirror_protected_branches = mirror_update.only_mirror_protected_branches
-    if mirror_update.mirror_branch_regex is not None:
+    if "mirror_branch_regex" in fields:
         mirror.mirror_branch_regex = mirror_update.mirror_branch_regex
-    if mirror_update.mirror_user_id is not None:
+    if "mirror_user_id" in fields:
         mirror.mirror_user_id = mirror_update.mirror_user_id
-    if mirror_update.enabled is not None:
+    if "enabled" in fields:
         mirror.enabled = mirror_update.enabled
 
     # Best-effort: if this mirror is configured in GitLab, apply settings there too.

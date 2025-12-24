@@ -543,3 +543,36 @@ async def test_mirrors_update_uses_group_defaults_over_pair(client, session_make
         "pull",
     )
 
+
+@pytest.mark.asyncio
+async def test_mirrors_update_can_clear_overrides_with_null(client, session_maker):
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="platform/proj",
+            target_project_id=2,
+            target_project_path="platform/proj",
+            mirror_id=None,  # avoid any GitLab client calls
+            enabled=True,
+            last_update_status="pending",
+            mirror_direction="pull",
+            mirror_overwrite_diverged=True,  # explicit override
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        db_mirror_id = m.id
+
+    resp = await client.put(f"/api/mirrors/{db_mirror_id}", json={"mirror_overwrite_diverged": None})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["mirror_overwrite_diverged"] is None
+
+    async with session_maker() as s:
+        row = (await s.execute(select(Mirror).where(Mirror.id == db_mirror_id))).scalar_one()
+        assert row.mirror_overwrite_diverged is None
+
