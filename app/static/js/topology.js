@@ -72,6 +72,72 @@
     topology.raw = await apiRequest(`/api/topology${qs}`);
   }
 
+  function statusBadgeHtml(status) {
+    const s = (status || "unknown").toString().toLowerCase();
+    const cls =
+      s === "failed"
+        ? "badge-danger"
+        : s === "finished"
+          ? "badge-success"
+          : s === "updating"
+            ? "badge-warning"
+            : s === "pending"
+              ? "badge-warning"
+              : "badge-info";
+    return `<span class="badge ${cls}">${esc(s)}</span>`;
+  }
+
+  function healthPillHtml(health, staleness, neverSucceeded) {
+    const h = (health || "unknown").toString().toLowerCase();
+    const dot = healthDotClass(h);
+    const st = (staleness || "unknown").toString().toLowerCase();
+    const never = !!neverSucceeded;
+    const extra = never ? `<span class="pill" style="margin-left:8px">never</span>` : st && st !== "ok" ? `<span class="pill" style="margin-left:8px">${esc(st)}</span>` : "";
+    return `<span class="pill"><span class="dot ${dot}"></span><strong>${esc(h)}</strong></span>${extra}`;
+  }
+
+  function buildLinkMirrorsQuery({ sourceId, targetId, direction }) {
+    const pairId = (byId("topology-pair-filter")?.value || "").toString().trim();
+    const includeDisabled = !!byId("topology-show-disabled")?.checked;
+    const warnHours = parseInt((byId("topology-stale-warn-hours")?.value || "24").toString(), 10);
+    const errHours = parseInt((byId("topology-stale-error-hours")?.value || "168").toString(), 10);
+    const warnS = Number.isFinite(warnHours) ? Math.max(0, warnHours) * 3600 : 24 * 3600;
+    const errS = Number.isFinite(errHours) ? Math.max(0, errHours) * 3600 : 168 * 3600;
+    const neverAsError = !!byId("topology-never-succeeded-error")?.checked;
+
+    const params = new URLSearchParams();
+    params.set("source_instance_id", String(sourceId));
+    params.set("target_instance_id", String(targetId));
+    params.set("mirror_direction", String(direction));
+    if (pairId) params.set("instance_pair_id", pairId);
+    params.set("include_disabled", includeDisabled ? "true" : "false");
+    params.set("stale_warning_seconds", String(warnS));
+    params.set("stale_error_seconds", String(errS));
+    params.set("never_succeeded_level", neverAsError ? "error" : "warning");
+    params.set("limit", "200");
+    params.set("offset", "0");
+    return params.toString();
+  }
+
+  window.openMirrorsForPair = async function openMirrorsForPair(pairId) {
+    try {
+      const tabBtn = document.querySelector(`.tab[data-tab="mirrors-tab"]`);
+      if (tabBtn) tabBtn.click();
+
+      if (typeof window.loadPairs === "function") {
+        await window.loadPairs();
+      }
+      const sel = document.getElementById("pair-selector");
+      if (sel) {
+        sel.value = String(pairId);
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        sel.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    } catch (e) {
+      showMessage(`Failed to open Mirrors tab: ${e?.message || e}`, "error");
+    }
+  };
+
   function filteredGraph() {
     const raw = topology.raw || { nodes: [], links: [] };
     const f = getFilters();
@@ -651,6 +717,12 @@
             <div class="text-muted" style="margin-bottom:6px">Status breakdown</div>
             <div>${fmtCounts}</div>
           </div>
+          <div>
+            <div class="text-muted" style="margin-bottom:6px">Mirrors in this link</div>
+            <div id="topology-link-mirrors">
+              <div class="text-muted">Loading…</div>
+            </div>
+          </div>
           <div class="text-muted" style="font-size:0.92rem">
             Arrow is always drawn <strong>source → target</strong>. Direction indicates how GitLab is configured:
             <strong>push</strong> = source pushes, <strong>pull</strong> = target pulls.
@@ -658,6 +730,77 @@
         </div>
       `
     );
+
+    // Fetch drilldown mirrors and render inline
+    const isFileDemo = (window?.location?.protocol || "") === "file:";
+    if (isFileDemo) return;
+    topology._linkReqId = (topology._linkReqId || 0) + 1;
+    const reqId = topology._linkReqId;
+
+    (async () => {
+      try {
+        const q = buildLinkMirrorsQuery({ sourceId: srcId, targetId: tgtId, direction: dir });
+        const res = await apiRequest(`/api/topology/link-mirrors?${q}`);
+        if (reqId !== topology._linkReqId) return;
+
+        const host = document.getElementById("topology-link-mirrors");
+        if (!host) return;
+
+        const mirrors = res?.mirrors || [];
+        if (!mirrors.length) {
+          host.innerHTML = `<div class="text-muted">No mirrors found for this link.</div>`;
+          return;
+        }
+
+        const rows = mirrors
+          .slice(0, 200)
+          .map((m) => {
+            const last = m.last_successful_update ? new Date(m.last_successful_update).toLocaleString() : "Never";
+            const enabled = m.enabled ? `<span class="badge badge-success">Enabled</span>` : `<span class="badge badge-warning">Disabled</span>`;
+            const health = healthPillHtml(m.health, m.staleness, m.never_succeeded);
+            const status = statusBadgeHtml(m.last_update_status);
+            const openBtn = `<button class="btn btn-secondary btn-small" type="button" onclick="openMirrorsForPair(${Number(m.instance_pair_id)})">Open</button>`;
+            return `
+              <tr>
+                <td><strong>${esc(m.instance_pair_name)}</strong><div class="text-muted">#${esc(String(m.instance_pair_id))}</div></td>
+                <td><code>${esc(m.source_project_path)}</code></td>
+                <td><code>${esc(m.target_project_path)}</code></td>
+                <td>${health}</td>
+                <td>${status}</td>
+                <td>${enabled}</td>
+                <td class="text-muted">${esc(last)}</td>
+                <td>${openBtn}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        host.innerHTML = `
+          <div class="text-muted" style="margin-bottom:8px">Showing ${esc(String(mirrors.length))} mirror(s)</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Pair</th>
+                <th>Source</th>
+                <th>Target</th>
+                <th>Health</th>
+                <th>Status</th>
+                <th>Enabled</th>
+                <th>Last Success</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        `;
+      } catch (e) {
+        if (reqId !== topology._linkReqId) return;
+        const host = document.getElementById("topology-link-mirrors");
+        if (host) {
+          host.innerHTML = `<div class="message message-error">Failed to load mirrors for this link: ${esc(e?.message || e)}</div>`;
+        }
+      }
+    })();
   }
 
   async function refresh() {

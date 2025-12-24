@@ -239,3 +239,72 @@ async def test_topology_never_succeeded_level_can_be_error(client, session_maker
     assert link2["staleness"] == "error"
     assert link2["health"] == "error"
 
+
+@pytest.mark.asyncio
+async def test_topology_link_mirrors_drilldown_filters_and_sorts(client, session_maker):
+    a_id = await seed_instance(session_maker, name="A", url="https://a.example.com")
+    b_id = await seed_instance(session_maker, name="B", url="https://b.example.com")
+    pair_ab = await seed_pair(session_maker, name="ab4", src_id=a_id, tgt_id=b_id, direction="push")
+
+    async with session_maker() as s:
+        # One failed (worst), one finished (best), one disabled pending (should be filtered if include_disabled=false)
+        s.add_all(
+            [
+                Mirror(
+                    instance_pair_id=pair_ab,
+                    source_project_id=1,
+                    source_project_path="g/a1",
+                    target_project_id=2,
+                    target_project_path="g/b1",
+                    mirror_direction=None,
+                    enabled=True,
+                    last_update_status="failed",
+                    last_successful_update=datetime.utcnow() - timedelta(hours=2),
+                ),
+                Mirror(
+                    instance_pair_id=pair_ab,
+                    source_project_id=3,
+                    source_project_path="g/a2",
+                    target_project_id=4,
+                    target_project_path="g/b2",
+                    mirror_direction=None,
+                    enabled=True,
+                    last_update_status="finished",
+                    last_successful_update=datetime.utcnow() - timedelta(hours=1),
+                ),
+                Mirror(
+                    instance_pair_id=pair_ab,
+                    source_project_id=5,
+                    source_project_path="g/a3",
+                    target_project_id=6,
+                    target_project_path="g/b3",
+                    mirror_direction=None,
+                    enabled=False,
+                    last_update_status="pending",
+                    last_successful_update=None,
+                ),
+            ]
+        )
+        await s.commit()
+
+    # include_disabled=false should exclude the disabled mirror
+    resp = await client.get(
+        f"/api/topology/link-mirrors?source_instance_id={a_id}&target_instance_id={b_id}&mirror_direction=push&include_disabled=false"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 2
+    assert len(body["mirrors"]) == 2
+    # First should be the failed one due to sorting by health severity
+    assert body["mirrors"][0]["last_update_status"] == "failed"
+    assert body["mirrors"][0]["health"] == "error"
+
+    # include_disabled=true should include all
+    resp = await client.get(
+        f"/api/topology/link-mirrors?source_instance_id={a_id}&target_instance_id={b_id}&mirror_direction=push&include_disabled=true"
+    )
+    assert resp.status_code == 200, resp.text
+    body2 = resp.json()
+    assert body2["total"] == 3
+    assert len(body2["mirrors"]) == 3
+
