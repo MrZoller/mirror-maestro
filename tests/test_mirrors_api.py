@@ -12,6 +12,7 @@ class FakeGitLabClient:
     trigger_calls = []
     delete_calls = []
     update_calls = []
+    project_mirrors = {}  # project_id -> list[dict]
 
     def __init__(self, url: str, encrypted_token: str):
         self.url = url
@@ -48,6 +49,9 @@ class FakeGitLabClient:
             (project_id, mirror_url, enabled, keep_divergent_refs, only_protected_branches, mirror_branch_regex, mirror_user_id)
         )
         return {"id": 88}
+
+    def get_project_mirrors(self, project_id: int):
+        return list(self.__class__.project_mirrors.get(project_id, []))
 
     def trigger_mirror_update(self, project_id: int, mirror_id: int) -> bool:
         self.__class__.trigger_calls.append((project_id, mirror_id))
@@ -175,6 +179,7 @@ async def test_mirrors_create_pull_uses_source_authenticated_url(client, session
     monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
     FakeGitLabClient.inits.clear()
     FakeGitLabClient.pull_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
 
     src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
     tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
@@ -209,6 +214,7 @@ async def test_mirrors_create_push_uses_target_authenticated_url(client, session
     monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
     FakeGitLabClient.inits.clear()
     FakeGitLabClient.push_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
 
     src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
     tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
@@ -240,6 +246,7 @@ async def test_mirrors_trigger_update_updates_status(client, session_maker, monk
 
     monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
     FakeGitLabClient.trigger_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
 
     src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
     tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
@@ -277,6 +284,7 @@ async def test_mirrors_delete_best_effort_gitlab_and_db(client, session_maker, m
 
     monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
     FakeGitLabClient.delete_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
 
     src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
     tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
@@ -314,6 +322,7 @@ async def test_mirrors_update_applies_settings_to_gitlab(client, session_maker, 
 
     monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
     FakeGitLabClient.update_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
 
     src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
     tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
@@ -368,6 +377,7 @@ async def test_mirrors_create_pull_uses_group_defaults_over_pair(client, session
     monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
     FakeGitLabClient.inits.clear()
     FakeGitLabClient.pull_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
 
     src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
     tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
@@ -421,6 +431,7 @@ async def test_mirrors_create_pull_defaults_mirror_user_to_token_user(client, se
 
     monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
     FakeGitLabClient.pull_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
 
     src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
     tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
@@ -455,6 +466,7 @@ async def test_mirrors_create_pull_mirror_override_wins_over_group_defaults(clie
 
     monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
     FakeGitLabClient.pull_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
 
     src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
     tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
@@ -489,6 +501,7 @@ async def test_mirrors_update_uses_group_defaults_over_pair(client, session_make
 
     monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
     FakeGitLabClient.update_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
 
     src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
     tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
@@ -575,4 +588,99 @@ async def test_mirrors_update_can_clear_overrides_with_null(client, session_make
     async with session_maker() as s:
         row = (await s.execute(select(Mirror).where(Mirror.id == db_mirror_id))).scalar_one()
         assert row.mirror_overwrite_diverged is None
+
+
+@pytest.mark.asyncio
+async def test_mirrors_create_pull_conflicts_when_existing_pull_mirror_present(client, session_maker, monkeypatch):
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.inits.clear()
+    FakeGitLabClient.pull_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    # Simulate an existing pull mirror on the target project
+    FakeGitLabClient.project_mirrors[2] = [{"id": 999, "mirror_direction": "pull", "url": "https://example.com/existing.git"}]
+
+    payload = {
+        "instance_pair_id": pair_id,
+        "source_project_id": 1,
+        "source_project_path": "platform/proj",
+        "target_project_id": 2,
+        "target_project_path": "platform/proj",
+        "enabled": True,
+    }
+    resp = await client.post("/api/mirrors", json=payload)
+    assert resp.status_code == 409
+    body = resp.json()
+    assert "existing_pull_mirrors" in body["detail"]
+    assert FakeGitLabClient.pull_calls == []
+
+
+@pytest.mark.asyncio
+async def test_mirrors_preflight_lists_existing_same_direction(client, session_maker, monkeypatch):
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.project_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    FakeGitLabClient.project_mirrors[2] = [
+        {"id": 1, "mirror_direction": "pull", "url": "https://example.com/a.git"},
+        {"id": 2, "mirror_direction": "push", "url": "https://example.com/b.git"},
+    ]
+
+    payload = {
+        "instance_pair_id": pair_id,
+        "source_project_id": 1,
+        "source_project_path": "platform/proj",
+        "target_project_id": 2,
+        "target_project_path": "platform/proj",
+    }
+    resp = await client.post("/api/mirrors/preflight", json=payload)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["effective_direction"] == "pull"
+    assert body["owner_project_id"] == 2
+    assert len(body["existing_same_direction"]) == 1
+    assert body["existing_same_direction"][0]["id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_mirrors_remove_existing_deletes_same_direction(client, session_maker, monkeypatch):
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.delete_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    FakeGitLabClient.project_mirrors[2] = [
+        {"id": 11, "mirror_direction": "pull", "url": "https://example.com/a.git"},
+        {"id": 22, "mirror_direction": "push", "url": "https://example.com/b.git"},
+    ]
+
+    payload = {
+        "instance_pair_id": pair_id,
+        "source_project_id": 1,
+        "source_project_path": "platform/proj",
+        "target_project_id": 2,
+        "target_project_path": "platform/proj",
+    }
+    resp = await client.post("/api/mirrors/remove-existing", json=payload)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["deleted"] == 1
+    assert body["deleted_ids"] == [11]
+    assert FakeGitLabClient.delete_calls[-1] == (2, 11)
 
