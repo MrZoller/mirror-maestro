@@ -11,6 +11,7 @@ const state = {
         instanceId: null,
         pairId: null,
         mirrorId: null,
+        tokenId: null,
     },
 };
 
@@ -146,7 +147,14 @@ function setupEventListeners() {
     // Token form
     document.getElementById('token-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
-        await createToken();
+        if (state.editing?.tokenId) {
+            await updateToken();
+        } else {
+            await createToken();
+        }
+    });
+    document.getElementById('token-cancel-edit')?.addEventListener('click', () => {
+        cancelTokenEdit();
     });
 
     // Group path typeahead (token form)
@@ -330,7 +338,10 @@ function renderInstances(instances) {
                         ${escapeHtml(instance.url)}
                     </td>
                     <td>
-                        <input class="table-input" id="edit-instance-description-${instance.id}" value="${escapeHtml(instance.description || '')}">
+                        <div style="display:grid; gap:8px">
+                            <input class="table-input" id="edit-instance-description-${instance.id}" value="${escapeHtml(instance.description || '')}" placeholder="Description (optional)">
+                            <input class="table-input" type="password" id="edit-instance-token-${instance.id}" value="" placeholder="New access token (leave blank to keep existing)">
+                        </div>
                     </td>
                     <td>
                         <div class="table-actions">
@@ -362,6 +373,7 @@ function beginInstanceEdit(id) {
     state.editing.instanceId = id;
     state.editing.pairId = null;
     state.editing.mirrorId = null;
+    state.editing.tokenId = null;
     renderInstances(state.instances);
 }
 
@@ -373,12 +385,17 @@ function cancelInstanceEdit() {
 async function saveInstanceEdit(id) {
     const nameEl = document.getElementById(`edit-instance-name-${id}`);
     const descEl = document.getElementById(`edit-instance-description-${id}`);
+    const tokenEl = document.getElementById(`edit-instance-token-${id}`);
     if (!nameEl || !descEl) return;
 
     const payload = {
         name: (nameEl.value || '').toString().trim(),
         description: (descEl.value || '').toString().trim() || null,
     };
+    const tokenRaw = (tokenEl?.value || '').toString().trim();
+    if (tokenRaw) {
+        payload.token = tokenRaw;
+    }
 
     try {
         await apiRequest(`/api/instances/${id}`, {
@@ -602,6 +619,7 @@ function beginPairEdit(id) {
     state.editing.pairId = id;
     state.editing.instanceId = null;
     state.editing.mirrorId = null;
+    state.editing.tokenId = null;
     renderPairs(state.pairs);
     setTimeout(() => applyPairEditDirection(id), 0);
 }
@@ -803,9 +821,104 @@ async function createToken() {
 
         showMessage('Group access token added successfully', 'success');
         form.reset();
+        cancelTokenEdit();
         await loadTokens();
     } catch (error) {
         console.error('Failed to create token:', error);
+    }
+}
+
+function _setTokenFormEditMode(isEditing) {
+    const submit = document.getElementById('token-submit');
+    const cancel = document.getElementById('token-cancel-edit');
+    const instanceSel = document.getElementById('token-instance');
+    const groupPathEl = document.getElementById('token-group-path');
+    const tokenEl = document.getElementById('token-value');
+    if (submit) submit.textContent = isEditing ? 'Update Token' : 'Add Group Token';
+    if (cancel) cancel.classList.toggle('hidden', !isEditing);
+
+    // Avoid breaking existing mirror auth by changing the lookup key in-place.
+    if (instanceSel) instanceSel.disabled = !!isEditing;
+    if (groupPathEl) groupPathEl.disabled = !!isEditing;
+
+    if (!isEditing) {
+        if (instanceSel) instanceSel.disabled = false;
+        if (groupPathEl) groupPathEl.disabled = false;
+    }
+
+    // In edit mode, the user must re-enter a fresh token value (we never display the old token).
+    if (tokenEl) {
+        tokenEl.required = true;
+        tokenEl.placeholder = isEditing ? 'Paste new token value' : 'Group access token';
+    }
+}
+
+function beginTokenEdit(tokenId) {
+    const token = (state.tokens || []).find(t => t.id === tokenId);
+    if (!token) return;
+
+    state.editing.tokenId = tokenId;
+    state.editing.instanceId = null;
+    state.editing.pairId = null;
+    state.editing.mirrorId = null;
+
+    const instanceSel = document.getElementById('token-instance');
+    const groupPathEl = document.getElementById('token-group-path');
+    const nameEl = document.getElementById('token-name');
+    const tokenEl = document.getElementById('token-value');
+
+    if (instanceSel) instanceSel.value = String(token.gitlab_instance_id);
+    if (groupPathEl) groupPathEl.value = token.group_path || '';
+    if (nameEl) nameEl.value = token.token_name || '';
+    if (tokenEl) tokenEl.value = '';
+
+    _setTokenFormEditMode(true);
+    document.getElementById('token-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelTokenEdit() {
+    state.editing.tokenId = null;
+    _setTokenFormEditMode(false);
+
+    const instanceSel = document.getElementById('token-instance');
+    const groupPathEl = document.getElementById('token-group-path');
+    const nameEl = document.getElementById('token-name');
+    const tokenEl = document.getElementById('token-value');
+    if (instanceSel) instanceSel.disabled = false;
+    if (groupPathEl) groupPathEl.disabled = false;
+    if (nameEl) nameEl.value = '';
+    if (tokenEl) tokenEl.value = '';
+}
+
+async function updateToken() {
+    const tokenId = state.editing?.tokenId;
+    if (!tokenId) return;
+
+    const nameEl = document.getElementById('token-name');
+    const tokenEl = document.getElementById('token-value');
+    if (!nameEl || !tokenEl) return;
+
+    const tokenValue = (tokenEl.value || '').toString().trim();
+    if (!tokenValue) {
+        showMessage('Please paste a new token value', 'error');
+        return;
+    }
+
+    const payload = {
+        token_name: (nameEl.value || '').toString().trim(),
+        token: tokenValue,
+    };
+
+    try {
+        await apiRequest(`/api/tokens/${tokenId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        });
+        showMessage('Group access token updated successfully', 'success');
+        cancelTokenEdit();
+        await loadTokens();
+    } catch (error) {
+        console.error('Failed to update token:', error);
     }
 }
 
@@ -945,8 +1058,8 @@ function renderGroupSettings() {
             const actions = [];
             if (gd) actions.push(`<button class="btn btn-secondary btn-small" onclick="editGroupDefaults(${gd.id})">Edit defaults</button>`);
             if (gd) actions.push(`<button class="btn btn-danger btn-small" onclick="deleteGroupDefaults(${gd.id})">Delete defaults</button>`);
-            if (srcTok) actions.push(`<button class="btn btn-danger btn-small" onclick="deleteToken(${srcTok.id})" title="Delete token on ${escapeHtml(srcName)}">Delete token</button>`);
-            if (tgtTok) actions.push(`<button class="btn btn-danger btn-small" onclick="deleteToken(${tgtTok.id})" title="Delete token on ${escapeHtml(tgtName)}">Delete token</button>`);
+            if (srcTok) actions.push(`<button class="btn btn-secondary btn-small" onclick="beginTokenEdit(${srcTok.id})" title="Update token on ${escapeHtml(srcName)}">Update token</button>`);
+            if (tgtTok) actions.push(`<button class="btn btn-secondary btn-small" onclick="beginTokenEdit(${tgtTok.id})" title="Update token on ${escapeHtml(tgtName)}">Update token</button>`);
             const actionsCell = actions.length
                 ? `<div class="flex" style="gap:6px; flex-wrap:wrap">${actions.join('')}</div>`
                 : '<span class="text-muted">N/A</span>';
@@ -1327,6 +1440,7 @@ function beginMirrorEdit(id) {
     state.editing.mirrorId = id;
     state.editing.instanceId = null;
     state.editing.pairId = null;
+    state.editing.tokenId = null;
     renderMirrors(state.mirrors);
     setTimeout(() => applyMirrorEditControls(id), 0);
 }
