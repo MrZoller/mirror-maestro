@@ -527,7 +527,23 @@ async function createPair() {
 }
 
 async function deletePair(id) {
-    if (!confirm('Are you sure you want to delete this instance pair?')) return;
+    // Warn about cascading deletes (mirrors) before taking action.
+    let confirmMsg = 'Are you sure you want to delete this instance pair?';
+    try {
+        const mirrors = await apiRequest(`/api/mirrors?instance_pair_id=${id}`).catch(() => []);
+        const mirrorCount = (mirrors || []).length;
+        if (mirrorCount) {
+            confirmMsg =
+                `Deleting this instance pair will also delete:\n` +
+                `- ${mirrorCount} mirror(s)\n\n` +
+                `This cannot be undone.\n\n` +
+                `Continue?`;
+        }
+    } catch (e) {
+        // Fall back to generic confirm.
+    }
+
+    if (!confirm(confirmMsg)) return;
 
     try {
         await apiRequest(`/api/pairs/${id}`, { method: 'DELETE' });
