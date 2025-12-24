@@ -41,6 +41,8 @@ The following HTML files contain mockups with sample data for taking screenshots
    - `05-mirrors.png`
    - `06-topology.png`
 
+**Tip for Topology screenshot:** click a link to show the mirror drilldown list (health, staleness thresholds, and never-succeeded classification are visible in the details panel).
+
 ### Method 2: Using Automated Script
 
 Run the automated screenshot script (requires Node.js and Playwright):
@@ -85,8 +87,9 @@ This will automatically generate all screenshots in the correct format.
 - `03-pairs.png` - Instance Pairs configuration
 - `04-tokens.png` - Group Settings (tokens + group defaults)
 - `05-mirrors.png` - Mirrors management
+- `06-topology.png` - Topology graph (health/staleness + drilldown)
 - `05-mirror-detail.png` - (Optional) Detailed view of a specific mirror
-- `06-export.png` - (Optional) Import/Export functionality
+ - `07-export.png` - (Optional) Import/Export functionality
 
 ## Image Optimization
 
