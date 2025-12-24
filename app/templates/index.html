@@ -476,6 +476,14 @@
                             <option value="">All pairs</option>
                         </select>
                     </div>
+                    <div class="form-group" style="margin-bottom:0; min-width: 210px;">
+                        <label for="topology-stale-warn-hours" class="text-muted" style="margin-bottom:6px">Stale warning (hours)</label>
+                        <input id="topology-stale-warn-hours" type="number" min="0" step="1" value="24">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; min-width: 210px;">
+                        <label for="topology-stale-error-hours" class="text-muted" style="margin-bottom:6px">Stale error (hours)</label>
+                        <input id="topology-stale-error-hours" type="number" min="0" step="1" value="168">
+                    </div>
                     <label class="checkbox-group" style="margin-bottom:0">
                         <input type="checkbox" id="topology-show-pull" checked>
                         <span>Show pull</span>

@@ -158,3 +158,43 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
     assert filtered["links"][0]["target"] == b_id
     assert filtered["links"][0]["mirror_direction"] == "push"
 
+
+@pytest.mark.asyncio
+async def test_topology_staleness_thresholds_influence_health(client, session_maker):
+    a_id = await seed_instance(session_maker, name="A", url="https://a.example.com")
+    b_id = await seed_instance(session_maker, name="B", url="https://b.example.com")
+    pair_ab = await seed_pair(session_maker, name="ab2", src_id=a_id, tgt_id=b_id, direction="push")
+
+    # A single successful mirror, but very old.
+    async with session_maker() as s:
+        s.add(
+            Mirror(
+                instance_pair_id=pair_ab,
+                source_project_id=1,
+                source_project_path="g/a1",
+                target_project_id=2,
+                target_project_path="g/b1",
+                mirror_direction=None,
+                enabled=True,
+                last_update_status="finished",
+                last_successful_update=datetime.utcnow() - timedelta(hours=10),
+            )
+        )
+        await s.commit()
+
+    # Force thresholds small so this becomes "stale error"
+    resp = await client.get("/api/topology?stale_warning_seconds=60&stale_error_seconds=120")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # Only one link exists
+    link = body["links"][0]
+    assert link["staleness"] == "error"
+    assert link["health"] in {"error"}  # staleness should elevate
+
+    nodes_by_name = {n["name"]: n for n in body["nodes"]}
+    assert nodes_by_name["A"]["staleness"] == "error"
+    assert nodes_by_name["B"]["staleness"] == "error"
+    assert nodes_by_name["A"]["health"] == "error"
+    assert nodes_by_name["B"]["health"] == "error"
+
