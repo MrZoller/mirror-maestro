@@ -182,6 +182,40 @@ class MirrorCreate(BaseModel):
     enabled: bool = True
 
 
+class MirrorPreflight(BaseModel):
+    """
+    Preflight a mirror creation by checking GitLab for existing remote mirrors
+    on the owning project.
+    """
+    instance_pair_id: int
+    source_project_id: int
+    source_project_path: str
+    target_project_id: int
+    target_project_path: str
+    mirror_direction: str | None = None
+
+
+class MirrorPreflightResponse(BaseModel):
+    effective_direction: str
+    owner_project_id: int
+    existing_mirrors: list[dict]
+    existing_same_direction: list[dict]
+
+
+class MirrorRemoveExisting(BaseModel):
+    """
+    Remove existing GitLab remote mirrors on the owning project for the effective direction.
+    If `remote_mirror_ids` is omitted, deletes all mirrors for that direction.
+    """
+    instance_pair_id: int
+    source_project_id: int
+    source_project_path: str
+    target_project_id: int
+    target_project_path: str
+    mirror_direction: str | None = None
+    remote_mirror_ids: list[int] | None = None
+
+
 class MirrorUpdate(BaseModel):
     mirror_direction: str | None = None
     mirror_protected_branches: bool | None = None
@@ -492,6 +526,23 @@ async def create_mirror(
         else:  # pull
             # For pull mirrors, configure on target to pull from source
             client = GitLabClient(target_instance.url, target_instance.encrypted_token)
+
+            # GitLab effectively supports only one pull mirror per project.
+            existing = client.get_project_mirrors(mirror.target_project_id)
+            existing_pull = [m for m in (existing or []) if str(m.get("mirror_direction") or "").lower() == "pull"]
+            if existing_pull:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": (
+                            "Target project already has a pull mirror configured in GitLab. "
+                            "GitLab allows only one pull mirror per project. "
+                            "Remove the existing pull mirror first."
+                        ),
+                        "existing_pull_mirrors": existing_pull,
+                    },
+                )
+
             # Build authenticated source URL with group access token
             source_url = await get_authenticated_url(db, source_instance, mirror.source_project_path)
             result = client.create_pull_mirror(
@@ -505,6 +556,8 @@ async def create_mirror(
                 mirror_user_id=mirror_user_id,
             )
             gitlab_mirror_id = result.get("id")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create mirror in GitLab: {str(e)}")
 
@@ -558,6 +611,122 @@ async def create_mirror(
         created_at=db_mirror.created_at.isoformat(),
         updated_at=db_mirror.updated_at.isoformat()
     )
+
+
+@router.post("/preflight", response_model=MirrorPreflightResponse)
+async def preflight_mirror(
+    req: MirrorPreflight,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials),
+):
+    """
+    Check GitLab for existing remote mirrors on the owning project before creation.
+
+    - Pull mirrors live on the target project (target pulls from source)
+    - Push mirrors live on the source project (source pushes to target)
+    """
+    pair_result = await db.execute(select(InstancePair).where(InstancePair.id == req.instance_pair_id))
+    pair = pair_result.scalar_one_or_none()
+    if not pair:
+        raise HTTPException(status_code=404, detail="Instance pair not found")
+
+    src_result = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id))
+    tgt_result = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id))
+    source_instance = src_result.scalar_one_or_none()
+    target_instance = tgt_result.scalar_one_or_none()
+    if not source_instance or not target_instance:
+        raise HTTPException(status_code=404, detail="Source or target instance not found")
+
+    group_defaults = await _get_group_defaults(
+        db,
+        instance_pair_id=pair.id,
+        source_project_path=req.source_project_path,
+        target_project_path=req.target_project_path,
+    )
+
+    direction = (
+        req.mirror_direction
+        or (group_defaults.mirror_direction if group_defaults else None)
+        or pair.mirror_direction
+        or "pull"
+    )
+    direction = (direction or "pull").lower()
+
+    owner_project_id = req.source_project_id if direction == "push" else req.target_project_id
+    owner_instance = source_instance if direction == "push" else target_instance
+
+    client = GitLabClient(owner_instance.url, owner_instance.encrypted_token)
+    existing = client.get_project_mirrors(owner_project_id) or []
+    same_dir = [m for m in existing if str(m.get("mirror_direction") or "").lower() == direction]
+
+    return MirrorPreflightResponse(
+        effective_direction=direction,
+        owner_project_id=owner_project_id,
+        existing_mirrors=existing,
+        existing_same_direction=same_dir,
+    )
+
+
+@router.post("/remove-existing")
+async def remove_existing_gitlab_mirrors(
+    req: MirrorRemoveExisting,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials),
+):
+    """Delete existing remote mirrors on the owning GitLab project for the effective direction."""
+    pair_result = await db.execute(select(InstancePair).where(InstancePair.id == req.instance_pair_id))
+    pair = pair_result.scalar_one_or_none()
+    if not pair:
+        raise HTTPException(status_code=404, detail="Instance pair not found")
+
+    src_result = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id))
+    tgt_result = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id))
+    source_instance = src_result.scalar_one_or_none()
+    target_instance = tgt_result.scalar_one_or_none()
+    if not source_instance or not target_instance:
+        raise HTTPException(status_code=404, detail="Source or target instance not found")
+
+    group_defaults = await _get_group_defaults(
+        db,
+        instance_pair_id=pair.id,
+        source_project_path=req.source_project_path,
+        target_project_path=req.target_project_path,
+    )
+
+    direction = (
+        req.mirror_direction
+        or (group_defaults.mirror_direction if group_defaults else None)
+        or pair.mirror_direction
+        or "pull"
+    )
+    direction = (direction or "pull").lower()
+
+    owner_project_id = req.source_project_id if direction == "push" else req.target_project_id
+    owner_instance = source_instance if direction == "push" else target_instance
+
+    client = GitLabClient(owner_instance.url, owner_instance.encrypted_token)
+    existing = client.get_project_mirrors(owner_project_id) or []
+    same_dir = [m for m in existing if str(m.get("mirror_direction") or "").lower() == direction]
+
+    wanted = set(req.remote_mirror_ids or [])
+    to_delete: list[int] = []
+    for m in same_dir:
+        mid = m.get("id")
+        if not isinstance(mid, int):
+            continue
+        if wanted and mid not in wanted:
+            continue
+        to_delete.append(mid)
+
+    deleted_ids: list[int] = []
+    for mid in to_delete:
+        try:
+            client.delete_mirror(owner_project_id, mid)
+            deleted_ids.append(mid)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to delete existing mirror {mid} in GitLab: {str(e)}")
+
+    return {"deleted": len(deleted_ids), "deleted_ids": deleted_ids, "direction": direction, "project_id": owner_project_id}
 
 
 @router.get("/{mirror_id}", response_model=MirrorResponse)

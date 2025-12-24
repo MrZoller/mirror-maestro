@@ -189,8 +189,22 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
         })
         assert gd_push.status_code == 200, gd_push.text
 
+        # 4b) Preflight should show no existing pull mirrors on a new target project.
+        pre_pull = await client.post("/api/mirrors/preflight", json={
+            "instance_pair_id": pull_pair_id,
+            "source_project_id": source_project.id,
+            "source_project_path": source_project.path_with_namespace,
+            "target_project_id": target_project.id,
+            "target_project_path": target_project.path_with_namespace,
+        })
+        assert pre_pull.status_code == 200, pre_pull.text
+        pre_pull_body = pre_pull.json()
+        assert pre_pull_body["effective_direction"] == "pull"
+        assert pre_pull_body["owner_project_id"] == target_project.id
+        assert pre_pull_body["existing_same_direction"] == []
+
         # 5) Create pull mirror via API (target pulls from source)
-        pull_mirror_resp = await client.post("/api/mirrors", json={
+        pull_mirror_payload = {
             "instance_pair_id": pull_pair_id,
             "source_project_id": source_project.id,
             "source_project_path": source_project.path_with_namespace,
@@ -198,13 +212,21 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
             "target_project_path": target_project.path_with_namespace,
             "enabled": True,
             # Do not pass pull-only settings; they should come from group defaults.
-        })
+        }
+        pull_mirror_resp = await client.post("/api/mirrors", json=pull_mirror_payload)
         assert pull_mirror_resp.status_code == 200, pull_mirror_resp.text
         pull_mirror_body = pull_mirror_resp.json()
         pull_mirror_db_id = pull_mirror_body["id"]
         created_mirror_db_ids.append(pull_mirror_db_id)
         pull_remote_mirror_id = pull_mirror_body["mirror_id"]
         assert pull_remote_mirror_id, "Expected GitLab mirror id to be returned"
+
+        # 5b) Creating a second pull mirror on the same target project should conflict.
+        pull_again = await client.post("/api/mirrors", json=pull_mirror_payload)
+        assert pull_again.status_code == 409, pull_again.text
+        pull_again_body = pull_again.json()
+        assert "detail" in pull_again_body
+        assert "existing_pull_mirrors" in (pull_again_body["detail"] or {})
 
         # 6) Best-effort: verify group defaults took effect (when visible via API).
         try:
@@ -261,6 +283,19 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
             and m["target_project_path"] == target_project.path_with_namespace
             for m in pull_export_data["mirrors"]
         )
+
+        # 9b) Preflight should see the push mirror owner project (source) as empty before creation.
+        pre_push = await client.post("/api/mirrors/preflight", json={
+            "instance_pair_id": push_pair_id,
+            "source_project_id": source_project.id,
+            "source_project_path": source_project.path_with_namespace,
+            "target_project_id": target_project.id,
+            "target_project_path": target_project.path_with_namespace,
+        })
+        assert pre_push.status_code == 200, pre_push.text
+        pre_push_body = pre_push.json()
+        assert pre_push_body["effective_direction"] == "push"
+        assert pre_push_body["owner_project_id"] == source_project.id
 
         # 10) Create push mirror via API (source pushes to target)
         push_mirror_resp = await client.post("/api/mirrors", json={
