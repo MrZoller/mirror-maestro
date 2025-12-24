@@ -135,3 +135,12 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
     bc_push = links_by_key[(b_id, c_id, "push")]
     assert bc_push["mirror_count"] == 1
 
+    # Pair filter should narrow the topology to one pair.
+    resp = await client.get(f"/api/topology?instance_pair_id={pair_ab}")
+    assert resp.status_code == 200, resp.text
+    filtered = resp.json()
+    assert len(filtered["links"]) == 1
+    assert filtered["links"][0]["source"] == a_id
+    assert filtered["links"][0]["target"] == b_id
+    assert filtered["links"][0]["mirror_direction"] == "push"
+
