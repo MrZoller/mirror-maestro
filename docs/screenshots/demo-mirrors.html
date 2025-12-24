@@ -138,24 +138,62 @@
                     </thead>
                     <tbody id="mirrors-list">
                         <tr>
-                            <td>platform/api-gateway</td>
-                            <td>platform/api-gateway</td>
+                            <td class="cell-locked" title="Project paths cannot be edited">platform/api-gateway</td>
+                            <td class="cell-locked" title="Project paths cannot be edited">platform/api-gateway</td>
                             <td>
-                                <div style="line-height:1.35">
-                                    <span class="badge badge-info">pull</span><br>
-                                    <span class="text-muted">overwrite:</span> true<br>
-                                    <span class="text-muted">only_protected:</span> true<br>
-                                    <span class="text-muted">trigger:</span> true<br>
-                                    <span class="text-muted">regex:</span> <code>^main$</code><br>
-                                    <span class="text-muted">user:</span> 123
+                                <div style="display:grid; gap:10px">
+                                    <div>
+                                        <span class="text-muted">direction:</span>
+                                        <span class="badge badge-info">pull</span>
+                                    </div>
+                                    <div style="display:grid; gap:8px">
+                                        <label class="text-muted">overwrite</label>
+                                        <select class="table-select">
+                                            <option>Inherit</option>
+                                            <option selected>true</option>
+                                            <option>false</option>
+                                        </select>
+                                        <label class="text-muted">only_protected</label>
+                                        <select class="table-select">
+                                            <option>Inherit</option>
+                                            <option selected>true</option>
+                                            <option>false</option>
+                                        </select>
+                                        <label class="text-muted">trigger (pull only)</label>
+                                        <select class="table-select">
+                                            <option>Inherit</option>
+                                            <option selected>true</option>
+                                            <option>false</option>
+                                        </select>
+                                        <label class="text-muted">branch regex (pull only)</label>
+                                        <select class="table-select">
+                                            <option>Inherit</option>
+                                            <option selected>Override</option>
+                                        </select>
+                                        <input class="table-input" value="^main$">
+                                        <label class="text-muted">mirror user id (pull only)</label>
+                                        <select class="table-select">
+                                            <option selected>Inherit</option>
+                                            <option>Override</option>
+                                        </select>
+                                        <input class="table-input" value="" disabled>
+                                    </div>
                                 </div>
                             </td>
-                            <td><span class="badge badge-success">Enabled</span></td>
-                            <td><span class="badge badge-info">finished</span></td>
-                            <td>2 hours ago</td>
                             <td>
-                                <button class="btn btn-success btn-small">Sync</button>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="checkbox-group">
+                                    <input type="checkbox" checked>
+                                    <label>Enabled</label>
+                                </div>
+                            </td>
+                            <td class="cell-locked"><span class="badge badge-info">finished</span></td>
+                            <td class="cell-locked">2 hours ago</td>
+                            <td>
+                                <div class="table-actions">
+                                    <button class="btn btn-primary btn-small">Save</button>
+                                    <button class="btn btn-secondary btn-small">Cancel</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -175,8 +213,11 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>1 hour ago</td>
                             <td>
-                                <button class="btn btn-success btn-small">Sync</button>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -196,8 +237,11 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>30 minutes ago</td>
                             <td>
-                                <button class="btn btn-success btn-small">Sync</button>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -217,8 +261,11 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>3 hours ago</td>
                             <td>
-                                <button class="btn btn-success btn-small">Sync</button>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -238,8 +285,11 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>45 minutes ago</td>
                             <td>
-                                <button class="btn btn-success btn-small">Sync</button>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -259,8 +309,11 @@
                             <td><span class="badge badge-danger">failed</span></td>
                             <td>5 hours ago</td>
                             <td>
-                                <button class="btn btn-success btn-small">Sync</button>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -280,8 +333,11 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>1 day ago</td>
                             <td>
-                                <button class="btn btn-success btn-small">Sync</button>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -301,8 +357,11 @@
                             <td><span class="text-muted">N/A</span></td>
                             <td>Never</td>
                             <td>
-                                <button class="btn btn-success btn-small">Sync</button>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                     </tbody>

@@ -121,21 +121,47 @@
                     </thead>
                     <tbody id="pairs-list">
                         <tr>
-                            <td><strong>Prod → Backup</strong></td>
-                            <td>Production GitLab</td>
-                            <td>Backup GitLab</td>
-                            <td><span class="badge badge-info">push</span></td>
                             <td>
-                                <div style="line-height:1.35">
-                                    <span class="text-muted">overwrite:</span> true<br>
-                                    <span class="text-muted">only_protected:</span> true<br>
-                                    <span class="text-muted">trigger:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">user:</span> <span class="text-muted">n/a</span>
+                                <div style="display:grid; gap:8px">
+                                    <input class="table-input" value="Prod → Backup">
+                                    <input class="table-input" value="Primary production → DR backup (defaults locked-safe)">
+                                </div>
+                            </td>
+                            <td class="cell-locked" title="Locked to avoid breaking existing mirrors">Production GitLab</td>
+                            <td class="cell-locked" title="Locked to avoid breaking existing mirrors">Backup GitLab</td>
+                            <td>
+                                <select class="table-select">
+                                    <option value="pull">pull</option>
+                                    <option value="push" selected>push</option>
+                                </select>
+                            </td>
+                            <td>
+                                <div style="display:grid; gap:10px">
+                                    <div class="checkbox-group">
+                                        <input type="checkbox" checked>
+                                        <label>Mirror protected branches</label>
+                                    </div>
+                                    <div class="checkbox-group">
+                                        <input type="checkbox" checked>
+                                        <label>Overwrite divergent branches</label>
+                                    </div>
+                                    <div class="checkbox-group">
+                                        <input type="checkbox" disabled>
+                                        <label>Trigger builds on mirror update (pull only)</label>
+                                    </div>
+                                    <div class="checkbox-group">
+                                        <input type="checkbox" checked>
+                                        <label>Only mirror protected branches</label>
+                                    </div>
+                                    <input class="table-input" value="" placeholder="Mirror branch regex (pull only)" disabled>
+                                    <input class="table-input" value="" placeholder="Mirror user id (pull only)" disabled>
                                 </div>
                             </td>
                             <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-primary btn-small">Save</button>
+                                    <button class="btn btn-secondary btn-small">Cancel</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -153,7 +179,10 @@
                                 </div>
                             </td>
                             <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                         <tr>
@@ -171,7 +200,10 @@
                                 </div>
                             </td>
                             <td>
-                                <button class="btn btn-danger btn-small">Delete</button>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
                             </td>
                         </tr>
                     </tbody>
