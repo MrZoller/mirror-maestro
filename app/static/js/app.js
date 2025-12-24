@@ -348,12 +348,35 @@ async function createInstance() {
 }
 
 async function deleteInstance(id) {
-    if (!confirm('Are you sure you want to delete this instance?')) return;
+    // Warn about cascading deletes (pairs + mirrors) before taking action.
+    let confirmMsg = 'Are you sure you want to delete this instance?';
+    try {
+        const affectedPairs = (state.pairs || []).filter(p => p.source_instance_id === id || p.target_instance_id === id);
+        const pairIds = new Set(affectedPairs.map(p => p.id));
+
+        // Mirrors aren't always loaded in the UI; fetch all to compute an accurate count.
+        const allMirrors = await apiRequest('/api/mirrors').catch(() => []);
+        const mirrorCount = (allMirrors || []).filter(m => pairIds.has(m.instance_pair_id)).length;
+
+        if (affectedPairs.length || mirrorCount) {
+            confirmMsg =
+                `Deleting this instance will also delete:\n` +
+                `- ${affectedPairs.length} instance pair(s)\n` +
+                `- ${mirrorCount} mirror(s)\n\n` +
+                `This cannot be undone.\n\n` +
+                `Continue?`;
+        }
+    } catch (e) {
+        // Fall back to generic confirm.
+    }
+
+    if (!confirm(confirmMsg)) return;
 
     try {
         await apiRequest(`/api/instances/${id}`, { method: 'DELETE' });
         showMessage('Instance deleted successfully', 'success');
         await loadInstances();
+        await loadPairs();
     } catch (error) {
         console.error('Failed to delete instance:', error);
     }
@@ -504,7 +527,23 @@ async function createPair() {
 }
 
 async function deletePair(id) {
-    if (!confirm('Are you sure you want to delete this instance pair?')) return;
+    // Warn about cascading deletes (mirrors) before taking action.
+    let confirmMsg = 'Are you sure you want to delete this instance pair?';
+    try {
+        const mirrors = await apiRequest(`/api/mirrors?instance_pair_id=${id}`).catch(() => []);
+        const mirrorCount = (mirrors || []).length;
+        if (mirrorCount) {
+            confirmMsg =
+                `Deleting this instance pair will also delete:\n` +
+                `- ${mirrorCount} mirror(s)\n\n` +
+                `This cannot be undone.\n\n` +
+                `Continue?`;
+        }
+    } catch (e) {
+        // Fall back to generic confirm.
+    }
+
+    if (!confirm(confirmMsg)) return;
 
     try {
         await apiRequest(`/api/pairs/${id}`, { method: 'DELETE' });
