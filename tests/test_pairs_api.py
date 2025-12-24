@@ -117,3 +117,35 @@ async def test_pairs_create_requires_instances(client, session_maker):
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Source instance not found"
 
+
+@pytest.mark.asyncio
+async def test_pairs_cannot_change_instances_when_mirrors_exist(client, session_maker):
+    src_id = await seed_instance(session_maker, name="src")
+    tgt_id = await seed_instance(session_maker, name="tgt")
+    other_id = await seed_instance(session_maker, name="other")
+
+    resp = await client.post(
+        "/api/pairs",
+        json={"name": "pair-lock", "source_instance_id": src_id, "target_instance_id": tgt_id, "mirror_direction": "pull"},
+    )
+    assert resp.status_code == 200, resp.text
+    pair_id = resp.json()["id"]
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="platform/proj",
+            target_project_id=2,
+            target_project_path="platform/proj",
+            mirror_id=None,
+            enabled=True,
+            last_update_status="pending",
+        )
+        s.add(m)
+        await s.commit()
+
+    resp = await client.put(f"/api/pairs/{pair_id}", json={"source_instance_id": other_id})
+    assert resp.status_code == 400
+    assert "cannot change" in resp.json()["detail"].lower()
+
