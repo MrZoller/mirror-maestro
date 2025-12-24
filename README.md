@@ -199,6 +199,13 @@ First, configure the GitLab instances you want to mirror between:
    - Access Token (Personal or Group Access Token)
    - Description (optional)
 
+#### Deletion behavior (important)
+To prevent broken configurations, the app performs **cascading deletes**:
+- Deleting a **GitLab instance** also deletes any **instance pairs** that reference it and any **mirrors** belonging to those pairs (plus related group defaults/tokens).
+- Deleting an **instance pair** also deletes any **mirrors** belonging to that pair (plus related group defaults).
+
+The UI shows a warning and requires confirmation before performing these actions.
+
 ### 2. Create Instance Pairs
 
 Define pairs of instances where mirrors will be created:
