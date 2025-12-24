@@ -1,11 +1,11 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
 
 from app.database import get_db
-from app.models import GitLabInstance
+from app.models import GitLabInstance, InstancePair, Mirror, GroupAccessToken, GroupMirrorDefaults
 from app.core.auth import verify_credentials
 from app.core.encryption import encryption
 from app.core.gitlab_client import GitLabClient
@@ -208,6 +208,31 @@ async def delete_instance(
 
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
+
+    # Cascade-delete related entities:
+    # - Mirrors that belong to pairs that reference this instance
+    # - Group defaults for those pairs
+    # - The pairs themselves
+    # - Group access tokens attached to this instance
+    #
+    # NOTE: This is intentionally implemented at the application layer since the
+    # schema does not currently enforce FK relationships with ON DELETE CASCADE.
+    pair_ids_res = await db.execute(
+        select(InstancePair.id).where(
+            or_(
+                InstancePair.source_instance_id == instance_id,
+                InstancePair.target_instance_id == instance_id,
+            )
+        )
+    )
+    pair_ids = list(pair_ids_res.scalars().all())
+
+    if pair_ids:
+        await db.execute(delete(Mirror).where(Mirror.instance_pair_id.in_(pair_ids)))
+        await db.execute(delete(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id.in_(pair_ids)))
+        await db.execute(delete(InstancePair).where(InstancePair.id.in_(pair_ids)))
+
+    await db.execute(delete(GroupAccessToken).where(GroupAccessToken.gitlab_instance_id == instance_id))
 
     await db.delete(instance)
     await db.commit()

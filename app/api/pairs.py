@@ -1,11 +1,11 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
 
 from app.database import get_db
-from app.models import InstancePair, GitLabInstance
+from app.models import InstancePair, GitLabInstance, Mirror, GroupMirrorDefaults
 from app.core.auth import verify_credentials
 
 
@@ -255,6 +255,11 @@ async def delete_pair(
 
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
+
+    # Cascade-delete dependent entities (mirrors + group defaults) to avoid leaving
+    # orphaned rows referencing this pair.
+    await db.execute(delete(Mirror).where(Mirror.instance_pair_id == pair_id))
+    await db.execute(delete(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id == pair_id))
 
     await db.delete(pair)
     await db.commit()
