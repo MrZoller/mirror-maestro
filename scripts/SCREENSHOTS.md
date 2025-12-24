@@ -17,6 +17,8 @@ The demo HTML files are pre-populated with sample data and ready to screenshot:
    - `demo-dashboard.html` - Dashboard view
    - `demo-instances.html` - GitLab Instances
    - `demo-pairs.html` - Instance Pairs
+   - `demo-tokens.html` - Group Settings
+   - `demo-topology.html` - Topology
    - `demo-mirrors.html` - Mirrors management
 
 3. **Take screenshots:**
@@ -28,7 +30,11 @@ The demo HTML files are pre-populated with sample data and ready to screenshot:
    - `01-dashboard.png`
    - `02-instances.png`
    - `03-pairs.png`
-   - `04-mirrors.png`
+   - `04-tokens.png`
+   - `05-mirrors.png`
+   - `06-topology.png`
+
+   For best results, click a link in the Topology graph before capturing so the drilldown mirror list is visible.
 
 ### Option 2: Automated with Playwright
 

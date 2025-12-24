@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import instances, pairs, mirrors, export, tokens, group_defaults
+from app.api import instances, pairs, mirrors, export, tokens, group_defaults, topology
 from app.core.auth import verify_credentials
 
 
@@ -38,6 +38,7 @@ app.include_router(pairs.router)
 app.include_router(mirrors.router)
 app.include_router(tokens.router)
 app.include_router(group_defaults.router)
+app.include_router(topology.router)
 app.include_router(export.router)
 
 
