@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Any
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -142,6 +142,155 @@ def _combine_health(*, base: str, staleness: str) -> str:
     order = {"unknown": 0, "ok": 1, "warning": 2, "error": 3}
     inv = {v: k for k, v in order.items()}
     return inv[max(order.get(base, 0), order.get(staleness, 0))]
+
+
+def _mirror_base_health_from_status(status: str | None) -> str:
+    s = _norm_status(status)
+    if s == "failed":
+        return "error"
+    if s in {"pending", "updating"}:
+        return "warning"
+    if s == "finished":
+        return "ok"
+    return "unknown"
+
+
+class TopologyMirrorItem(BaseModel):
+    id: int
+    instance_pair_id: int
+    instance_pair_name: str
+    source_project_path: str
+    target_project_path: str
+    mirror_direction: str
+    enabled: bool
+    last_update_status: str | None
+    last_successful_update: str | None
+    never_succeeded: bool
+    staleness: str
+    staleness_age_seconds: int | None = None
+    health: str
+
+
+class TopologyLinkMirrorsResponse(BaseModel):
+    total: int
+    mirrors: list[TopologyMirrorItem]
+
+
+@router.get("/link-mirrors", response_model=TopologyLinkMirrorsResponse)
+async def get_link_mirrors(
+    source_instance_id: int,
+    target_instance_id: int,
+    mirror_direction: str,
+    instance_pair_id: int | None = None,
+    include_disabled: bool = True,
+    limit: int = 200,
+    offset: int = 0,
+    stale_warning_seconds: int | None = None,
+    stale_error_seconds: int | None = None,
+    never_succeeded_level: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials),
+) -> TopologyLinkMirrorsResponse:
+    """
+    Drilldown endpoint: list mirrors that contribute to a topology link.
+
+    Filters by:
+    - source_instance_id / target_instance_id (via the InstancePair)
+    - effective mirror direction (mirror override when set, else pair default)
+    - optional instance_pair_id to narrow to a specific pair
+    - include_disabled (default true)
+    """
+    direction = _norm_dir(mirror_direction)
+    if direction not in {"push", "pull"}:
+        raise HTTPException(status_code=400, detail="Invalid mirror_direction")
+
+    warn_s, err_s = _normalize_stale_thresholds(
+        stale_warning_seconds=stale_warning_seconds,
+        stale_error_seconds=stale_error_seconds,
+    )
+    never_level = _normalize_never_succeeded_level(never_succeeded_level)
+    now = datetime.now(timezone.utc)
+
+    # Find relevant pairs first
+    pair_q = select(InstancePair).where(
+        InstancePair.source_instance_id == source_instance_id,
+        InstancePair.target_instance_id == target_instance_id,
+    )
+    if instance_pair_id is not None:
+        pair_q = pair_q.where(InstancePair.id == instance_pair_id)
+
+    pairs = (await db.execute(pair_q)).scalars().all()
+    if not pairs:
+        return TopologyLinkMirrorsResponse(total=0, mirrors=[])
+
+    pair_by_id = {p.id: p for p in pairs}
+    pair_ids = list(pair_by_id.keys())
+
+    mirror_q = select(Mirror).where(Mirror.instance_pair_id.in_(pair_ids))
+    if not include_disabled:
+        mirror_q = mirror_q.where(Mirror.enabled.is_(True))
+
+    rows = (await db.execute(mirror_q)).scalars().all()
+
+    # Filter by effective direction in Python (avoids CASE logic and keeps DB portable).
+    items: list[TopologyMirrorItem] = []
+    for m in rows:
+        p = pair_by_id.get(m.instance_pair_id)
+        if not p:
+            continue
+        eff_dir = _norm_dir(m.mirror_direction or p.mirror_direction)
+        if eff_dir != direction:
+            continue
+
+        base_health = _mirror_base_health_from_status(m.last_update_status)
+        never = m.last_successful_update is None
+        if never:
+            stale_level = never_level
+            stale_age_s = None
+        else:
+            stale_level, stale_age_s = _staleness_level(
+                now=now,
+                last_successful_update=m.last_successful_update,
+                mirror_count=1,
+                warn_s=warn_s,
+                err_s=err_s,
+            )
+
+        health = _combine_health(base=base_health, staleness=stale_level)
+        items.append(
+            TopologyMirrorItem(
+                id=m.id,
+                instance_pair_id=m.instance_pair_id,
+                instance_pair_name=p.name,
+                source_project_path=m.source_project_path,
+                target_project_path=m.target_project_path,
+                mirror_direction=eff_dir,
+                enabled=bool(m.enabled),
+                last_update_status=m.last_update_status,
+                last_successful_update=m.last_successful_update.isoformat() if m.last_successful_update else None,
+                never_succeeded=never,
+                staleness=stale_level,
+                staleness_age_seconds=stale_age_s,
+                health=health,
+            )
+        )
+
+    # Sort: worst health first, then stalest, then most recently successful, then stable key.
+    sev = {"unknown": 0, "ok": 1, "warning": 2, "error": 3}
+    items.sort(
+        key=lambda it: (
+            -sev.get((it.health or "unknown"), 0),
+            -(it.staleness_age_seconds or -1),
+            it.last_successful_update or "",
+            it.instance_pair_id,
+            it.id,
+        )
+    )
+
+    total = len(items)
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
+    return TopologyLinkMirrorsResponse(total=total, mirrors=items[offset : offset + limit])
 
 
 @router.get("", response_model=TopologyResponse)
