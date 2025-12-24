@@ -18,10 +18,15 @@ const state = {
 // Initialize the application
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
-    loadInstances();
-    loadPairs();
     setupEventListeners();
     initTableEnhancements();
+
+    // Demo screenshots open static HTML files via file://; avoid API calls there.
+    const isFileDemo = (window?.location?.protocol || '') === 'file:';
+    if (!isFileDemo) {
+        loadInstances();
+        loadPairs();
+    }
 });
 
 // ----------------------------
