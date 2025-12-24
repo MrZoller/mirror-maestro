@@ -10,6 +10,7 @@ The following HTML files contain mockups with sample data for taking screenshots
 - `demo-instances.html` - GitLab Instances management view
 - `demo-pairs.html` - Instance Pairs configuration view
 - `demo-tokens.html` - Group Settings view (tokens + group defaults)
+- `demo-topology.html` - Topology graph view
 - `demo-mirrors.html` - Mirrors management view
 
 ## Taking Screenshots
@@ -23,6 +24,7 @@ The following HTML files contain mockups with sample data for taking screenshots
    open docs/screenshots/demo-instances.html
    open docs/screenshots/demo-pairs.html
    open docs/screenshots/demo-tokens.html
+   open docs/screenshots/demo-topology.html
    open docs/screenshots/demo-mirrors.html
    ```
 
@@ -37,6 +39,9 @@ The following HTML files contain mockups with sample data for taking screenshots
    - `03-pairs.png`
    - `04-tokens.png`
    - `05-mirrors.png`
+   - `06-topology.png`
+
+**Tip for Topology screenshot:** click a link to show the mirror drilldown list (health, staleness thresholds, and never-succeeded classification are visible in the details panel).
 
 ### Method 2: Using Automated Script
 
@@ -82,8 +87,9 @@ This will automatically generate all screenshots in the correct format.
 - `03-pairs.png` - Instance Pairs configuration
 - `04-tokens.png` - Group Settings (tokens + group defaults)
 - `05-mirrors.png` - Mirrors management
+- `06-topology.png` - Topology graph (health/staleness + drilldown)
 - `05-mirror-detail.png` - (Optional) Detailed view of a specific mirror
-- `06-export.png` - (Optional) Import/Export functionality
+ - `07-export.png` - (Optional) Import/Export functionality
 
 ## Image Optimization
 

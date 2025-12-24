@@ -18,7 +18,8 @@ const DEMO_FILES = [
   { file: 'demo-instances.html', output: '02-instances.png', name: 'GitLab Instances' },
   { file: 'demo-pairs.html', output: '03-pairs.png', name: 'Instance Pairs' },
   { file: 'demo-tokens.html', output: '04-tokens.png', name: 'Group Settings' },
-  { file: 'demo-mirrors.html', output: '05-mirrors.png', name: 'Mirrors' }
+  { file: 'demo-mirrors.html', output: '05-mirrors.png', name: 'Mirrors' },
+  { file: 'demo-topology.html', output: '06-topology.png', name: 'Topology' }
 ];
 
 async function takeScreenshots() {
@@ -49,7 +50,7 @@ async function takeScreenshots() {
     await page.goto(`file://${filePath}`, { waitUntil: 'networkidle' });
 
     // Wait a bit for any animations to complete
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
 
     // Take screenshot
     await page.screenshot({

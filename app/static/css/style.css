@@ -592,9 +592,157 @@ table tbody tr:hover {
     gap: 20px;
 }
 
+/* ----------------------------
+   Topology (graph visualization)
+   ---------------------------- */
+.topology-controls {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.topology-layout {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 18px;
+    align-items: stretch;
+}
+
+.topology-canvas {
+    position: relative;
+    min-height: 520px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background:
+        radial-gradient(1100px 600px at 18% 12%, rgba(31, 117, 203, 0.08), transparent 55%),
+        radial-gradient(900px 520px at 82% 78%, rgba(252, 109, 38, 0.10), transparent 52%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.96));
+}
+
+.topology-panel {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--card-background);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.topology-panel-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    background: rgba(17, 24, 39, 0.02);
+}
+
+.topology-panel-body {
+    padding: 14px;
+    flex: 1;
+    overflow: auto;
+}
+
+.topology-panel-body code {
+    /* Wrap long URLs / paths without breaking every character */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.topology-legend {
+    border-top: 1px solid var(--border-color);
+    padding: 12px 14px;
+    background: rgba(17, 24, 39, 0.02);
+}
+
+.topology-legend-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.topology-legend-row:first-child {
+    margin-top: 0;
+}
+
+.topology-legend-swatch {
+    width: 18px;
+    height: 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(17, 24, 39, 0.18);
+}
+
+.topology-swatch-pull {
+    background: rgba(31, 117, 203, 0.9);
+}
+
+.topology-swatch-push {
+    background: rgba(252, 109, 38, 0.95);
+}
+
+/* Tooltip for topology graph */
+.topology-tooltip {
+    position: absolute;
+    z-index: 10;
+    pointer-events: none;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(17, 24, 39, 0.14);
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: var(--shadow-md);
+    color: var(--text-primary);
+    font-size: 0.92rem;
+    line-height: 1.25;
+    max-width: 340px;
+    backdrop-filter: blur(6px);
+}
+
+.topology-tooltip .muted {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.topology-tooltip .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.topology-tooltip .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    background: rgba(17, 24, 39, 0.03);
+    font-size: 0.85rem;
+}
+
+.topology-tooltip .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.topology-dot-ok { background: rgba(16, 133, 72, 0.95); }
+.topology-dot-warning { background: rgba(222, 126, 0, 0.95); }
+.topology-dot-error { background: rgba(221, 43, 14, 0.95); }
+.topology-dot-unknown { background: rgba(107, 114, 128, 0.95); }
+
 /* Responsive */
 @media (max-width: 768px) {
     .form-row, .grid-2 {
+        grid-template-columns: 1fr;
+    }
+
+    .topology-layout {
         grid-template-columns: 1fr;
     }
 

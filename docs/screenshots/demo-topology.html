@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitLab Mirror Wizard - Topology</title>
+    <link rel="stylesheet" href="../../app/static/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>GitLab Mirror Wizard</h1>
+            <p>Manage GitLab mirrors across multiple instance pairs</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab" data-tab="dashboard-tab">Dashboard</button>
+            <button class="tab" data-tab="instances-tab">GitLab Instances</button>
+            <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
+            <button class="tab" data-tab="tokens-tab">Group Settings</button>
+            <button class="tab active" data-tab="topology-tab">Topology</button>
+            <button class="tab" data-tab="mirrors-tab">Mirrors</button>
+        </div>
+
+        <!-- Topology Tab -->
+        <div id="topology-tab" class="tab-content active">
+            <div class="card">
+                <div class="flex-between">
+                    <div>
+                        <h2>Topology</h2>
+                        <p class="text-muted">Visualize instance-to-instance mirror flows (aggregated by direction and count).</p>
+                    </div>
+                    <div class="flex" style="gap:10px; flex-wrap:wrap">
+                        <button class="btn btn-secondary btn-small" type="button">Refresh</button>
+                    </div>
+                </div>
+
+                <div class="topology-controls mt-20">
+                    <div class="form-group" style="margin-bottom:0; min-width: 320px;">
+                        <label for="topology-pair-filter" class="text-muted" style="margin-bottom:6px">Instance pair</label>
+                        <select id="topology-pair-filter">
+                            <option value="">All pairs</option>
+                            <option value="1" selected>Prod → Backup — Production GitLab → Backup GitLab (push)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; min-width: 210px;">
+                        <label for="topology-stale-warn-hours" class="text-muted" style="margin-bottom:6px">Stale warning (hours)</label>
+                        <input id="topology-stale-warn-hours" type="number" min="0" step="1" value="24">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; min-width: 210px;">
+                        <label for="topology-stale-error-hours" class="text-muted" style="margin-bottom:6px">Stale error (hours)</label>
+                        <input id="topology-stale-error-hours" type="number" min="0" step="1" value="168">
+                    </div>
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-never-succeeded-error" checked>
+                        <span>Never succeeded = error</span>
+                    </label>
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-show-pull" checked>
+                        <span>Show pull</span>
+                    </label>
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-show-push" checked>
+                        <span>Show push</span>
+                    </label>
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-show-disabled" checked>
+                        <span>Include disabled mirrors</span>
+                    </label>
+                    <div class="text-muted" style="font-size:0.92rem">
+                        Tip: drag nodes, scroll to zoom, click a node/edge for details.
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="topology-layout">
+                    <div class="topology-canvas" id="topology-canvas">
+                        <div class="text-muted text-center" id="topology-loading" style="padding:24px">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                    <aside class="topology-panel">
+                        <div class="topology-panel-header">
+                            <strong id="topology-panel-title">Details</strong>
+                            <span class="text-muted" id="topology-panel-subtitle">Click a node or link</span>
+                        </div>
+                        <div class="topology-panel-body" id="topology-panel-body">
+                            <div class="text-muted">No selection.</div>
+                        </div>
+                        <div class="topology-legend">
+                            <div class="topology-legend-row">
+                                <span class="topology-legend-swatch topology-swatch-pull"></span>
+                                <span><strong>pull</strong> (target pulls from source)</span>
+                            </div>
+                            <div class="topology-legend-row">
+                                <span class="topology-legend-swatch topology-swatch-push"></span>
+                                <span><strong>push</strong> (source pushes to target)</span>
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+<!-- Demo payload for file:// rendering -->
+<script>
+    window.__TOPOLOGY_DEMO_DATA__ = {
+        nodes: [
+            {
+                id: 1,
+                name: "Production GitLab",
+                url: "https://gitlab.company.com",
+                description: "Main production GitLab instance",
+                mirrors_in: 2,
+                mirrors_out: 11,
+                pairs_in: 1,
+                pairs_out: 2,
+                status_counts: { failed: 1, finished: 6, pending: 1 },
+                last_successful_update: "2025-12-23T20:12:00Z",
+                staleness: "warning",
+                staleness_age_seconds: 90000,
+                never_succeeded_count: 1,
+                health: "error",
+                x: 520,
+                y: 360
+            },
+            {
+                id: 2,
+                name: "Backup GitLab",
+                url: "https://backup.gitlab.company.com",
+                description: "Backup GitLab instance for disaster recovery",
+                mirrors_in: 8,
+                mirrors_out: 0,
+                pairs_in: 1,
+                pairs_out: 0,
+                status_counts: { failed: 1, finished: 6, pending: 1 },
+                last_successful_update: "2025-12-23T20:12:00Z",
+                staleness: "warning",
+                staleness_age_seconds: 90000,
+                never_succeeded_count: 1,
+                health: "error",
+                x: 1260,
+                y: 320
+            },
+            {
+                id: 3,
+                name: "Development GitLab",
+                url: "https://gitlab-dev.company.com",
+                description: "Development and testing environment",
+                mirrors_in: 0,
+                mirrors_out: 2,
+                pairs_in: 0,
+                pairs_out: 1,
+                status_counts: { finished: 2 },
+                last_successful_update: "2025-12-24T06:05:00Z",
+                staleness: "ok",
+                staleness_age_seconds: 7200,
+                never_succeeded_count: 0,
+                health: "ok",
+                x: 520,
+                y: 780
+            },
+            {
+                id: 4,
+                name: "Partner GitLab",
+                url: "https://gitlab.partner.com",
+                description: "Partner organization GitLab instance",
+                mirrors_in: 3,
+                mirrors_out: 0,
+                pairs_in: 1,
+                pairs_out: 0,
+                status_counts: { finished: 3 },
+                last_successful_update: "2025-12-24T04:20:00Z",
+                staleness: "ok",
+                staleness_age_seconds: 14400,
+                never_succeeded_count: 0,
+                health: "ok",
+                x: 1180,
+                y: 720
+            }
+        ],
+        links: [
+            {
+                source: 1,
+                target: 2,
+                mirror_direction: "push",
+                mirror_count: 8,
+                enabled_count: 7,
+                disabled_count: 1,
+                pair_count: 1,
+                status_counts: { failed: 1, finished: 6, pending: 1 },
+                last_successful_update: "2025-12-23T20:12:00Z",
+                staleness: "warning",
+                staleness_age_seconds: 90000,
+                never_succeeded_count: 1,
+                health: "error"
+            }
+        ]
+    };
+
+    // Demo drilldown payload used by topology.js in file:// mode (keyed by "src:tgt:dir")
+    window.__TOPOLOGY_DEMO_LINK_MIRRORS__ = {
+        "1:2:push": [
+            {
+                id: 101,
+                instance_pair_id: 1,
+                instance_pair_name: "Prod → Backup",
+                source_project_path: "data/analytics-pipeline",
+                target_project_path: "data/analytics-pipeline",
+                mirror_direction: "push",
+                enabled: true,
+                last_update_status: "failed",
+                last_successful_update: "2025-12-23T20:12:00Z",
+                never_succeeded: false,
+                staleness: "warning",
+                staleness_age_seconds: 90000,
+                health: "error"
+            },
+            {
+                id: 102,
+                instance_pair_id: 1,
+                instance_pair_name: "Prod → Backup",
+                source_project_path: "mobile/android-app",
+                target_project_path: "mobile/android-app",
+                mirror_direction: "push",
+                enabled: false,
+                last_update_status: "pending",
+                last_successful_update: null,
+                never_succeeded: true,
+                staleness: "error",
+                staleness_age_seconds: null,
+                health: "error"
+            },
+            {
+                id: 103,
+                instance_pair_id: 1,
+                instance_pair_name: "Prod → Backup",
+                source_project_path: "platform/api-gateway",
+                target_project_path: "platform/api-gateway",
+                mirror_direction: "push",
+                enabled: true,
+                last_update_status: "finished",
+                last_successful_update: "2025-12-24T06:00:00Z",
+                never_succeeded: false,
+                staleness: "ok",
+                staleness_age_seconds: 7800,
+                health: "ok"
+            }
+        ]
+    };
+</script>
+
+<script src="../../app/static/js/app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="../../app/static/js/topology.js"></script>
+<script>
+    // Render the demo graph and select the busiest link for a nice screenshot.
+    (async () => {
+        if (typeof window.initTopologyTab === "function") {
+            await window.initTopologyTab();
+            setTimeout(() => {
+                const firstLink = document.querySelector("#topology-canvas svg line");
+                if (firstLink) firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+            }, 120);
+        }
+    })();
+</script>
+</html>
+

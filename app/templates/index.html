@@ -23,6 +23,7 @@
             <button class="tab" data-tab="instances-tab">GitLab Instances</button>
             <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
             <button class="tab" data-tab="tokens-tab">Group Settings</button>
+            <button class="tab" data-tab="topology-tab">Topology</button>
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
         </div>
 
@@ -454,9 +455,91 @@
                 </table>
             </div>
         </div>
+
+        <!-- Topology Tab -->
+        <div id="topology-tab" class="tab-content">
+            <div class="card">
+                <div class="flex-between">
+                    <div>
+                        <h2>Topology</h2>
+                        <p class="text-muted">Visualize instance-to-instance mirror flows (aggregated by direction and count).</p>
+                    </div>
+                    <div class="flex" style="gap:10px; flex-wrap:wrap">
+                        <button class="btn btn-secondary btn-small" type="button" id="topology-refresh-btn">Refresh</button>
+                    </div>
+                </div>
+
+                <div class="topology-controls mt-20">
+                    <div class="form-group" style="margin-bottom:0; min-width: 320px;">
+                        <label for="topology-pair-filter" class="text-muted" style="margin-bottom:6px">Instance pair</label>
+                        <select id="topology-pair-filter">
+                            <option value="">All pairs</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; min-width: 210px;">
+                        <label for="topology-stale-warn-hours" class="text-muted" style="margin-bottom:6px">Stale warning (hours)</label>
+                        <input id="topology-stale-warn-hours" type="number" min="0" step="1" value="24">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0; min-width: 210px;">
+                        <label for="topology-stale-error-hours" class="text-muted" style="margin-bottom:6px">Stale error (hours)</label>
+                        <input id="topology-stale-error-hours" type="number" min="0" step="1" value="168">
+                    </div>
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-never-succeeded-error">
+                        <span>Never succeeded = error</span>
+                    </label>
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-show-pull" checked>
+                        <span>Show pull</span>
+                    </label>
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-show-push" checked>
+                        <span>Show push</span>
+                    </label>
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-show-disabled" checked>
+                        <span>Include disabled mirrors</span>
+                    </label>
+                    <div class="text-muted" style="font-size:0.92rem">
+                        Tip: drag nodes, scroll to zoom, click a node/edge for details.
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="topology-layout">
+                    <div class="topology-canvas" id="topology-canvas">
+                        <div class="text-muted text-center" id="topology-loading" style="padding:24px">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                    <aside class="topology-panel">
+                        <div class="topology-panel-header">
+                            <strong id="topology-panel-title">Details</strong>
+                            <span class="text-muted" id="topology-panel-subtitle">Click a node or link</span>
+                        </div>
+                        <div class="topology-panel-body" id="topology-panel-body">
+                            <div class="text-muted">No selection.</div>
+                        </div>
+                        <div class="topology-legend">
+                            <div class="topology-legend-row">
+                                <span class="topology-legend-swatch topology-swatch-pull"></span>
+                                <span><strong>pull</strong> (target pulls from source)</span>
+                            </div>
+                            <div class="topology-legend-row">
+                                <span class="topology-legend-swatch topology-swatch-push"></span>
+                                <span><strong>push</strong> (source pushes to target)</span>
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="/static/js/app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+    <script src="/static/js/topology.js"></script>
     <script>
         // Update stats on dashboard
         setInterval(async () => {
