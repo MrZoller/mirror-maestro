@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from typing import Any
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -30,6 +31,8 @@ class TopologyNode(BaseModel):
     status_counts: dict[str, int] = Field(default_factory=dict)
     last_successful_update: str | None = None
     health: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
+    staleness: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
+    staleness_age_seconds: int | None = None
 
 
 class TopologyLink(BaseModel):
@@ -44,6 +47,8 @@ class TopologyLink(BaseModel):
     status_counts: dict[str, int] = Field(default_factory=dict)
     last_successful_update: str | None = None
     health: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
+    staleness: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
+    staleness_age_seconds: int | None = None
 
 
 class TopologyResponse(BaseModel):
@@ -74,9 +79,67 @@ def _health_from_status_counts(counts: dict[str, int]) -> str:
     return "unknown"
 
 
+def _normalize_stale_thresholds(
+    *,
+    stale_warning_seconds: int | None,
+    stale_error_seconds: int | None,
+) -> tuple[int, int]:
+    # Reasonable defaults: warn after 24h, error after 7d
+    warn = 24 * 60 * 60 if stale_warning_seconds is None else int(stale_warning_seconds)
+    err = 7 * 24 * 60 * 60 if stale_error_seconds is None else int(stale_error_seconds)
+    warn = max(0, warn)
+    err = max(0, err)
+    if err < warn:
+        err = warn
+    return warn, err
+
+
+def _staleness_level(
+    *,
+    now: datetime,
+    last_successful_update: datetime | None,
+    mirror_count: int,
+    warn_s: int,
+    err_s: int,
+) -> tuple[str, int | None]:
+    """
+    Determine staleness from the most recent successful update time.
+
+    - If there are mirrors but we've never seen a success timestamp: warning
+    - If there are no mirrors: unknown (not applicable)
+    - Otherwise compare age against warn/error thresholds
+    """
+    if mirror_count <= 0:
+        return "unknown", None
+    if last_successful_update is None:
+        return "warning", None
+    # Stored timestamps are naive utcnow(); treat naive as UTC.
+    last = last_successful_update
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    age_s = int(max(0, (now - last).total_seconds()))
+    if age_s >= err_s and err_s > 0:
+        return "error", age_s
+    if age_s >= warn_s and warn_s > 0:
+        return "warning", age_s
+    return "ok", age_s
+
+
+def _combine_health(*, base: str, staleness: str) -> str:
+    """
+    Combine status-based health with staleness-based health.
+    Severity order: error > warning > ok > unknown.
+    """
+    order = {"unknown": 0, "ok": 1, "warning": 2, "error": 3}
+    inv = {v: k for k, v in order.items()}
+    return inv[max(order.get(base, 0), order.get(staleness, 0))]
+
+
 @router.get("", response_model=TopologyResponse)
 async def get_topology(
     instance_pair_id: int | None = None,
+    stale_warning_seconds: int | None = None,
+    stale_error_seconds: int | None = None,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials),
 ) -> TopologyResponse:
@@ -92,6 +155,12 @@ async def get_topology(
     Note: for visualization we always draw the arrow source -> target for both push and pull,
     and encode whether the sync is configured as push vs pull via `mirror_direction`.
     """
+    warn_s, err_s = _normalize_stale_thresholds(
+        stale_warning_seconds=stale_warning_seconds,
+        stale_error_seconds=stale_error_seconds,
+    )
+    now = datetime.now(timezone.utc)
+
     inst_rows = (await db.execute(select(GitLabInstance))).scalars().all()
 
     pair_q = select(InstancePair)
@@ -174,7 +243,15 @@ async def get_topology(
     for (src, tgt, direction), v in agg.items():
         last = v["last_successful_update"]
         status_counts = dict(v["status_counts"])
-        health = _health_from_status_counts(status_counts)
+        base_health = _health_from_status_counts(status_counts)
+        stale_level, stale_age_s = _staleness_level(
+            now=now,
+            last_successful_update=last,
+            mirror_count=int(v["mirror_count"]),
+            warn_s=warn_s,
+            err_s=err_s,
+        )
+        health = _combine_health(base=base_health, staleness=stale_level)
         links.append(
             TopologyLink(
                 source=src,
@@ -187,6 +264,8 @@ async def get_topology(
                 status_counts=status_counts,
                 last_successful_update=last.isoformat() if last is not None else None,
                 health=health,
+                staleness=stale_level,
+                staleness_age_seconds=stale_age_s,
             )
         )
 
@@ -199,7 +278,17 @@ async def get_topology(
         last = a["last_successful_update"]
         n.status_counts = counts
         n.last_successful_update = last.isoformat() if last is not None else None
-        n.health = _health_from_status_counts(counts)
+        base_health = _health_from_status_counts(counts)
+        stale_level, stale_age_s = _staleness_level(
+            now=now,
+            last_successful_update=last,
+            mirror_count=int(n.mirrors_in) + int(n.mirrors_out),
+            warn_s=warn_s,
+            err_s=err_s,
+        )
+        n.staleness = stale_level
+        n.staleness_age_seconds = stale_age_s
+        n.health = _combine_health(base=base_health, staleness=stale_level)
 
     # Keep output stable for UI diffs
     nodes_out = sorted(nodes.values(), key=lambda n: (n.name.lower(), n.id))

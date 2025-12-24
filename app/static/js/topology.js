@@ -56,7 +56,17 @@
   async function fetchTopology() {
     const pairSel = byId("topology-pair-filter");
     const pairId = (pairSel?.value || "").toString().trim();
-    const qs = pairId ? `?instance_pair_id=${encodeURIComponent(pairId)}` : "";
+    const warnHours = parseInt((byId("topology-stale-warn-hours")?.value || "24").toString(), 10);
+    const errHours = parseInt((byId("topology-stale-error-hours")?.value || "168").toString(), 10);
+    const warnS = Number.isFinite(warnHours) ? Math.max(0, warnHours) * 3600 : 24 * 3600;
+    const errS = Number.isFinite(errHours) ? Math.max(0, errHours) * 3600 : 168 * 3600;
+
+    const params = new URLSearchParams();
+    if (pairId) params.set("instance_pair_id", pairId);
+    params.set("stale_warning_seconds", String(warnS));
+    params.set("stale_error_seconds", String(errS));
+
+    const qs = params.toString() ? `?${params.toString()}` : "";
     topology.raw = await apiRequest(`/api/topology${qs}`);
   }
 
@@ -302,6 +312,8 @@
         const tgt = nodes.find((n) => n.id === tgtId);
         const counts = d.status_counts || {};
         const last = d.last_successful_update ? new Date(d.last_successful_update).toLocaleString() : "Never";
+        const stale = (d.staleness || "").toString().toLowerCase();
+        const staleAge = Number.isFinite(d.staleness_age_seconds) ? `${Math.round(d.staleness_age_seconds / 3600)}h` : "n/a";
         const health = (d.health || "unknown").toString();
         const dot = healthDotClass(health);
         const html = `
@@ -311,6 +323,7 @@
           </div>
           <div class="muted" style="margin-top:6px">${esc(String(d.shown_count))} ${esc(d.mirror_direction)} mirror(s)</div>
           <div class="muted" style="margin-top:6px">Last success: ${esc(last)}</div>
+          <div class="muted" style="margin-top:6px">Staleness: ${esc(stale || "n/a")} (${esc(staleAge)})</div>
           <div class="muted" style="margin-top:8px">Status: ${Object.entries(counts).map(([k,v]) => `${esc(k)}=${esc(String(v))}`).join(", ") || "n/a"}</div>
         `;
         setTooltip(html, event.offsetX, event.offsetY);
@@ -396,6 +409,8 @@
         const dot = healthDotClass(h);
         const lastIso = nodeHealth.get(d.id)?.last || d.last_successful_update || null;
         const last = lastIso ? new Date(lastIso).toLocaleString() : "Never";
+        const stale = (d.staleness || "").toString().toLowerCase();
+        const staleAge = Number.isFinite(d.staleness_age_seconds) ? `${Math.round(d.staleness_age_seconds / 3600)}h` : "n/a";
         const html = `
           <div class="row" style="align-items:center">
             <div><strong>${esc(d.name)}</strong></div>
@@ -403,6 +418,7 @@
           </div>
           <div class="muted" style="margin-top:6px">${esc(String(d.mirrors_in || 0))} in • ${esc(String(d.mirrors_out || 0))} out</div>
           <div class="muted" style="margin-top:6px">Last success: ${esc(last)}</div>
+          <div class="muted" style="margin-top:6px">Staleness: ${esc(stale || "n/a")} (${esc(staleAge)})</div>
         `;
         setTooltip(html, event.offsetX, event.offsetY);
       })
@@ -536,6 +552,8 @@
     const health = (n.health || "unknown").toString().toLowerCase();
     const dot = healthDotClass(health);
     const last = n.last_successful_update ? new Date(n.last_successful_update).toLocaleString() : "Never";
+    const stale = (n.staleness || "unknown").toString().toLowerCase();
+    const staleAge = Number.isFinite(n.staleness_age_seconds) ? `${Math.round(n.staleness_age_seconds / 3600)}h` : "n/a";
     const counts = n.status_counts || {};
     const fmtCounts = Object.keys(counts).length
       ? Object.entries(counts)
@@ -553,6 +571,7 @@
             <div class="pill"><span class="dot ${dot}"></span><strong>${esc(health)}</strong></div>
             <div class="text-muted">Last success: ${esc(last)}</div>
           </div>
+          <div class="text-muted">Staleness: <strong>${esc(stale)}</strong> <span class="text-muted">(${esc(staleAge)})</span></div>
           <div>
             <div class="text-muted">URL</div>
             <div><code>${esc(n.url)}</code></div>
@@ -590,6 +609,8 @@
     const health = (link.health || "unknown").toString().toLowerCase();
     const dot = healthDotClass(health);
     const last = link.last_successful_update ? new Date(link.last_successful_update).toLocaleString() : "Never";
+    const stale = (link.staleness || "unknown").toString().toLowerCase();
+    const staleAge = Number.isFinite(link.staleness_age_seconds) ? `${Math.round(link.staleness_age_seconds / 3600)}h` : "n/a";
     const counts = link.status_counts || {};
     const fmtCounts = Object.keys(counts).length
       ? Object.entries(counts)
@@ -607,6 +628,7 @@
             <div class="pill"><span class="dot ${dot}"></span><strong>${esc(health)}</strong></div>
             <div class="text-muted">Last success: ${esc(last)}</div>
           </div>
+          <div class="text-muted">Staleness: <strong>${esc(stale)}</strong> <span class="text-muted">(${esc(staleAge)})</span></div>
           <div class="grid-2">
             <div><div class="text-muted">Mirrors shown</div><div><strong>${esc(String(countShown))}</strong></div></div>
             <div><div class="text-muted">Pairs</div><div><strong>${esc(String(link.pair_count || 0))}</strong></div></div>
@@ -657,6 +679,21 @@
     if (pairSel) {
       pairSel.addEventListener("change", () => refresh());
     }
+
+    const warnEl = byId("topology-stale-warn-hours");
+    const errEl = byId("topology-stale-error-hours");
+    const normalize = () => {
+      if (!warnEl || !errEl) return;
+      const w = parseInt((warnEl.value || "0").toString(), 10);
+      const e = parseInt((errEl.value || "0").toString(), 10);
+      const wv = Number.isFinite(w) ? Math.max(0, w) : 0;
+      let ev = Number.isFinite(e) ? Math.max(0, e) : 0;
+      if (ev < wv) ev = wv;
+      warnEl.value = String(wv);
+      errEl.value = String(ev);
+    };
+    if (warnEl) warnEl.addEventListener("change", () => { normalize(); refresh(); });
+    if (errEl) errEl.addEventListener("change", () => { normalize(); refresh(); });
 
     ["topology-show-pull", "topology-show-push", "topology-show-disabled"].forEach((id) => {
       const el = byId(id);
