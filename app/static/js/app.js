@@ -469,6 +469,10 @@ function initTabs() {
             } else if (targetId === 'tokens-tab') {
                 loadTokens();
                 loadGroupDefaults();
+            } else if (targetId === 'topology-tab') {
+                if (typeof window.initTopologyTab === 'function') {
+                    window.initTopologyTab();
+                }
             }
         });
     });

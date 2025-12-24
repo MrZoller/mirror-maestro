@@ -28,6 +28,10 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 ![Mirrors](docs/screenshots/05-mirrors.png)
 *View and manage mirrors with real-time status updates and safe per-mirror edits*
 
+### Topology
+![Topology](docs/screenshots/06-topology.png)
+*Visualize instance-to-instance mirror flows as an interactive graph (push vs pull, counts, health/staleness, and click-through drilldown to the underlying mirrors)*
+
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
 
 ## Features
@@ -348,6 +352,10 @@ The application provides a RESTful API. Once running, visit:
 #### Import/Export
 - `GET /api/export/pair/{id}` - Export mirrors for a pair
 - `POST /api/export/pair/{id}` - Import mirrors for a pair
+
+#### Topology
+- `GET /api/topology` - Aggregated instance/link graph (supports staleness thresholds and “never succeeded” handling)
+- `GET /api/topology/link-mirrors` - Drill down: list mirrors behind a topology link
 
 ## Security
 
