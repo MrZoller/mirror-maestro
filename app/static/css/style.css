@@ -339,6 +339,104 @@ table th {
     color: var(--text-primary);
 }
 
+/* Table tools (search + clear) */
+.table-tools {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: rgba(17, 24, 39, 0.02);
+}
+
+.table-tools-left,
+.table-tools-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.table-tools-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.table-tools-search {
+    width: min(520px, 50vw);
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 0.92rem;
+    background: var(--card-background);
+}
+
+.table-tools-search:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: var(--focus-ring);
+}
+
+/* Sortable headers */
+table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-right: 28px;
+}
+
+table th.sortable::after {
+    content: "↕";
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: rgba(17, 24, 39, 0.35);
+    font-size: 0.9rem;
+}
+
+table th.sortable.sort-asc::after {
+    content: "↑";
+    color: rgba(17, 24, 39, 0.65);
+}
+
+table th.sortable.sort-desc::after {
+    content: "↓";
+    color: rgba(17, 24, 39, 0.65);
+}
+
+/* Per-column filter row */
+table thead tr.table-filter-row th {
+    padding: 8px 10px;
+    background: rgba(17, 24, 39, 0.02);
+    border-top: 1px solid var(--border-color);
+}
+
+.table-filter-input,
+.table-filter-select {
+    width: 100%;
+    padding: 7px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 0.9rem;
+    background: var(--card-background);
+}
+
+.table-filter-input:focus,
+.table-filter-select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: var(--focus-ring);
+}
+
+.table-filter-none {
+    height: 34px; /* keep row height consistent */
+}
+
 table td {
     padding: 12px;
     border-bottom: 1px solid var(--border-color);
