@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.models import GitLabInstance
+from app.models import GitLabInstance, InstancePair, Mirror, GroupAccessToken, GroupMirrorDefaults
 
 
 class FakeGitLabClient:
@@ -65,6 +65,109 @@ async def test_instances_create_and_get_and_delete(client, session_maker, monkey
     resp = await client.delete(f"/api/instances/{created['id']}")
     assert resp.status_code == 200
     assert resp.json() == {"status": "deleted"}
+
+
+@pytest.mark.asyncio
+async def test_instances_delete_cascades_pairs_mirrors_group_settings_and_tokens(client, session_maker, monkeypatch):
+    """
+    Deleting a GitLab instance should also delete any associated instance pairs and mirrors
+    (and related group defaults), plus group access tokens for that instance.
+    """
+    from app.api import instances as inst_mod
+
+    monkeypatch.setattr(inst_mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.test_ok = True
+
+    # Create two instances via API (exercises encryption swap + token user fetch best-effort).
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst-src", "url": "https://src.example.com", "token": "t-src", "description": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    src_id = resp.json()["id"]
+
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst-tgt", "url": "https://tgt.example.com", "token": "t-tgt", "description": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    tgt_id = resp.json()["id"]
+
+    # Pair references src_id (will be deleted when deleting src instance).
+    resp = await client.post(
+        "/api/pairs",
+        json={
+            "name": "pair-for-instance-delete",
+            "source_instance_id": src_id,
+            "target_instance_id": tgt_id,
+            "mirror_direction": "pull",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    pair_id = resp.json()["id"]
+
+    async with session_maker() as s:
+        # Mirror & group defaults attached to the pair.
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="platform/proj",
+            target_project_id=2,
+            target_project_path="platform/proj",
+            mirror_id=77,
+            enabled=True,
+            last_update_status="pending",
+        )
+        gd = GroupMirrorDefaults(
+            instance_pair_id=pair_id,
+            group_path="platform",
+            mirror_direction="pull",
+        )
+
+        # Tokens: one for the instance being deleted, one for the other instance.
+        tok_src = GroupAccessToken(
+            gitlab_instance_id=src_id,
+            group_path="platform",
+            encrypted_token="enc:tok-src",
+            token_name="bot-src",
+        )
+        tok_tgt = GroupAccessToken(
+            gitlab_instance_id=tgt_id,
+            group_path="platform",
+            encrypted_token="enc:tok-tgt",
+            token_name="bot-tgt",
+        )
+        s.add_all([m, gd, tok_src, tok_tgt])
+        await s.commit()
+        await s.refresh(tok_src)
+        await s.refresh(tok_tgt)
+        tok_src_id = tok_src.id
+        tok_tgt_id = tok_tgt.id
+
+    # Delete source instance and assert cascade.
+    resp = await client.delete(f"/api/instances/{src_id}")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"status": "deleted"}
+
+    async with session_maker() as s:
+        inst_src = (await s.execute(select(GitLabInstance).where(GitLabInstance.id == src_id))).scalar_one_or_none()
+        inst_tgt = (await s.execute(select(GitLabInstance).where(GitLabInstance.id == tgt_id))).scalar_one_or_none()
+        assert inst_src is None
+        assert inst_tgt is not None
+
+        pair = (await s.execute(select(InstancePair).where(InstancePair.id == pair_id))).scalar_one_or_none()
+        assert pair is None
+
+        mirrors = (await s.execute(select(Mirror).where(Mirror.instance_pair_id == pair_id))).scalars().all()
+        assert mirrors == []
+
+        defaults = (await s.execute(select(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id == pair_id))).scalars().all()
+        assert defaults == []
+
+        tok_src_row = (await s.execute(select(GroupAccessToken).where(GroupAccessToken.id == tok_src_id))).scalar_one_or_none()
+        tok_tgt_row = (await s.execute(select(GroupAccessToken).where(GroupAccessToken.id == tok_tgt_id))).scalar_one_or_none()
+        assert tok_src_row is None
+        assert tok_tgt_row is not None
 
 
 @pytest.mark.asyncio
