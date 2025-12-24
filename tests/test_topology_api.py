@@ -198,3 +198,44 @@ async def test_topology_staleness_thresholds_influence_health(client, session_ma
     assert nodes_by_name["A"]["health"] == "error"
     assert nodes_by_name["B"]["health"] == "error"
 
+
+@pytest.mark.asyncio
+async def test_topology_never_succeeded_level_can_be_error(client, session_maker):
+    a_id = await seed_instance(session_maker, name="A", url="https://a.example.com")
+    b_id = await seed_instance(session_maker, name="B", url="https://b.example.com")
+    pair_ab = await seed_pair(session_maker, name="ab3", src_id=a_id, tgt_id=b_id, direction="pull")
+
+    # Mirror exists but has never recorded a successful update timestamp.
+    async with session_maker() as s:
+        s.add(
+            Mirror(
+                instance_pair_id=pair_ab,
+                source_project_id=1,
+                source_project_path="g/a1",
+                target_project_id=2,
+                target_project_path="g/b1",
+                mirror_direction=None,
+                enabled=True,
+                last_update_status="pending",
+                last_successful_update=None,
+            )
+        )
+        await s.commit()
+
+    # Default: never succeeded => staleness warning
+    resp = await client.get("/api/topology")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    link = body["links"][0]
+    assert link["never_succeeded_count"] == 1
+    assert link["staleness"] == "warning"
+
+    # Override: never succeeded => staleness error
+    resp = await client.get("/api/topology?never_succeeded_level=error")
+    assert resp.status_code == 200, resp.text
+    body2 = resp.json()
+    link2 = body2["links"][0]
+    assert link2["never_succeeded_count"] == 1
+    assert link2["staleness"] == "error"
+    assert link2["health"] == "error"
+
