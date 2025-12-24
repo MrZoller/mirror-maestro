@@ -10,6 +10,7 @@ The following HTML files contain mockups with sample data for taking screenshots
 - `demo-instances.html` - GitLab Instances management view
 - `demo-pairs.html` - Instance Pairs configuration view
 - `demo-tokens.html` - Group Settings view (tokens + group defaults)
+- `demo-topology.html` - Topology graph view
 - `demo-mirrors.html` - Mirrors management view
 
 ## Taking Screenshots
@@ -23,6 +24,7 @@ The following HTML files contain mockups with sample data for taking screenshots
    open docs/screenshots/demo-instances.html
    open docs/screenshots/demo-pairs.html
    open docs/screenshots/demo-tokens.html
+   open docs/screenshots/demo-topology.html
    open docs/screenshots/demo-mirrors.html
    ```
 
@@ -37,6 +39,7 @@ The following HTML files contain mockups with sample data for taking screenshots
    - `03-pairs.png`
    - `04-tokens.png`
    - `05-mirrors.png`
+   - `06-topology.png`
 
 ### Method 2: Using Automated Script
 
