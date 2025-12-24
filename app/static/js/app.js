@@ -6,7 +6,13 @@ const state = {
     tokens: [],
     groupDefaults: [],
     selectedPair: null,
-    mirrorProjectInstances: { source: null, target: null }
+    mirrorProjectInstances: { source: null, target: null },
+    editing: {
+        instanceId: null,
+        pairId: null,
+        mirrorId: null,
+        tokenId: null,
+    },
 };
 
 // Initialize the application
@@ -141,7 +147,14 @@ function setupEventListeners() {
     // Token form
     document.getElementById('token-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
-        await createToken();
+        if (state.editing?.tokenId) {
+            await updateToken();
+        } else {
+            await createToken();
+        }
+    });
+    document.getElementById('token-cancel-edit')?.addEventListener('click', () => {
+        cancelTokenEdit();
     });
 
     // Group path typeahead (token form)
@@ -164,10 +177,12 @@ function setupEventListeners() {
 
     document.getElementById('group-defaults-pair')?.addEventListener('change', () => {
         applyGroupDefaultsTokenUserDefaultIfEmpty();
+        applyGroupDefaultsDirectionUI();
         clearDatalist('group-defaults-group-path-options');
     });
     document.getElementById('group-defaults-direction')?.addEventListener('change', () => {
         applyGroupDefaultsTokenUserDefaultIfEmpty();
+        applyGroupDefaultsDirectionUI();
     });
 
     // Group path typeahead (group defaults form)
@@ -306,20 +321,97 @@ function renderInstances(instances) {
     if (!tbody) return;
 
     if (instances.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No instances configured</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No instances configured</td></tr>';
         return;
     }
 
-    tbody.innerHTML = instances.map(instance => `
-        <tr>
-            <td><strong>${escapeHtml(instance.name)}</strong></td>
-            <td>${escapeHtml(instance.url)}</td>
-            <td><span class="text-muted">${escapeHtml(instance.description || 'N/A')}</span></td>
-            <td>
-                <button class="btn btn-danger btn-small" onclick="deleteInstance(${instance.id})">Delete</button>
-            </td>
-        </tr>
-    `).join('');
+    const editingId = state.editing?.instanceId;
+    tbody.innerHTML = instances.map(instance => {
+        const isEditing = editingId === instance.id;
+        if (isEditing) {
+            return `
+                <tr>
+                    <td>
+                        <input class="table-input" id="edit-instance-name-${instance.id}" value="${escapeHtml(instance.name)}">
+                    </td>
+                    <td class="cell-locked" title="Instance URL is locked once it is used by a pair">
+                        ${escapeHtml(instance.url)}
+                    </td>
+                    <td>
+                        <input class="table-input" id="edit-instance-description-${instance.id}" value="${escapeHtml(instance.description || '')}" placeholder="Description (optional)">
+                    </td>
+                    <td>
+                        <input class="table-input" type="password" id="edit-instance-token-${instance.id}" value="" placeholder="New access token (leave blank to keep)">
+                    </td>
+                    <td>
+                        <div class="table-actions">
+                            <button class="btn btn-primary btn-small" onclick="saveInstanceEdit(${instance.id})">Save</button>
+                            <button class="btn btn-secondary btn-small" onclick="cancelInstanceEdit()">Cancel</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        return `
+            <tr>
+                <td><strong>${escapeHtml(instance.name)}</strong></td>
+                <td>${escapeHtml(instance.url)}</td>
+                <td><span class="text-muted">${escapeHtml(instance.description || 'N/A')}</span></td>
+                <td>
+                    <span class="text-muted" title="Token value is never displayed">••••••••</span>
+                </td>
+                <td>
+                    <div class="table-actions">
+                        <button class="btn btn-secondary btn-small" onclick="beginInstanceEdit(${instance.id})">Edit</button>
+                        <button class="btn btn-danger btn-small" onclick="deleteInstance(${instance.id})">Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function beginInstanceEdit(id) {
+    state.editing.instanceId = id;
+    state.editing.pairId = null;
+    state.editing.mirrorId = null;
+    state.editing.tokenId = null;
+    renderInstances(state.instances);
+}
+
+function cancelInstanceEdit() {
+    state.editing.instanceId = null;
+    renderInstances(state.instances);
+}
+
+async function saveInstanceEdit(id) {
+    const nameEl = document.getElementById(`edit-instance-name-${id}`);
+    const descEl = document.getElementById(`edit-instance-description-${id}`);
+    const tokenEl = document.getElementById(`edit-instance-token-${id}`);
+    if (!nameEl || !descEl) return;
+
+    const payload = {
+        name: (nameEl.value || '').toString().trim(),
+        description: (descEl.value || '').toString().trim() || null,
+    };
+    const tokenRaw = (tokenEl?.value || '').toString().trim();
+    if (tokenRaw) {
+        payload.token = tokenRaw;
+    }
+
+    try {
+        await apiRequest(`/api/instances/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        });
+        showMessage('Instance updated successfully', 'success');
+        state.editing.instanceId = null;
+        await loadInstances();
+        await loadPairs(); // names are displayed on the pairs tab
+    } catch (error) {
+        console.error('Failed to update instance:', error);
+    }
 }
 
 async function createInstance() {
@@ -422,6 +514,7 @@ function renderPairs(pairs) {
         : `<code>${escapeHtml(String(v))}</code>`;
     const badge = (dir) => `<span class="badge badge-info">${escapeHtml((dir || '').toString().toLowerCase() || 'n/a')}</span>`;
 
+    const editingId = state.editing?.pairId;
     tbody.innerHTML = pairs.map(pair => {
         const source = state.instances.find(i => i.id === pair.source_instance_id);
         const target = state.instances.find(i => i.id === pair.target_instance_id);
@@ -455,6 +548,58 @@ function renderPairs(pairs) {
             return `<div style="line-height:1.35">${pieces.join('<br>')}</div>`;
         })();
 
+        const isEditing = editingId === pair.id;
+        if (isEditing) {
+            return `
+                <tr>
+                    <td>
+                        <div style="display:grid; gap:8px">
+                            <input class="table-input" id="edit-pair-name-${pair.id}" value="${escapeHtml(pair.name)}">
+                            <input class="table-input" id="edit-pair-description-${pair.id}" value="${escapeHtml(pair.description || '')}" placeholder="Description (optional)">
+                        </div>
+                    </td>
+                    <td class="cell-locked" title="Locked to avoid breaking existing mirrors">${escapeHtml(source?.name || 'Unknown')}</td>
+                    <td class="cell-locked" title="Locked to avoid breaking existing mirrors">${escapeHtml(target?.name || 'Unknown')}</td>
+                    <td>
+                        <select class="table-select" id="edit-pair-direction-${pair.id}" onchange="applyPairEditDirection(${pair.id})">
+                            <option value="pull"${direction === 'pull' ? ' selected' : ''}>pull</option>
+                            <option value="push"${direction === 'push' ? ' selected' : ''}>push</option>
+                        </select>
+                    </td>
+                    <td>
+                        <div style="display:grid; gap:10px">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="edit-pair-protected-${pair.id}" ${pair.mirror_protected_branches ? 'checked' : ''}>
+                                <label for="edit-pair-protected-${pair.id}">Mirror protected branches</label>
+                            </div>
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="edit-pair-overwrite-${pair.id}" ${pair.mirror_overwrite_diverged ? 'checked' : ''}>
+                                <label for="edit-pair-overwrite-${pair.id}">Overwrite divergent branches</label>
+                            </div>
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="edit-pair-trigger-${pair.id}" ${pair.mirror_trigger_builds ? 'checked' : ''}>
+                                <label for="edit-pair-trigger-${pair.id}">Trigger builds on mirror update (pull only)</label>
+                            </div>
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="edit-pair-only-protected-${pair.id}" ${pair.only_mirror_protected_branches ? 'checked' : ''}>
+                                <label for="edit-pair-only-protected-${pair.id}">Only mirror protected branches</label>
+                            </div>
+                            <div style="display:grid; gap:8px">
+                                <input class="table-input" id="edit-pair-regex-${pair.id}" value="${escapeHtml(pair.mirror_branch_regex || '')}" placeholder="Mirror branch regex (pull only)">
+                                <input class="table-input" id="edit-pair-user-${pair.id}" value="${escapeHtml(pair.mirror_user_id === null || pair.mirror_user_id === undefined ? '' : String(pair.mirror_user_id))}" placeholder="Mirror user id (pull only)">
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="table-actions">
+                            <button class="btn btn-primary btn-small" onclick="savePairEdit(${pair.id})">Save</button>
+                            <button class="btn btn-secondary btn-small" onclick="cancelPairEdit()">Cancel</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
         return `
             <tr>
                 <td><strong>${escapeHtml(pair.name)}</strong></td>
@@ -463,11 +608,93 @@ function renderPairs(pairs) {
                 <td>${badge(pair.mirror_direction)}</td>
                 <td>${settingsCell}</td>
                 <td>
-                    <button class="btn btn-danger btn-small" onclick="deletePair(${pair.id})">Delete</button>
+                    <div class="table-actions">
+                        <button class="btn btn-secondary btn-small" onclick="beginPairEdit(${pair.id})">Edit</button>
+                        <button class="btn btn-danger btn-small" onclick="deletePair(${pair.id})">Delete</button>
+                    </div>
                 </td>
             </tr>
         `;
     }).join('');
+}
+
+function beginPairEdit(id) {
+    state.editing.pairId = id;
+    state.editing.instanceId = null;
+    state.editing.mirrorId = null;
+    state.editing.tokenId = null;
+    renderPairs(state.pairs);
+    setTimeout(() => applyPairEditDirection(id), 0);
+}
+
+function cancelPairEdit() {
+    state.editing.pairId = null;
+    renderPairs(state.pairs);
+}
+
+function applyPairEditDirection(pairId) {
+    const dirEl = document.getElementById(`edit-pair-direction-${pairId}`);
+    const triggerEl = document.getElementById(`edit-pair-trigger-${pairId}`);
+    const regexEl = document.getElementById(`edit-pair-regex-${pairId}`);
+    const userEl = document.getElementById(`edit-pair-user-${pairId}`);
+    if (!dirEl) return;
+    const direction = (dirEl.value || '').toString().toLowerCase();
+    const isPush = direction === 'push';
+
+    if (triggerEl) {
+        triggerEl.disabled = isPush;
+        if (isPush) triggerEl.checked = false;
+    }
+    if (regexEl) {
+        regexEl.disabled = isPush;
+        if (isPush) regexEl.value = '';
+    }
+    if (userEl) {
+        userEl.disabled = isPush;
+        if (isPush) userEl.value = '';
+    }
+}
+
+async function savePairEdit(id) {
+    const nameEl = document.getElementById(`edit-pair-name-${id}`);
+    const descEl = document.getElementById(`edit-pair-description-${id}`);
+    const dirEl = document.getElementById(`edit-pair-direction-${id}`);
+    const protectedEl = document.getElementById(`edit-pair-protected-${id}`);
+    const overwriteEl = document.getElementById(`edit-pair-overwrite-${id}`);
+    const triggerEl = document.getElementById(`edit-pair-trigger-${id}`);
+    const onlyProtectedEl = document.getElementById(`edit-pair-only-protected-${id}`);
+    const regexEl = document.getElementById(`edit-pair-regex-${id}`);
+    const userEl = document.getElementById(`edit-pair-user-${id}`);
+    if (!nameEl || !dirEl || !protectedEl || !overwriteEl || !onlyProtectedEl) return;
+
+    const direction = (dirEl.value || '').toString().toLowerCase();
+    const isPush = direction === 'push';
+    const regexRaw = (regexEl?.value || '').toString().trim();
+    const userRaw = (userEl?.value || '').toString().trim();
+
+    const payload = {
+        name: (nameEl.value || '').toString().trim(),
+        description: (descEl?.value || '').toString().trim() || null,
+        mirror_direction: direction || 'pull',
+        mirror_protected_branches: !!protectedEl.checked,
+        mirror_overwrite_diverged: !!overwriteEl.checked,
+        only_mirror_protected_branches: !!onlyProtectedEl.checked,
+        mirror_trigger_builds: isPush ? false : !!triggerEl?.checked,
+        mirror_branch_regex: isPush ? null : (regexRaw || null),
+        mirror_user_id: isPush ? null : (userRaw ? parseInt(userRaw) : null),
+    };
+
+    try {
+        await apiRequest(`/api/pairs/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        });
+        showMessage('Instance pair updated successfully', 'success');
+        state.editing.pairId = null;
+        await loadPairs();
+    } catch (error) {
+        console.error('Failed to update pair:', error);
+    }
 }
 
 function applyPairTokenUserDefaultIfEmpty() {
@@ -597,9 +824,104 @@ async function createToken() {
 
         showMessage('Group access token added successfully', 'success');
         form.reset();
+        cancelTokenEdit();
         await loadTokens();
     } catch (error) {
         console.error('Failed to create token:', error);
+    }
+}
+
+function _setTokenFormEditMode(isEditing) {
+    const submit = document.getElementById('token-submit');
+    const cancel = document.getElementById('token-cancel-edit');
+    const instanceSel = document.getElementById('token-instance');
+    const groupPathEl = document.getElementById('token-group-path');
+    const tokenEl = document.getElementById('token-value');
+    if (submit) submit.textContent = isEditing ? 'Update Token' : 'Add Group Token';
+    if (cancel) cancel.classList.toggle('hidden', !isEditing);
+
+    // Avoid breaking existing mirror auth by changing the lookup key in-place.
+    if (instanceSel) instanceSel.disabled = !!isEditing;
+    if (groupPathEl) groupPathEl.disabled = !!isEditing;
+
+    if (!isEditing) {
+        if (instanceSel) instanceSel.disabled = false;
+        if (groupPathEl) groupPathEl.disabled = false;
+    }
+
+    // In edit mode, the user must re-enter a fresh token value (we never display the old token).
+    if (tokenEl) {
+        tokenEl.required = true;
+        tokenEl.placeholder = isEditing ? 'Paste new token value' : 'Group access token';
+    }
+}
+
+function beginTokenEdit(tokenId) {
+    const token = (state.tokens || []).find(t => t.id === tokenId);
+    if (!token) return;
+
+    state.editing.tokenId = tokenId;
+    state.editing.instanceId = null;
+    state.editing.pairId = null;
+    state.editing.mirrorId = null;
+
+    const instanceSel = document.getElementById('token-instance');
+    const groupPathEl = document.getElementById('token-group-path');
+    const nameEl = document.getElementById('token-name');
+    const tokenEl = document.getElementById('token-value');
+
+    if (instanceSel) instanceSel.value = String(token.gitlab_instance_id);
+    if (groupPathEl) groupPathEl.value = token.group_path || '';
+    if (nameEl) nameEl.value = token.token_name || '';
+    if (tokenEl) tokenEl.value = '';
+
+    _setTokenFormEditMode(true);
+    document.getElementById('token-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelTokenEdit() {
+    state.editing.tokenId = null;
+    _setTokenFormEditMode(false);
+
+    const instanceSel = document.getElementById('token-instance');
+    const groupPathEl = document.getElementById('token-group-path');
+    const nameEl = document.getElementById('token-name');
+    const tokenEl = document.getElementById('token-value');
+    if (instanceSel) instanceSel.disabled = false;
+    if (groupPathEl) groupPathEl.disabled = false;
+    if (nameEl) nameEl.value = '';
+    if (tokenEl) tokenEl.value = '';
+}
+
+async function updateToken() {
+    const tokenId = state.editing?.tokenId;
+    if (!tokenId) return;
+
+    const nameEl = document.getElementById('token-name');
+    const tokenEl = document.getElementById('token-value');
+    if (!nameEl || !tokenEl) return;
+
+    const tokenValue = (tokenEl.value || '').toString().trim();
+    if (!tokenValue) {
+        showMessage('Please paste a new token value', 'error');
+        return;
+    }
+
+    const payload = {
+        token_name: (nameEl.value || '').toString().trim(),
+        token: tokenValue,
+    };
+
+    try {
+        await apiRequest(`/api/tokens/${tokenId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        });
+        showMessage('Group access token updated successfully', 'success');
+        cancelTokenEdit();
+        await loadTokens();
+    } catch (error) {
+        console.error('Failed to update token:', error);
     }
 }
 
@@ -737,9 +1059,10 @@ function renderGroupSettings() {
             `;
 
             const actions = [];
+            if (gd) actions.push(`<button class="btn btn-secondary btn-small" onclick="editGroupDefaults(${gd.id})">Edit defaults</button>`);
             if (gd) actions.push(`<button class="btn btn-danger btn-small" onclick="deleteGroupDefaults(${gd.id})">Delete defaults</button>`);
-            if (srcTok) actions.push(`<button class="btn btn-danger btn-small" onclick="deleteToken(${srcTok.id})" title="Delete token on ${escapeHtml(srcName)}">Delete token</button>`);
-            if (tgtTok) actions.push(`<button class="btn btn-danger btn-small" onclick="deleteToken(${tgtTok.id})" title="Delete token on ${escapeHtml(tgtName)}">Delete token</button>`);
+            if (srcTok) actions.push(`<button class="btn btn-secondary btn-small" onclick="beginTokenEdit(${srcTok.id})" title="Update token on ${escapeHtml(srcName)}">Update token</button>`);
+            if (tgtTok) actions.push(`<button class="btn btn-secondary btn-small" onclick="beginTokenEdit(${tgtTok.id})" title="Update token on ${escapeHtml(tgtName)}">Update token</button>`);
             const actionsCell = actions.length
                 ? `<div class="flex" style="gap:6px; flex-wrap:wrap">${actions.join('')}</div>`
                 : '<span class="text-muted">N/A</span>';
@@ -800,6 +1123,81 @@ function resetGroupDefaultsOverrides() {
 
     const userId = document.getElementById('group-defaults-mirror-user-id');
     if (userId) userId.value = '';
+
+    applyGroupDefaultsDirectionUI();
+}
+
+function applyGroupDefaultsDirectionUI() {
+    const pairSel = document.getElementById('group-defaults-pair');
+    const dirSel = document.getElementById('group-defaults-direction');
+    const triggerEl = document.getElementById('group-defaults-trigger');
+    const regexEl = document.getElementById('group-defaults-branch-regex');
+    const userEl = document.getElementById('group-defaults-mirror-user-id');
+    if (!pairSel || !dirSel) return;
+
+    const pair = state.pairs.find(p => p.id === parseInt(pairSel.value || '0'));
+    const effDir = ((dirSel.value || '') || pair?.mirror_direction || '').toString().toLowerCase();
+    const isPush = effDir === 'push';
+
+    if (triggerEl) {
+        triggerEl.disabled = isPush;
+        if (isPush) {
+            triggerEl.checked = false;
+            triggerEl.indeterminate = true;
+            triggerEl.title = 'Not applicable for push mirrors';
+        }
+    }
+    if (regexEl) {
+        regexEl.disabled = isPush;
+        if (isPush) regexEl.value = '';
+    }
+    if (userEl) {
+        userEl.disabled = isPush;
+        if (isPush) userEl.value = '';
+    }
+}
+
+function editGroupDefaults(groupDefaultId) {
+    const row = (state.groupDefaults || []).find(gd => gd.id === groupDefaultId);
+    if (!row) return;
+
+    const pairSel = document.getElementById('group-defaults-pair');
+    const pathEl = document.getElementById('group-defaults-group-path');
+    const dirSel = document.getElementById('group-defaults-direction');
+    const overwriteEl = document.getElementById('group-defaults-overwrite');
+    const triggerEl = document.getElementById('group-defaults-trigger');
+    const onlyProtectedEl = document.getElementById('group-defaults-only-protected');
+    const regexEl = document.getElementById('group-defaults-branch-regex');
+    const userEl = document.getElementById('group-defaults-mirror-user-id');
+
+    if (pairSel) pairSel.value = String(row.instance_pair_id);
+    if (pathEl) pathEl.value = row.group_path || '';
+    if (dirSel) dirSel.value = row.mirror_direction || '';
+
+    const setTri = (el, v) => {
+        if (!el) return;
+        if (v === null || v === undefined) {
+            el.checked = false;
+            el.indeterminate = true;
+            el.title = 'Inherit pair default';
+        } else {
+            el.indeterminate = false;
+            el.checked = !!v;
+            el.title = '';
+        }
+        el.onchange = () => {
+            el.indeterminate = false;
+            el.title = '';
+        };
+    };
+    setTri(overwriteEl, row.mirror_overwrite_diverged);
+    setTri(triggerEl, row.mirror_trigger_builds);
+    setTri(onlyProtectedEl, row.only_mirror_protected_branches);
+
+    if (regexEl) regexEl.value = row.mirror_branch_regex || '';
+    if (userEl) userEl.value = row.mirror_user_id === null || row.mirror_user_id === undefined ? '' : String(row.mirror_user_id);
+
+    applyGroupDefaultsDirectionUI();
 }
 
 async function upsertGroupDefaults() {
@@ -909,6 +1307,9 @@ function renderMirrors(mirrors) {
         : `<code>${escapeHtml(String(v))}</code>`;
     const fmtUser = (v) => (v === null || v === undefined) ? '<span class="text-muted">n/a</span>' : escapeHtml(String(v));
 
+    const editingId = state.editing?.mirrorId;
+    const overrideBoolSelectValue = (v) => (v === null || v === undefined) ? '__inherit__' : (v ? 'true' : 'false');
+
     tbody.innerHTML = mirrors.map(mirror => {
         const statusBadge = mirror.enabled ?
             `<span class="badge badge-success">Enabled</span>` :
@@ -936,6 +1337,88 @@ function renderMirrors(mirrors) {
             return `<div style="line-height:1.35">${pieces.join('<br>')}</div>`;
         })();
 
+        const isEditing = editingId === mirror.id;
+        if (isEditing) {
+            const isPush = dir === 'push';
+            const overwriteSel = overrideBoolSelectValue(mirror.mirror_overwrite_diverged);
+            const onlyProtectedSel = overrideBoolSelectValue(mirror.only_mirror_protected_branches);
+            const triggerSel = overrideBoolSelectValue(mirror.mirror_trigger_builds);
+
+            const regexMode = (mirror.mirror_branch_regex === null || mirror.mirror_branch_regex === undefined) ? '__inherit__' : '__override__';
+            const userMode = (mirror.mirror_user_id === null || mirror.mirror_user_id === undefined) ? '__inherit__' : '__override__';
+
+            return `
+                <tr>
+                    <td class="cell-locked" title="Project paths cannot be edited">${escapeHtml(mirror.source_project_path)}</td>
+                    <td class="cell-locked" title="Project paths cannot be edited">${escapeHtml(mirror.target_project_path)}</td>
+                    <td>
+                        <div data-dir="${escapeHtml(dir)}" style="display:grid; gap:10px">
+                            <div>
+                                <span class="text-muted">direction:</span>
+                                <span class="badge badge-info">${escapeHtml(dir || 'n/a')}</span>
+                            </div>
+
+                            <div style="display:grid; gap:8px">
+                                <label class="text-muted" for="edit-mirror-overwrite-${mirror.id}">overwrite</label>
+                                <select class="table-select" id="edit-mirror-overwrite-${mirror.id}">
+                                    <option value="__inherit__"${overwriteSel === '__inherit__' ? ' selected' : ''}>Inherit</option>
+                                    <option value="true"${overwriteSel === 'true' ? ' selected' : ''}>true</option>
+                                    <option value="false"${overwriteSel === 'false' ? ' selected' : ''}>false</option>
+                                </select>
+
+                                <label class="text-muted" for="edit-mirror-only-protected-${mirror.id}">only_protected</label>
+                                <select class="table-select" id="edit-mirror-only-protected-${mirror.id}">
+                                    <option value="__inherit__"${onlyProtectedSel === '__inherit__' ? ' selected' : ''}>Inherit</option>
+                                    <option value="true"${onlyProtectedSel === 'true' ? ' selected' : ''}>true</option>
+                                    <option value="false"${onlyProtectedSel === 'false' ? ' selected' : ''}>false</option>
+                                </select>
+
+                                <label class="text-muted" for="edit-mirror-trigger-${mirror.id}">trigger (pull only)</label>
+                                <select class="table-select" id="edit-mirror-trigger-${mirror.id}" ${isPush ? 'disabled' : ''}>
+                                    <option value="__inherit__"${triggerSel === '__inherit__' ? ' selected' : ''}>Inherit</option>
+                                    <option value="true"${triggerSel === 'true' ? ' selected' : ''}>true</option>
+                                    <option value="false"${triggerSel === 'false' ? ' selected' : ''}>false</option>
+                                </select>
+
+                                <label class="text-muted">branch regex (pull only)</label>
+                                <div style="display:grid; gap:6px">
+                                    <select class="table-select" id="edit-mirror-regex-mode-${mirror.id}" onchange="applyMirrorEditControls(${mirror.id})" ${isPush ? 'disabled' : ''}>
+                                        <option value="__inherit__"${regexMode === '__inherit__' ? ' selected' : ''}>Inherit</option>
+                                        <option value="__override__"${regexMode === '__override__' ? ' selected' : ''}>Override</option>
+                                    </select>
+                                    <input class="table-input" id="edit-mirror-regex-${mirror.id}" value="${escapeHtml(mirror.mirror_branch_regex || '')}" placeholder="^main$ (optional)" ${isPush ? 'disabled' : ''}>
+                                </div>
+
+                                <label class="text-muted">mirror user id (pull only)</label>
+                                <div style="display:grid; gap:6px">
+                                    <select class="table-select" id="edit-mirror-user-mode-${mirror.id}" onchange="applyMirrorEditControls(${mirror.id})" ${isPush ? 'disabled' : ''}>
+                                        <option value="__inherit__"${userMode === '__inherit__' ? ' selected' : ''}>Inherit</option>
+                                        <option value="__override__"${userMode === '__override__' ? ' selected' : ''}>Override</option>
+                                    </select>
+                                    <input class="table-input" id="edit-mirror-user-${mirror.id}" value="${escapeHtml(mirror.mirror_user_id === null || mirror.mirror_user_id === undefined ? '' : String(mirror.mirror_user_id))}" placeholder="123 (optional)" ${isPush ? 'disabled' : ''}>
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="edit-mirror-enabled-${mirror.id}" ${mirror.enabled ? 'checked' : ''}>
+                            <label for="edit-mirror-enabled-${mirror.id}">Enabled</label>
+                        </div>
+                    </td>
+                    <td class="cell-locked">${updateStatus}</td>
+                    <td class="cell-locked">${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}</td>
+                    <td>
+                        <div class="table-actions">
+                            <button class="btn btn-primary btn-small" onclick="saveMirrorEdit(${mirror.id})">Save</button>
+                            <button class="btn btn-secondary btn-small" onclick="cancelMirrorEdit()">Cancel</button>
+                            <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
         return `
             <tr>
                 <td>${escapeHtml(mirror.source_project_path)}</td>
@@ -945,12 +1428,106 @@ function renderMirrors(mirrors) {
                 <td>${updateStatus}</td>
                 <td>${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}</td>
                 <td>
-                    <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
-                    <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
+                    <div class="table-actions">
+                        <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
+                        <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
+                        <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
+                    </div>
                 </td>
             </tr>
         `;
     }).join('');
+}
+
+function beginMirrorEdit(id) {
+    state.editing.mirrorId = id;
+    state.editing.instanceId = null;
+    state.editing.pairId = null;
+    state.editing.tokenId = null;
+    renderMirrors(state.mirrors);
+    setTimeout(() => applyMirrorEditControls(id), 0);
+}
+
+function cancelMirrorEdit() {
+    state.editing.mirrorId = null;
+    renderMirrors(state.mirrors);
+}
+
+function applyMirrorEditControls(mirrorId) {
+    const rowContainer = document.querySelector(`#edit-mirror-overwrite-${mirrorId}`)?.closest('[data-dir]');
+    const dir = (rowContainer?.dataset?.dir || '').toString().toLowerCase();
+    const isPush = dir === 'push';
+
+    const regexModeEl = document.getElementById(`edit-mirror-regex-mode-${mirrorId}`);
+    const regexEl = document.getElementById(`edit-mirror-regex-${mirrorId}`);
+    const userModeEl = document.getElementById(`edit-mirror-user-mode-${mirrorId}`);
+    const userEl = document.getElementById(`edit-mirror-user-${mirrorId}`);
+
+    if (regexEl) {
+        const mode = (regexModeEl?.value || '__inherit__').toString();
+        regexEl.disabled = isPush || mode !== '__override__';
+        if (isPush) regexEl.value = '';
+    }
+    if (userEl) {
+        const mode = (userModeEl?.value || '__inherit__').toString();
+        userEl.disabled = isPush || mode !== '__override__';
+        if (isPush) userEl.value = '';
+    }
+}
+
+async function saveMirrorEdit(id) {
+    const mirror = (state.mirrors || []).find(m => m.id === id);
+    if (!mirror) return;
+    const dir = (mirror.effective_mirror_direction || mirror.mirror_direction || '').toString().toLowerCase();
+    const isPush = dir === 'push';
+
+    const enabledEl = document.getElementById(`edit-mirror-enabled-${id}`);
+    const overwriteEl = document.getElementById(`edit-mirror-overwrite-${id}`);
+    const onlyProtectedEl = document.getElementById(`edit-mirror-only-protected-${id}`);
+    const triggerEl = document.getElementById(`edit-mirror-trigger-${id}`);
+    const regexModeEl = document.getElementById(`edit-mirror-regex-mode-${id}`);
+    const regexEl = document.getElementById(`edit-mirror-regex-${id}`);
+    const userModeEl = document.getElementById(`edit-mirror-user-mode-${id}`);
+    const userEl = document.getElementById(`edit-mirror-user-${id}`);
+    if (!enabledEl || !overwriteEl || !onlyProtectedEl) return;
+
+    const parseBoolOverride = (v) => {
+        if (v === '__inherit__') return null;
+        if (v === 'true') return true;
+        if (v === 'false') return false;
+        return null;
+    };
+
+    const payload = {
+        enabled: !!enabledEl.checked,
+        mirror_overwrite_diverged: parseBoolOverride(overwriteEl.value),
+        only_mirror_protected_branches: parseBoolOverride(onlyProtectedEl.value),
+        mirror_trigger_builds: isPush ? null : parseBoolOverride(triggerEl?.value || '__inherit__'),
+        mirror_branch_regex: null,
+        mirror_user_id: null,
+    };
+
+    if (!isPush) {
+        const regexMode = (regexModeEl?.value || '__inherit__').toString();
+        const regexRaw = (regexEl?.value || '').toString().trim();
+        payload.mirror_branch_regex = regexMode === '__override__' ? (regexRaw || null) : null;
+
+        const userMode = (userModeEl?.value || '__inherit__').toString();
+        const userRaw = (userEl?.value || '').toString().trim();
+        payload.mirror_user_id = userMode === '__override__' ? (userRaw ? parseInt(userRaw) : null) : null;
+    }
+
+    try {
+        await apiRequest(`/api/mirrors/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        });
+        showMessage('Mirror updated successfully', 'success');
+        state.editing.mirrorId = null;
+        await loadMirrors();
+    } catch (error) {
+        console.error('Failed to update mirror:', error);
+    }
 }
 
 async function loadProjectsForPair() {

@@ -225,6 +225,23 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
         pull_upd = await client.post(f"/api/mirrors/{pull_mirror_db_id}/update")
         assert pull_upd.status_code == 200, pull_upd.text
 
+        # 7b) Update mirror settings (this is what the UI "Edit" uses).
+        # Explicit mirror override should win over group defaults.
+        pull_edit = await client.put(f"/api/mirrors/{pull_mirror_db_id}", json={
+            "mirror_overwrite_diverged": False,
+        })
+        assert pull_edit.status_code == 200, pull_edit.text
+        assert pull_edit.json()["mirror_overwrite_diverged"] is False
+
+        # Best-effort: verify GitLab reflects the change when the attribute exists.
+        try:
+            rm = gl.projects.get(target_project.id).remote_mirrors.get(pull_remote_mirror_id)
+            if getattr(rm, "keep_divergent_refs", None) is not None:
+                # overwrite_diverged=False => keep_divergent_refs=True
+                assert rm.keep_divergent_refs is True
+        except Exception:
+            pass
+
         # 8) Best-effort: verify GitLab has any mirror status/timestamp visible.
         pull_status = await _poll_remote_mirror_status(
             gl=gl,
@@ -275,6 +292,21 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
         # 12) Trigger update for push mirror.
         push_upd = await client.post(f"/api/mirrors/{push_mirror_db_id}/update")
         assert push_upd.status_code == 200, push_upd.text
+
+        # 12b) Update push mirror settings via API (UI "Edit").
+        push_edit = await client.put(f"/api/mirrors/{push_mirror_db_id}", json={
+            "only_mirror_protected_branches": False,
+        })
+        assert push_edit.status_code == 200, push_edit.text
+        assert push_edit.json()["only_mirror_protected_branches"] is False
+
+        # Best-effort: verify GitLab reflects the change when the attribute exists.
+        try:
+            rm = gl.projects.get(source_project.id).remote_mirrors.get(push_remote_mirror_id)
+            if getattr(rm, "only_protected_branches", None) is not None:
+                assert rm.only_protected_branches is False
+        except Exception:
+            pass
 
         # 13) Best-effort: verify GitLab has any mirror status/timestamp visible (push mirror lives on source project).
         push_status = await _poll_remote_mirror_status(

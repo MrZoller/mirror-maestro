@@ -196,28 +196,39 @@ async def update_pair(
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
 
-    # Update fields
-    if pair_update.name is not None:
+    fields = getattr(pair_update, "model_fields_set", set())
+
+    # Safety: do not allow changing which instances a pair points at once mirrors exist.
+    if ("source_instance_id" in fields) or ("target_instance_id" in fields):
+        mirrors_res = await db.execute(select(Mirror.id).where(Mirror.instance_pair_id == pair_id).limit(1))
+        if mirrors_res.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot change source/target instances for a pair that already has mirrors.",
+            )
+
+    # Update fields (presence-aware to allow explicit null clears)
+    if "name" in fields:
         pair.name = pair_update.name
-    if pair_update.source_instance_id is not None:
+    if "source_instance_id" in fields:
         pair.source_instance_id = pair_update.source_instance_id
-    if pair_update.target_instance_id is not None:
+    if "target_instance_id" in fields:
         pair.target_instance_id = pair_update.target_instance_id
-    if pair_update.mirror_direction is not None:
+    if "mirror_direction" in fields:
         pair.mirror_direction = pair_update.mirror_direction
-    if pair_update.mirror_protected_branches is not None:
+    if "mirror_protected_branches" in fields:
         pair.mirror_protected_branches = pair_update.mirror_protected_branches
-    if pair_update.mirror_overwrite_diverged is not None:
+    if "mirror_overwrite_diverged" in fields:
         pair.mirror_overwrite_diverged = pair_update.mirror_overwrite_diverged
-    if pair_update.mirror_trigger_builds is not None:
+    if "mirror_trigger_builds" in fields:
         pair.mirror_trigger_builds = pair_update.mirror_trigger_builds
-    if pair_update.only_mirror_protected_branches is not None:
+    if "only_mirror_protected_branches" in fields:
         pair.only_mirror_protected_branches = pair_update.only_mirror_protected_branches
-    if pair_update.mirror_branch_regex is not None:
+    if "mirror_branch_regex" in fields:
         pair.mirror_branch_regex = pair_update.mirror_branch_regex
-    if pair_update.mirror_user_id is not None:
+    if "mirror_user_id" in fields:
         pair.mirror_user_id = pair_update.mirror_user_id
-    if pair_update.description is not None:
+    if "description" in fields:
         pair.description = pair_update.description
 
     await db.commit()
