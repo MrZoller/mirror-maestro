@@ -56,10 +56,15 @@ class Mirror(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     instance_pair_id: Mapped[int] = mapped_column(Integer, nullable=False)
 
+    # Where the remote mirror is configured (the "owner" project in GitLab).
+    # This enables GitLab-driven discovery while keeping local IDs stable.
+    owner_instance_id: Mapped[Optional[int]] = mapped_column(Integer)
+    owner_project_id: Mapped[Optional[int]] = mapped_column(Integer)
+
     # Project information
-    source_project_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_project_id: Mapped[Optional[int]] = mapped_column(Integer)
     source_project_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    target_project_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_project_id: Mapped[Optional[int]] = mapped_column(Integer)
     target_project_path: Mapped[str] = mapped_column(String(500), nullable=False)
 
     # Mirror settings (can override instance pair defaults)

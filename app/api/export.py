@@ -32,8 +32,8 @@ router = APIRouter(prefix="/api/export", tags=["export"])
 class MirrorExport(BaseModel):
     source_project_path: str
     target_project_path: str
-    source_project_id: int
-    target_project_id: int
+    source_project_id: int | None = None
+    target_project_id: int | None = None
     mirror_direction: str | None = None
     mirror_protected_branches: bool | None = None
     mirror_overwrite_diverged: bool | None = None

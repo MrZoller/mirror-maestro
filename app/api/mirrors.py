@@ -1,16 +1,16 @@
-from typing import List
+from typing import List, Iterable
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import get_db
 from app.models import Mirror, InstancePair, GitLabInstance, GroupAccessToken, GroupMirrorDefaults
 from app.core.auth import verify_credentials
 from app.core.gitlab_client import GitLabClient
 from app.core.encryption import encryption
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse, quote, unquote
 
 
 router = APIRouter(prefix="/api/mirrors", tags=["mirrors"])
@@ -43,6 +43,256 @@ def _build_git_url(*, scheme: str, hostname: str, port: int | None, project_path
     # Keep slashes for namespaces, but escape other unsafe chars.
     safe_path = quote(project_path, safe="/-._~")
     return f"{scheme}://{userinfo}{hostport}/{safe_path}.git"
+
+
+def _instance_hostname(url: str) -> str | None:
+    parsed = urlparse(_normalize_instance_url(url))
+    return parsed.hostname
+
+
+def _parse_git_remote_project_path(remote_url: str) -> str | None:
+    """
+    Extract "group/subgroup/project" from a remote URL.
+
+    Supports:
+    - https://user:pass@host/group/project.git
+    - http(s)://host/group/project.git
+    - git@host:group/project.git
+    """
+    if not remote_url:
+        return None
+
+    s = remote_url.strip()
+
+    # SSH scp-like syntax: git@host:group/project.git
+    if s.startswith("git@") and ":" in s and "://" not in s:
+        try:
+            after_at = s.split("@", 1)[1]
+            _host, path = after_at.split(":", 1)
+            path = path.lstrip("/")
+            if path.endswith(".git"):
+                path = path[:-4]
+            return unquote(path)
+        except Exception:
+            return None
+
+    try:
+        parsed = urlparse(s)
+        path = (parsed.path or "").lstrip("/")
+        if path.endswith(".git"):
+            path = path[:-4]
+        if not path:
+            return None
+        return unquote(path)
+    except Exception:
+        return None
+
+
+def _parse_gitlab_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    v = value.strip()
+    # GitLab often returns ISO timestamps with Z.
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(v)
+        if dt.tzinfo is None:
+            # Treat naive timestamps as UTC.
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+async def _discover_and_sync_pair_mirrors_from_gitlab(db: AsyncSession, *, pair: InstancePair) -> list[Mirror]:
+    """
+    Discover remote mirrors directly from GitLab for a specific instance pair.
+
+    We scan projects on both instances, fetch each project's remote mirrors,
+    and keep only mirrors that point at the counterpart instance hostname.
+    Discovered mirrors are upserted into the local DB so existing UI actions
+    (sync/delete/update) can still operate using the local mirror id.
+    """
+    src_res = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id))
+    tgt_res = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id))
+    src_inst = src_res.scalar_one_or_none()
+    tgt_inst = tgt_res.scalar_one_or_none()
+    if not src_inst or not tgt_inst:
+        return []
+
+    src_host = _instance_hostname(src_inst.url)
+    tgt_host = _instance_hostname(tgt_inst.url)
+    if not src_host or not tgt_host:
+        return []
+
+    src_client = GitLabClient(src_inst.url, src_inst.encrypted_token)
+    tgt_client = GitLabClient(tgt_inst.url, tgt_inst.encrypted_token)
+
+    # Build project index for both sides (for best-effort ID resolution).
+    src_projects = src_client.get_projects(get_all=True, per_page=100)
+    tgt_projects = tgt_client.get_projects(get_all=True, per_page=100)
+
+    src_path_by_id: dict[int, str] = {int(p["id"]): str(p.get("path_with_namespace") or "") for p in src_projects if p.get("id")}
+    tgt_path_by_id: dict[int, str] = {int(p["id"]): str(p.get("path_with_namespace") or "") for p in tgt_projects if p.get("id")}
+    src_id_by_path: dict[str, int] = {v: k for k, v in src_path_by_id.items() if v}
+    tgt_id_by_path: dict[str, int] = {v: k for k, v in tgt_path_by_id.items() if v}
+
+    discovered: list[Mirror] = []
+
+    async def _upsert_from_remote(
+        *,
+        owner_instance_id: int,
+        owner_project_id: int,
+        owner_project_path: str,
+        remote: dict,
+        other_id_by_path: dict[str, int],
+        mirror_points_to_hostname: str,
+    ) -> Mirror | None:
+        mirror_id = remote.get("id")
+        if mirror_id is None:
+            return None
+
+        remote_url = (remote.get("url") or "").strip()
+        remote_host = None
+        try:
+            if remote_url.startswith("git@") and ":" in remote_url and "://" not in remote_url:
+                remote_host = remote_url.split("@", 1)[1].split(":", 1)[0]
+            else:
+                remote_host = urlparse(remote_url).hostname
+        except Exception:
+            remote_host = None
+
+        if not remote_host or remote_host.lower() != mirror_points_to_hostname.lower():
+            return None
+
+        other_project_path = _parse_git_remote_project_path(remote_url)
+        if not other_project_path:
+            return None
+        other_project_id = other_id_by_path.get(other_project_path)
+
+        direction = (remote.get("mirror_direction") or "").lower() or None
+        enabled = remote.get("enabled")
+        only_protected = remote.get("only_protected_branches")
+        keep_divergent = remote.get("keep_divergent_refs")
+        overwrite_diverged = None if keep_divergent is None else (not bool(keep_divergent))
+
+        trigger_builds = remote.get("trigger_builds")
+        branch_regex = remote.get("mirror_branch_regex")
+        mirror_user_id = remote.get("mirror_user_id")
+        last_update_status = remote.get("update_status")
+        last_success = _parse_gitlab_datetime(remote.get("last_successful_update_at"))
+
+        # Try to match existing row (new schema key first; legacy fallback second).
+        existing = None
+        res = await db.execute(
+            select(Mirror).where(
+                Mirror.instance_pair_id == pair.id,
+                Mirror.owner_instance_id == owner_instance_id,
+                Mirror.owner_project_id == owner_project_id,
+                Mirror.mirror_id == int(mirror_id),
+            )
+        )
+        existing = res.scalar_one_or_none()
+        if not existing:
+            res2 = await db.execute(
+                select(Mirror).where(
+                    Mirror.instance_pair_id == pair.id,
+                    Mirror.mirror_id == int(mirror_id),
+                    Mirror.source_project_path == owner_project_path,
+                )
+            )
+            existing = res2.scalar_one_or_none()
+
+        row = existing or Mirror(
+            instance_pair_id=pair.id,
+            source_project_id=None,
+            source_project_path="",
+            target_project_id=None,
+            target_project_path="",
+            enabled=bool(enabled) if enabled is not None else True,
+        )
+
+        row.owner_instance_id = owner_instance_id
+        row.owner_project_id = owner_project_id
+        row.mirror_id = int(mirror_id)
+        row.mirror_direction = direction
+
+        # Map into "source/target" fields based on direction.
+        if direction == "push":
+            row.source_project_id = owner_project_id
+            row.source_project_path = owner_project_path
+            row.target_project_id = other_project_id
+            row.target_project_path = other_project_path
+        elif direction == "pull":
+            row.target_project_id = owner_project_id
+            row.target_project_path = owner_project_path
+            row.source_project_id = other_project_id
+            row.source_project_path = other_project_path
+        else:
+            # Unknown direction: keep owner info best-effort, don't overwrite paths if set.
+            if not row.source_project_path:
+                row.source_project_path = owner_project_path
+            if row.source_project_id is None:
+                row.source_project_id = owner_project_id
+
+        row.enabled = bool(enabled) if enabled is not None else row.enabled
+        row.only_mirror_protected_branches = only_protected if only_protected is not None else row.only_mirror_protected_branches
+        row.mirror_overwrite_diverged = overwrite_diverged if overwrite_diverged is not None else row.mirror_overwrite_diverged
+        row.mirror_trigger_builds = trigger_builds if trigger_builds is not None else row.mirror_trigger_builds
+        row.mirror_branch_regex = branch_regex if branch_regex is not None else row.mirror_branch_regex
+        row.mirror_user_id = mirror_user_id if mirror_user_id is not None else row.mirror_user_id
+        row.last_update_status = str(last_update_status) if last_update_status is not None else row.last_update_status
+        row.last_successful_update = last_success if last_success is not None else row.last_successful_update
+
+        if not existing:
+            db.add(row)
+        return row
+
+    # Scan source projects: keep mirrors pointing to target.
+    for pid, ppath in src_path_by_id.items():
+        try:
+            remotes = src_client.get_project_mirrors(pid)
+        except Exception:
+            continue
+        for remote in remotes or []:
+            row = await _upsert_from_remote(
+                owner_instance_id=src_inst.id,
+                owner_project_id=pid,
+                owner_project_path=ppath,
+                remote=remote,
+                other_id_by_path=tgt_id_by_path,
+                mirror_points_to_hostname=tgt_host,
+            )
+            if row:
+                discovered.append(row)
+
+    # Scan target projects: keep mirrors pointing to source.
+    for pid, ppath in tgt_path_by_id.items():
+        try:
+            remotes = tgt_client.get_project_mirrors(pid)
+        except Exception:
+            continue
+        for remote in remotes or []:
+            row = await _upsert_from_remote(
+                owner_instance_id=tgt_inst.id,
+                owner_project_id=pid,
+                owner_project_path=ppath,
+                remote=remote,
+                other_id_by_path=src_id_by_path,
+                mirror_points_to_hostname=src_host,
+            )
+            if row:
+                discovered.append(row)
+
+    await db.commit()
+    # Refresh to ensure ids are populated for newly inserted rows.
+    for row in discovered:
+        try:
+            await db.refresh(row)
+        except Exception:
+            pass
+    return discovered
 
 
 async def get_authenticated_url(
@@ -330,13 +580,22 @@ async def list_mirrors(
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
-    """List all mirrors, optionally filtered by instance pair."""
-    query = select(Mirror)
-    if instance_pair_id is not None:
-        query = query.where(Mirror.instance_pair_id == instance_pair_id)
+    """
+    List mirrors.
 
-    result = await db.execute(query)
-    mirrors = result.scalars().all()
+    If `instance_pair_id` is provided, the set of mirrors returned is discovered
+    directly from GitLab (and synced into the local DB for stable IDs).
+    Otherwise, returns the locally stored mirrors (used for dashboard stats).
+    """
+    if instance_pair_id is not None:
+        pair_res = await db.execute(select(InstancePair).where(InstancePair.id == instance_pair_id))
+        pair = pair_res.scalar_one_or_none()
+        if not pair:
+            raise HTTPException(status_code=404, detail="Instance pair not found")
+        mirrors = await _discover_and_sync_pair_mirrors_from_gitlab(db, pair=pair)
+    else:
+        result = await db.execute(select(Mirror))
+        mirrors = result.scalars().all()
 
     # Best-effort caches to avoid N+1 on common paths (e.g., filtered by pair)
     pair_cache: dict[int, InstancePair] = {}
@@ -511,6 +770,8 @@ async def create_mirror(
     # Create the mirror record in database
     db_mirror = Mirror(
         instance_pair_id=mirror.instance_pair_id,
+        owner_instance_id=source_instance.id if direction == "push" else target_instance.id,
+        owner_project_id=mirror.source_project_id if direction == "push" else mirror.target_project_id,
         source_project_id=mirror.source_project_id,
         source_project_path=mirror.source_project_path,
         target_project_id=mirror.target_project_id,

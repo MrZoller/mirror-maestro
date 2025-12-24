@@ -52,6 +52,8 @@ async def _maybe_migrate_sqlite(conn) -> None:
         "mirrors": {
             "mirror_branch_regex": "VARCHAR(255)",
             "mirror_user_id": "INTEGER",
+            "owner_instance_id": "INTEGER",
+            "owner_project_id": "INTEGER",
         },
     }
 
