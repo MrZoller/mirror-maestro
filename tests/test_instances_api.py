@@ -228,3 +228,35 @@ async def test_instances_projects_and_groups(client, session_maker, monkeypatch)
     assert resp.status_code == 200
     assert resp.json() == {"groups": [{"id": 456, "name": "grp"}]}
 
+
+@pytest.mark.asyncio
+async def test_instances_update_url_disallowed_when_used_by_pair(client, session_maker, monkeypatch):
+    from app.api import instances as inst_mod
+
+    monkeypatch.setattr(inst_mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.test_ok = True
+
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst-src", "url": "https://src.example.com", "token": "t-src", "description": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    src_id = resp.json()["id"]
+
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst-tgt", "url": "https://tgt.example.com", "token": "t-tgt", "description": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    tgt_id = resp.json()["id"]
+
+    resp = await client.post(
+        "/api/pairs",
+        json={"name": "pair-url-lock", "source_instance_id": src_id, "target_instance_id": tgt_id, "mirror_direction": "pull"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.put(f"/api/instances/{src_id}", json={"url": "https://new.example.com"})
+    assert resp.status_code == 400
+    assert "cannot be changed" in resp.json()["detail"].lower()
+
