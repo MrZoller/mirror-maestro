@@ -2145,6 +2145,69 @@ async function createMirror() {
         data.mirror_user_id = parseInt(mirrorUserIdRaw);
     }
 
+    // Preflight: check for existing GitLab remote mirrors before attempting to create.
+    // This is especially important for pull mirrors, where GitLab effectively supports only one.
+    try {
+        const preflightPayload = {
+            instance_pair_id: data.instance_pair_id,
+            source_project_id: data.source_project_id,
+            source_project_path: data.source_project_path,
+            target_project_id: data.target_project_id,
+            target_project_path: data.target_project_path,
+        };
+        if (mirrorDirection) preflightPayload.mirror_direction = mirrorDirection;
+
+        const preflight = await apiRequest('/api/mirrors/preflight', {
+            method: 'POST',
+            body: JSON.stringify(preflightPayload),
+        });
+
+        const dir = (preflight?.effective_direction || effectiveDirection || '').toString().toLowerCase();
+        const same = preflight?.existing_same_direction || [];
+        if (same.length > 0) {
+            const urls = same.map(m => (m.url || '').toString()).filter(Boolean);
+            const list = urls.length ? `\n\nExisting mirror URL(s):\n- ${urls.join('\n- ')}` : '';
+
+            if (dir === 'pull') {
+                const msg =
+                    `This target project already has a pull mirror configured in GitLab.\n` +
+                    `GitLab allows only one pull mirror per project.\n\n` +
+                    `Click OK to delete the existing pull mirror now, or Cancel to abort.` +
+                    list;
+
+                if (!confirm(msg)) {
+                    showMessage('Mirror creation cancelled (existing pull mirror detected)', 'info');
+                    return;
+                }
+
+                await apiRequest('/api/mirrors/remove-existing', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        ...preflightPayload,
+                        remote_mirror_ids: same.map(m => m.id).filter(v => typeof v === 'number'),
+                    }),
+                });
+            } else if (dir === 'push') {
+                const msg =
+                    `This source project already has ${same.length} push mirror(s) configured in GitLab.\n\n` +
+                    `Click OK to delete them first, or Cancel to keep them and create an additional push mirror.` +
+                    list;
+
+                if (confirm(msg)) {
+                    await apiRequest('/api/mirrors/remove-existing', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            ...preflightPayload,
+                            remote_mirror_ids: same.map(m => m.id).filter(v => typeof v === 'number'),
+                        }),
+                    });
+                }
+            }
+        }
+    } catch (e) {
+        // Preflight is best-effort; creation endpoint will still enforce pull mirror uniqueness.
+    }
+
     try {
         await apiRequest('/api/mirrors', {
             method: 'POST',
