@@ -683,6 +683,57 @@ table tbody tr:hover {
     background: rgba(252, 109, 38, 0.95);
 }
 
+/* Tooltip for topology graph */
+.topology-tooltip {
+    position: absolute;
+    z-index: 10;
+    pointer-events: none;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(17, 24, 39, 0.14);
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: var(--shadow-md);
+    color: var(--text-primary);
+    font-size: 0.92rem;
+    line-height: 1.25;
+    max-width: 340px;
+    backdrop-filter: blur(6px);
+}
+
+.topology-tooltip .muted {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.topology-tooltip .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.topology-tooltip .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    background: rgba(17, 24, 39, 0.03);
+    font-size: 0.85rem;
+}
+
+.topology-tooltip .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.topology-dot-ok { background: rgba(16, 133, 72, 0.95); }
+.topology-dot-warning { background: rgba(222, 126, 0, 0.95); }
+.topology-dot-error { background: rgba(221, 43, 14, 0.95); }
+.topology-dot-unknown { background: rgba(107, 114, 128, 0.95); }
+
 /* Responsive */
 @media (max-width: 768px) {
     .form-row, .grid-2 {
