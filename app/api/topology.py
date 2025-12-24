@@ -50,6 +50,7 @@ def _norm_dir(raw: str | None) -> str:
 
 @router.get("", response_model=TopologyResponse)
 async def get_topology(
+    instance_pair_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials),
 ) -> TopologyResponse:
@@ -66,8 +67,15 @@ async def get_topology(
     and encode whether the sync is configured as push vs pull via `mirror_direction`.
     """
     inst_rows = (await db.execute(select(GitLabInstance))).scalars().all()
-    pair_rows = (await db.execute(select(InstancePair))).scalars().all()
-    mirror_rows = (await db.execute(select(Mirror))).scalars().all()
+
+    pair_q = select(InstancePair)
+    mirror_q = select(Mirror)
+    if instance_pair_id is not None:
+        pair_q = pair_q.where(InstancePair.id == instance_pair_id)
+        mirror_q = mirror_q.where(Mirror.instance_pair_id == instance_pair_id)
+
+    pair_rows = (await db.execute(pair_q)).scalars().all()
+    mirror_rows = (await db.execute(mirror_q)).scalars().all()
 
     nodes: dict[int, TopologyNode] = {
         i.id: TopologyNode(id=i.id, name=i.name, url=i.url, description=i.description)
