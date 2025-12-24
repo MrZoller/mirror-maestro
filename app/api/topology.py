@@ -36,6 +36,10 @@ class TopologyLink(BaseModel):
     enabled_count: int
     disabled_count: int
     pair_count: int
+    # health/status (computed, aggregated)
+    status_counts: dict[str, int] = {}
+    last_successful_update: str | None = None
+    health: str = "unknown"  # "ok" | "warning" | "error" | "unknown"
 
 
 class TopologyResponse(BaseModel):
@@ -46,6 +50,24 @@ class TopologyResponse(BaseModel):
 def _norm_dir(raw: str | None) -> str:
     d = (raw or "").strip().lower()
     return d if d in {"push", "pull"} else "pull"
+
+
+def _norm_status(raw: str | None) -> str:
+    s = (raw or "").strip().lower()
+    return s or "unknown"
+
+
+def _health_from_status_counts(counts: dict[str, int]) -> str:
+    if not counts:
+        return "unknown"
+    if counts.get("failed", 0) > 0:
+        return "error"
+    # "updating" and "pending" are treated as warning: mirrors exist but are not healthy/settled.
+    if counts.get("updating", 0) > 0 or counts.get("pending", 0) > 0:
+        return "warning"
+    if counts.get("finished", 0) > 0:
+        return "ok"
+    return "unknown"
 
 
 @router.get("", response_model=TopologyResponse)
@@ -93,7 +115,16 @@ async def get_topology(
 
     # Aggregate mirror edges
     # key: (src, tgt, dir) -> counters
-    agg: dict[tuple[int, int, str], dict[str, Any]] = defaultdict(lambda: {"mirror_count": 0, "enabled": 0, "disabled": 0, "pair_ids": set()})
+    agg: dict[tuple[int, int, str], dict[str, Any]] = defaultdict(
+        lambda: {
+            "mirror_count": 0,
+            "enabled": 0,
+            "disabled": 0,
+            "pair_ids": set(),
+            "status_counts": defaultdict(int),
+            "last_successful_update": None,
+        }
+    )
 
     for m in mirror_rows:
         pair = pairs_by_id.get(m.instance_pair_id)
@@ -110,6 +141,11 @@ async def get_topology(
         agg[key]["enabled"] += 1 if m.enabled else 0
         agg[key]["disabled"] += 0 if m.enabled else 1
         agg[key]["pair_ids"].add(pair.id)
+        agg[key]["status_counts"][_norm_status(m.last_update_status)] += 1
+        if m.last_successful_update is not None:
+            cur = agg[key]["last_successful_update"]
+            if cur is None or m.last_successful_update > cur:
+                agg[key]["last_successful_update"] = m.last_successful_update
 
         # Per-node mirror flow counts
         if src in nodes:
@@ -119,6 +155,9 @@ async def get_topology(
 
     links: list[TopologyLink] = []
     for (src, tgt, direction), v in agg.items():
+        last = v["last_successful_update"]
+        status_counts = dict(v["status_counts"])
+        health = _health_from_status_counts(status_counts)
         links.append(
             TopologyLink(
                 source=src,
@@ -128,6 +167,9 @@ async def get_topology(
                 enabled_count=int(v["enabled"]),
                 disabled_count=int(v["disabled"]),
                 pair_count=len(v["pair_ids"]),
+                status_counts=status_counts,
+                last_successful_update=last.isoformat() if last is not None else None,
+                health=health,
             )
         )
 

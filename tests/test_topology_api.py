@@ -1,6 +1,7 @@
 import pytest
 
 from app.models import GitLabInstance, InstancePair, Mirror
+from datetime import datetime, timedelta
 
 
 async def seed_instance(session_maker, *, name: str, url: str) -> int:
@@ -47,7 +48,8 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
                     target_project_path="g/b1",
                     mirror_direction=None,  # inherit pair direction
                     enabled=True,
-                    last_update_status="pending",
+                    last_update_status="failed",
+                    last_successful_update=datetime.utcnow() - timedelta(hours=6),
                 ),
                 Mirror(
                     instance_pair_id=pair_ab,
@@ -57,7 +59,8 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
                     target_project_path="g/b2",
                     mirror_direction=None,
                     enabled=True,
-                    last_update_status="pending",
+                    last_update_status="finished",
+                    last_successful_update=datetime.utcnow() - timedelta(hours=1),
                 ),
                 Mirror(
                     instance_pair_id=pair_ab,
@@ -68,6 +71,7 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
                     mirror_direction=None,
                     enabled=False,
                     last_update_status="pending",
+                    last_successful_update=None,
                 ),
             ]
         )
@@ -125,6 +129,11 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
     assert ab_push["enabled_count"] == 2
     assert ab_push["disabled_count"] == 1
     assert ab_push["pair_count"] == 1
+    assert ab_push["status_counts"]["failed"] == 1
+    assert ab_push["status_counts"]["finished"] == 1
+    assert ab_push["status_counts"]["pending"] == 1
+    assert ab_push["health"] == "error"
+    assert ab_push["last_successful_update"] is not None
 
     bc_pull = links_by_key[(b_id, c_id, "pull")]
     assert bc_pull["mirror_count"] == 1

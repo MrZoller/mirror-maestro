@@ -92,6 +92,22 @@
     return dir === "push" ? "rgba(252, 109, 38, 0.95)" : "rgba(31, 117, 203, 0.92)";
   }
 
+  function healthSeverity(h) {
+    const x = (h || "").toString().toLowerCase();
+    if (x === "error") return 3;
+    if (x === "warning") return 2;
+    if (x === "ok") return 1;
+    return 0;
+  }
+
+  function healthDotClass(h) {
+    const x = (h || "").toString().toLowerCase();
+    if (x === "error") return "topology-dot-error";
+    if (x === "warning") return "topology-dot-warning";
+    if (x === "ok") return "topology-dot-ok";
+    return "topology-dot-unknown";
+  }
+
   function linkWidth(count) {
     const c = Math.max(1, Number(count || 1));
     // 1..8-ish
@@ -148,7 +164,7 @@
 
     topology.svg = svg;
 
-    // Markers
+    // Markers + filters
     const defs = svg.append("defs");
     const mk = (id, color) => {
       defs
@@ -166,6 +182,15 @@
     };
     mk("arrow-pull", linkColor("pull"));
     mk("arrow-push", linkColor("push"));
+
+    // Glow filters for health states (applied as SVG filter).
+    const addGlow = (id, color) => {
+      const f = defs.append("filter").attr("id", id).attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
+      f.append("feDropShadow").attr("dx", 0).attr("dy", 0).attr("stdDeviation", 3.2).attr("flood-color", color).attr("flood-opacity", 0.45);
+      f.append("feDropShadow").attr("dx", 0).attr("dy", 0).attr("stdDeviation", 1.8).attr("flood-color", color).attr("flood-opacity", 0.35);
+    };
+    addGlow("glow-error", "rgba(221, 43, 14, 1)");
+    addGlow("glow-warning", "rgba(222, 126, 0, 1)");
 
     const rootG = svg.append("g");
     topology.rootG = rootG;
@@ -194,6 +219,32 @@
     const simNodes = nodes.map((n) => ({ ...n }));
     const simLinks = links.map((l) => ({ ...l }));
 
+    // Tooltip (absolute div overlay)
+    const tooltip = document.createElement("div");
+    tooltip.className = "topology-tooltip hidden";
+    canvas.appendChild(tooltip);
+
+    const setTooltip = (html, x, y) => {
+      tooltip.innerHTML = html;
+      tooltip.classList.remove("hidden");
+      const pad = 12;
+      const rect = canvas.getBoundingClientRect();
+      // position relative to canvas
+      let left = x + pad;
+      let top = y + pad;
+      // clamp within canvas
+      const maxLeft = rect.width - 360;
+      const maxTop = rect.height - 140;
+      left = Math.max(10, Math.min(left, maxLeft));
+      top = Math.max(10, Math.min(top, maxTop));
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+    };
+    const hideTooltip = () => {
+      tooltip.classList.add("hidden");
+      tooltip.innerHTML = "";
+    };
+
     const linkSel = linkG
       .selectAll("line")
       .data(simLinks, (d) => `${d.source}-${d.target}-${d.mirror_direction}`)
@@ -201,8 +252,31 @@
       .attr("stroke", (d) => linkColor(d.mirror_direction))
       .attr("stroke-width", (d) => linkWidth(d.shown_count))
       .attr("stroke-opacity", 0.75)
+      .attr("stroke-dasharray", (d) => (healthSeverity(d.health) === 2 ? "7 6" : null))
+      .attr("filter", (d) => (healthSeverity(d.health) === 3 ? "url(#glow-error)" : healthSeverity(d.health) === 2 ? "url(#glow-warning)" : null))
       .attr("marker-end", (d) => `url(#arrow-${d.mirror_direction})`)
       .style("cursor", "pointer")
+      .on("mousemove", (event, d) => {
+        const srcId = typeof d.source === "object" && d.source ? d.source.id : d.source;
+        const tgtId = typeof d.target === "object" && d.target ? d.target.id : d.target;
+        const src = nodes.find((n) => n.id === srcId);
+        const tgt = nodes.find((n) => n.id === tgtId);
+        const counts = d.status_counts || {};
+        const last = d.last_successful_update ? new Date(d.last_successful_update).toLocaleString() : "Never";
+        const health = (d.health || "unknown").toString();
+        const dot = healthDotClass(health);
+        const html = `
+          <div class="row" style="align-items:center">
+            <div><strong>${esc(src?.name || `#${srcId}`)} → ${esc(tgt?.name || `#${tgtId}`)}</strong></div>
+            <div class="pill"><span class="dot ${dot}"></span>${esc(health)}</div>
+          </div>
+          <div class="muted" style="margin-top:6px">${esc(String(d.shown_count))} ${esc(d.mirror_direction)} mirror(s)</div>
+          <div class="muted" style="margin-top:6px">Last success: ${esc(last)}</div>
+          <div class="muted" style="margin-top:8px">Status: ${Object.entries(counts).map(([k,v]) => `${esc(k)}=${esc(String(v))}`).join(", ") || "n/a"}</div>
+        `;
+        setTooltip(html, event.offsetX, event.offsetY);
+      })
+      .on("mouseout", () => hideTooltip())
       .on("click", (event, d) => {
         event.stopPropagation();
         topology.selected = { type: "link", data: d };
@@ -275,6 +349,7 @@
 
     svg.on("click", () => {
       topology.selected = null;
+      hideTooltip();
       setPanel("Details", "Click a node or link", '<div class="text-muted">No selection.</div>');
       highlightSelection();
     });
@@ -432,12 +507,26 @@
     const tgt = nodes.find((n) => n.id === tgtId) || { name: `#${tgtId}` };
     const dir = (link.mirror_direction || "").toLowerCase();
     const countShown = link.shown_count ?? link.mirror_count;
+    const health = (link.health || "unknown").toString().toLowerCase();
+    const dot = healthDotClass(health);
+    const last = link.last_successful_update ? new Date(link.last_successful_update).toLocaleString() : "Never";
+    const counts = link.status_counts || {};
+    const fmtCounts = Object.keys(counts).length
+      ? Object.entries(counts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([k, v]) => `<span class="pill" style="margin-right:6px">${esc(k)}: <strong>${esc(String(v))}</strong></span>`)
+          .join("")
+      : '<span class="text-muted">n/a</span>';
 
     setPanel(
       `${src.name} → ${tgt.name}`,
       `${dir} link`,
       `
         <div style="display:grid; gap:14px">
+          <div class="row" style="display:flex; justify-content:space-between; align-items:center">
+            <div class="pill"><span class="dot ${dot}"></span><strong>${esc(health)}</strong></div>
+            <div class="text-muted">Last success: ${esc(last)}</div>
+          </div>
           <div class="grid-2">
             <div><div class="text-muted">Mirrors shown</div><div><strong>${esc(String(countShown))}</strong></div></div>
             <div><div class="text-muted">Pairs</div><div><strong>${esc(String(link.pair_count || 0))}</strong></div></div>
@@ -445,6 +534,10 @@
           <div class="grid-2">
             <div><div class="text-muted">Enabled</div><div><strong>${esc(String(link.enabled_count || 0))}</strong></div></div>
             <div><div class="text-muted">Disabled</div><div><strong>${esc(String(link.disabled_count || 0))}</strong></div></div>
+          </div>
+          <div>
+            <div class="text-muted" style="margin-bottom:6px">Status breakdown</div>
+            <div>${fmtCounts}</div>
           </div>
           <div class="text-muted" style="font-size:0.92rem">
             Arrow is always drawn <strong>source → target</strong>. Direction indicates how GitLab is configured:
