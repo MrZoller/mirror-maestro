@@ -71,7 +71,13 @@
                         <tr>
                             <td><input class="table-input" value="Production GitLab"></td>
                             <td class="cell-locked" title="Instance URL is locked once it is used by a pair">https://gitlab.company.com</td>
-                            <td><input class="table-input" value="Main production GitLab instance"></td>
+                            <td>
+                                <div style="display:grid; gap:8px">
+                                    <input class="table-input" value="Main production GitLab instance">
+                                    <div class="text-muted" style="font-size:0.9rem">Rotate API token</div>
+                                    <input class="table-input" type="password" value="" placeholder="New access token (leave blank to keep existing)">
+                                </div>
+                            </td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-primary btn-small">Save</button>
