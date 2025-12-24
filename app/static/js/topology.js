@@ -294,7 +294,7 @@
 
     topology.simulation = sim;
 
-    sim.on("tick", () => {
+    const ticked = () => {
       linkSel
         .attr("x1", (d) => d.source.x)
         .attr("y1", (d) => d.source.y)
@@ -306,7 +306,22 @@
       linkLabelSel
         .attr("x", (d) => (d.source.x + d.target.x) / 2)
         .attr("y", (d) => (d.source.y + d.target.y) / 2 - 6);
-    });
+    };
+
+    sim.on("tick", ticked);
+
+    // In demo screenshot mode (file:// with injected data), pre-tick the simulation
+    // so the graph is visible and stable before Playwright captures the page.
+    const isDemo = (window?.location?.protocol || "") === "file:" && !!window.__TOPOLOGY_DEMO_DATA__;
+    if (isDemo) {
+      try {
+        for (let i = 0; i < 260; i++) sim.tick();
+        ticked();
+        sim.stop();
+      } catch (e) {
+        // Ignore demo-only stabilization errors; rendering will still proceed.
+      }
+    }
 
     function highlightSelection() {
       const sel = topology.selected;
@@ -342,6 +357,16 @@
         </div>
       `
     );
+
+    // Demo mode: auto-select the busiest link for nicer screenshots.
+    if (isDemo && simLinks.length) {
+      const best = simLinks.slice().sort((a, b) => (b.shown_count || 0) - (a.shown_count || 0))[0];
+      if (best) {
+        topology.selected = { type: "link", data: best };
+        showLinkDetails(best, nodes);
+        highlightSelection();
+      }
+    }
 
     topology.lastRenderKey = renderKey;
   }
@@ -398,8 +423,10 @@
   }
 
   function showLinkDetails(link, nodes) {
-    const src = nodes.find((n) => n.id === link.source) || { name: `#${link.source}` };
-    const tgt = nodes.find((n) => n.id === link.target) || { name: `#${link.target}` };
+    const srcId = typeof link.source === "object" && link.source ? link.source.id : link.source;
+    const tgtId = typeof link.target === "object" && link.target ? link.target.id : link.target;
+    const src = nodes.find((n) => n.id === srcId) || { name: `#${srcId}` };
+    const tgt = nodes.find((n) => n.id === tgtId) || { name: `#${tgtId}` };
     const dir = (link.mirror_direction || "").toLowerCase();
     const countShown = link.shown_count ?? link.mirror_count;
 
@@ -471,7 +498,16 @@
   // Public hook called from app.js when the tab is activated
   window.initTopologyTab = async function initTopologyTab() {
     const isFileDemo = (window?.location?.protocol || "") === "file:";
-    if (isFileDemo) return;
+    // Demo screenshots are opened via file://. In that case, allow rendering from
+    // an injected demo payload so docs/screenshots/demo-topology.html can work.
+    if (isFileDemo) {
+      if (window.__TOPOLOGY_DEMO_DATA__) {
+        bindUIOnce();
+        topology.raw = window.__TOPOLOGY_DEMO_DATA__;
+        render();
+      }
+      return;
+    }
 
     bindUIOnce();
     if (!topology.raw) {

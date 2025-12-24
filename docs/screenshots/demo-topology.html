@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitLab Mirror Wizard - Topology</title>
+    <link rel="stylesheet" href="../../app/static/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>GitLab Mirror Wizard</h1>
+            <p>Manage GitLab mirrors across multiple instance pairs</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab" data-tab="dashboard-tab">Dashboard</button>
+            <button class="tab" data-tab="instances-tab">GitLab Instances</button>
+            <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
+            <button class="tab" data-tab="tokens-tab">Group Settings</button>
+            <button class="tab active" data-tab="topology-tab">Topology</button>
+            <button class="tab" data-tab="mirrors-tab">Mirrors</button>
+        </div>
+
+        <!-- Topology Tab -->
+        <div id="topology-tab" class="tab-content active">
+            <div class="card">
+                <div class="flex-between">
+                    <div>
+                        <h2>Topology</h2>
+                        <p class="text-muted">Visualize instance-to-instance mirror flows (aggregated by direction and count).</p>
+                    </div>
+                    <div class="flex" style="gap:10px; flex-wrap:wrap">
+                        <button class="btn btn-secondary btn-small" type="button">Refresh</button>
+                    </div>
+                </div>
+
+                <div class="topology-controls mt-20">
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-show-pull" checked>
+                        <span>Show pull</span>
+                    </label>
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-show-push" checked>
+                        <span>Show push</span>
+                    </label>
+                    <label class="checkbox-group" style="margin-bottom:0">
+                        <input type="checkbox" id="topology-show-disabled" checked>
+                        <span>Include disabled mirrors</span>
+                    </label>
+                    <div class="text-muted" style="font-size:0.92rem">
+                        Tip: drag nodes, scroll to zoom, click a node/edge for details.
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="topology-layout">
+                    <div class="topology-canvas" id="topology-canvas">
+                        <div class="text-muted text-center" id="topology-loading" style="padding:24px">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                    <aside class="topology-panel">
+                        <div class="topology-panel-header">
+                            <strong id="topology-panel-title">Details</strong>
+                            <span class="text-muted" id="topology-panel-subtitle">Click a node or link</span>
+                        </div>
+                        <div class="topology-panel-body" id="topology-panel-body">
+                            <div class="text-muted">No selection.</div>
+                        </div>
+                        <div class="topology-legend">
+                            <div class="topology-legend-row">
+                                <span class="topology-legend-swatch topology-swatch-pull"></span>
+                                <span><strong>pull</strong> (target pulls from source)</span>
+                            </div>
+                            <div class="topology-legend-row">
+                                <span class="topology-legend-swatch topology-swatch-push"></span>
+                                <span><strong>push</strong> (source pushes to target)</span>
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+<!-- Demo payload for file:// rendering -->
+<script>
+    window.__TOPOLOGY_DEMO_DATA__ = {
+        nodes: [
+            { id: 1, name: "Production GitLab", url: "https://gitlab.company.com", description: "Main production GitLab instance", mirrors_in: 2, mirrors_out: 11, pairs_in: 1, pairs_out: 2, x: 500, y: 350 },
+            { id: 2, name: "Backup GitLab", url: "https://backup.gitlab.company.com", description: "Backup GitLab instance for disaster recovery", mirrors_in: 8, mirrors_out: 0, pairs_in: 1, pairs_out: 0, x: 1280, y: 300 },
+            { id: 3, name: "Development GitLab", url: "https://gitlab-dev.company.com", description: "Development and testing environment", mirrors_in: 0, mirrors_out: 2, pairs_in: 0, pairs_out: 1, x: 520, y: 760 },
+            { id: 4, name: "Partner GitLab", url: "https://gitlab.partner.com", description: "Partner organization GitLab instance", mirrors_in: 3, mirrors_out: 0, pairs_in: 1, pairs_out: 0, x: 1220, y: 740 }
+        ],
+        links: [
+            { source: 1, target: 2, mirror_direction: "push", mirror_count: 8, enabled_count: 7, disabled_count: 1, pair_count: 1 },
+            { source: 1, target: 4, mirror_direction: "pull", mirror_count: 3, enabled_count: 3, disabled_count: 0, pair_count: 1 },
+            { source: 3, target: 1, mirror_direction: "push", mirror_count: 2, enabled_count: 2, disabled_count: 0, pair_count: 1 }
+        ]
+    };
+</script>
+
+<script src="../../app/static/js/app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="../../app/static/js/topology.js"></script>
+<script>
+    // Render the demo graph and select the busiest link for a nice screenshot.
+    (async () => {
+        if (typeof window.initTopologyTab === "function") {
+            await window.initTopologyTab();
+            setTimeout(() => {
+                const firstLink = document.querySelector("#topology-canvas svg line");
+                if (firstLink) firstLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+            }, 120);
+        }
+    })();
+</script>
+</html>
+
