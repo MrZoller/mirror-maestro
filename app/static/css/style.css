@@ -648,7 +648,9 @@ table tbody tr:hover {
 }
 
 .topology-panel-body code {
-    word-break: break-all;
+    /* Wrap long URLs / paths without breaking every character */
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .topology-legend {

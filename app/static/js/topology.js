@@ -733,7 +733,61 @@
 
     // Fetch drilldown mirrors and render inline
     const isFileDemo = (window?.location?.protocol || "") === "file:";
-    if (isFileDemo) return;
+    if (isFileDemo) {
+      try {
+        const host = document.getElementById("topology-link-mirrors");
+        if (!host) return;
+        const demo = window.__TOPOLOGY_DEMO_LINK_MIRRORS__;
+        const key = `${srcId}:${tgtId}:${dir}`;
+        const mirrors = (demo && (demo[key] || demo.default)) || [];
+        if (!mirrors.length) {
+          host.innerHTML = `<div class="text-muted">No mirrors found for this link.</div>`;
+          return;
+        }
+
+        const rows = mirrors
+          .slice(0, 200)
+          .map((m) => {
+            const last = m.last_successful_update ? new Date(m.last_successful_update).toLocaleString() : "Never";
+            const enabled = m.enabled ? `<span class="badge badge-success">Enabled</span>` : `<span class="badge badge-warning">Disabled</span>`;
+            const health = healthPillHtml(m.health, m.staleness, m.never_succeeded);
+            const status = statusBadgeHtml(m.last_update_status);
+            return `
+              <tr>
+                <td><strong>${esc(m.instance_pair_name || "Pair")}</strong><div class="text-muted">#${esc(String(m.instance_pair_id || ""))}</div></td>
+                <td><code>${esc(m.source_project_path)}</code></td>
+                <td><code>${esc(m.target_project_path)}</code></td>
+                <td>${health}</td>
+                <td>${status}</td>
+                <td>${enabled}</td>
+                <td class="text-muted">${esc(last)}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        host.innerHTML = `
+          <div class="text-muted" style="margin-bottom:8px">Showing ${esc(String(mirrors.length))} mirror(s)</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Pair</th>
+                <th>Source</th>
+                <th>Target</th>
+                <th>Health</th>
+                <th>Status</th>
+                <th>Enabled</th>
+                <th>Last Success</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        `;
+      } catch (e) {
+        // ignore demo rendering errors
+      }
+      return;
+    }
     topology._linkReqId = (topology._linkReqId || 0) + 1;
     const reqId = topology._linkReqId;
 
