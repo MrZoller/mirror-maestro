@@ -295,3 +295,195 @@ async def test_instances_groups_not_found(client):
     resp = await client.get("/api/instances/9999/groups")
     assert resp.status_code == 404
 
+
+@pytest.mark.asyncio
+async def test_instances_projects_pagination_clamping(client, session_maker, monkeypatch):
+    """Test that pagination parameters are clamped to safe values."""
+    from app.api import instances as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.test_ok = True
+    FakeGitLabClient.projects = []
+
+    # Create instance
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst1", "url": "https://x", "token": "t1", "description": ""},
+    )
+    instance_id = resp.json()["id"]
+
+    # Test per_page is clamped to max 100
+    resp = await client.get(f"/api/instances/{instance_id}/projects?per_page=999&page=5")
+    assert resp.status_code == 200
+
+    # Test page is clamped to minimum 1
+    resp = await client.get(f"/api/instances/{instance_id}/projects?page=0")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_instances_projects_gitlab_error(client, session_maker, monkeypatch):
+    """Test error handling when GitLab API fails for projects."""
+    from app.api import instances as mod
+
+    class FailingGitLabClient:
+        def __init__(self, url: str, encrypted_token: str):
+            pass
+
+        def get_projects(self, *args, **kwargs):
+            raise Exception("GitLab API down")
+
+    monkeypatch.setattr(mod, "GitLabClient", FailingGitLabClient)
+
+    # Create instance
+    async with session_maker() as s:
+        inst = GitLabInstance(
+            name="inst", url="https://gitlab.com", encrypted_token="enc:token"
+        )
+        s.add(inst)
+        await s.commit()
+        await s.refresh(inst)
+        instance_id = inst.id
+
+    resp = await client.get(f"/api/instances/{instance_id}/projects")
+    assert resp.status_code == 500
+    assert "failed to fetch projects" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_instances_groups_gitlab_error(client, session_maker, monkeypatch):
+    """Test error handling when GitLab API fails for groups."""
+    from app.api import instances as mod
+
+    class FailingGitLabClient:
+        def __init__(self, url: str, encrypted_token: str):
+            pass
+
+        def get_groups(self, *args, **kwargs):
+            raise Exception("GitLab API error")
+
+    monkeypatch.setattr(mod, "GitLabClient", FailingGitLabClient)
+
+    # Create instance
+    async with session_maker() as s:
+        inst = GitLabInstance(
+            name="inst", url="https://gitlab.com", encrypted_token="enc:token"
+        )
+        s.add(inst)
+        await s.commit()
+        await s.refresh(inst)
+        instance_id = inst.id
+
+    resp = await client.get(f"/api/instances/{instance_id}/groups")
+    assert resp.status_code == 500
+    assert "failed to fetch groups" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_instances_projects_with_search(client, session_maker, monkeypatch):
+    """Test fetching projects with search parameter."""
+    from app.api import instances as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.test_ok = True
+    FakeGitLabClient.projects = [
+        {"id": 1, "name": "matching-project"},
+        {"id": 2, "name": "another-match"}
+    ]
+
+    # Create instance
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst1", "url": "https://x", "token": "t1", "description": ""},
+    )
+    instance_id = resp.json()["id"]
+
+    resp = await client.get(f"/api/instances/{instance_id}/projects?search=match")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "projects" in data
+
+
+@pytest.mark.asyncio
+async def test_instances_groups_with_pagination(client, session_maker, monkeypatch):
+    """Test fetching groups with pagination."""
+    from app.api import instances as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.test_ok = True
+    FakeGitLabClient.groups = [
+        {"id": 1, "name": "group1"},
+        {"id": 2, "name": "group2"}
+    ]
+
+    # Create instance
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst1", "url": "https://x", "token": "t1", "description": ""},
+    )
+    instance_id = resp.json()["id"]
+
+    resp = await client.get(f"/api/instances/{instance_id}/groups?page=2&per_page=10")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "groups" in data
+
+
+@pytest.mark.asyncio
+async def test_instances_update_description_only(client, session_maker, monkeypatch):
+    """Test updating only the description field."""
+    from app.api import instances as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.test_ok = True
+
+    # Create instance
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst1", "url": "https://x", "token": "t1", "description": "original"},
+    )
+    instance_id = resp.json()["id"]
+
+    # Update only description
+    resp = await client.put(f"/api/instances/{instance_id}", json={"description": "updated"})
+    assert resp.status_code == 200
+    assert resp.json()["description"] == "updated"
+
+
+@pytest.mark.asyncio
+async def test_instances_update_name_only(client, session_maker, monkeypatch):
+    """Test updating only the name field."""
+    from app.api import instances as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.test_ok = True
+
+    # Create instance
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst1", "url": "https://x", "token": "t1", "description": ""},
+    )
+    instance_id = resp.json()["id"]
+
+    # Update only name
+    resp = await client.put(f"/api/instances/{instance_id}", json={"name": "renamed"})
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "renamed"
+
+
+@pytest.mark.asyncio
+async def test_instances_create_with_empty_description(client, monkeypatch):
+    """Test creating instance with empty description."""
+    from app.api import instances as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.test_ok = True
+
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst1", "url": "https://x", "token": "t1", "description": ""},
+    )
+    assert resp.status_code == 200
+    # Empty string is allowed
+    assert resp.json()["description"] == ""
+
