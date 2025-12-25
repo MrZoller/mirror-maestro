@@ -149,3 +149,196 @@ async def test_pairs_cannot_change_instances_when_mirrors_exist(client, session_
     assert resp.status_code == 400
     assert "cannot change" in resp.json()["detail"].lower()
 
+
+@pytest.mark.asyncio
+async def test_pairs_get_not_found(client):
+    """Test 404 when getting non-existent pair."""
+    resp = await client.get("/api/pairs/9999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_pairs_update_not_found(client):
+    """Test 404 when updating non-existent pair."""
+    resp = await client.put("/api/pairs/9999", json={"name": "test"})
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_pairs_delete_not_found(client):
+    """Test 404 when deleting non-existent pair."""
+    resp = await client.delete("/api/pairs/9999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_pairs_create_target_instance_not_found(client, session_maker):
+    """Test creating pair with invalid target instance."""
+    src_id = await seed_instance(session_maker, name="src")
+
+    resp = await client.post(
+        "/api/pairs",
+        json={
+            "name": "pair1",
+            "source_instance_id": src_id,
+            "target_instance_id": 999,
+        },
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Target instance not found"
+
+
+@pytest.mark.asyncio
+async def test_pairs_create_with_all_settings(client, session_maker):
+    """Test creating pair with all mirror settings."""
+    src_id = await seed_instance(session_maker, name="src")
+    tgt_id = await seed_instance(session_maker, name="tgt")
+
+    resp = await client.post(
+        "/api/pairs",
+        json={
+            "name": "full-pair",
+            "source_instance_id": src_id,
+            "target_instance_id": tgt_id,
+            "mirror_direction": "pull",
+            "mirror_protected_branches": True,
+            "mirror_overwrite_diverged": False,
+            "mirror_trigger_builds": True,
+            "only_mirror_protected_branches": True,
+            "mirror_branch_regex": "^main$",
+            "mirror_user_id": 123,
+            "description": "Test pair with all settings"
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mirror_direction"] == "pull"
+    assert data["mirror_protected_branches"] is True
+    assert data["mirror_overwrite_diverged"] is False
+    assert data["mirror_trigger_builds"] is True
+    assert data["only_mirror_protected_branches"] is True
+    assert data["mirror_branch_regex"] == "^main$"
+    assert data["mirror_user_id"] == 123
+
+
+@pytest.mark.asyncio
+async def test_pairs_update_multiple_fields(client, session_maker):
+    """Test updating multiple fields at once."""
+    src_id = await seed_instance(session_maker, name="src")
+    tgt_id = await seed_instance(session_maker, name="tgt")
+
+    # Create pair
+    resp = await client.post(
+        "/api/pairs",
+        json={
+            "name": "pair1",
+            "source_instance_id": src_id,
+            "target_instance_id": tgt_id,
+            "mirror_direction": "push",
+        },
+    )
+    pair_id = resp.json()["id"]
+
+    # Update multiple fields
+    resp = await client.put(
+        f"/api/pairs/{pair_id}",
+        json={
+            "name": "renamed-pair",
+            "description": "Updated description",
+            "mirror_protected_branches": True,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "renamed-pair"
+    assert data["description"] == "Updated description"
+    assert data["mirror_protected_branches"] is True
+
+
+@pytest.mark.asyncio
+async def test_pairs_update_only_name(client, session_maker):
+    """Test updating only the name field."""
+    src_id = await seed_instance(session_maker, name="src")
+    tgt_id = await seed_instance(session_maker, name="tgt")
+
+    resp = await client.post(
+        "/api/pairs",
+        json={"name": "pair1", "source_instance_id": src_id, "target_instance_id": tgt_id},
+    )
+    pair_id = resp.json()["id"]
+
+    resp = await client.put(f"/api/pairs/{pair_id}", json={"name": "new-name"})
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "new-name"
+
+
+@pytest.mark.asyncio
+async def test_pairs_update_mirror_settings(client, session_maker):
+    """Test updating various mirror settings."""
+    src_id = await seed_instance(session_maker, name="src")
+    tgt_id = await seed_instance(session_maker, name="tgt")
+
+    resp = await client.post(
+        "/api/pairs",
+        json={"name": "pair1", "source_instance_id": src_id, "target_instance_id": tgt_id},
+    )
+    pair_id = resp.json()["id"]
+
+    # Update mirror settings
+    resp = await client.put(
+        f"/api/pairs/{pair_id}",
+        json={
+            "mirror_overwrite_diverged": True,
+            "mirror_trigger_builds": False,
+            "mirror_branch_regex": "release/.*",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["mirror_overwrite_diverged"] is True
+    assert data["mirror_trigger_builds"] is False
+    assert data["mirror_branch_regex"] == "release/.*"
+
+
+@pytest.mark.asyncio
+async def test_pairs_create_with_push_direction(client, session_maker):
+    """Test creating pair with push direction."""
+    src_id = await seed_instance(session_maker, name="src")
+    tgt_id = await seed_instance(session_maker, name="tgt")
+
+    resp = await client.post(
+        "/api/pairs",
+        json={
+            "name": "push-pair",
+            "source_instance_id": src_id,
+            "target_instance_id": tgt_id,
+            "mirror_direction": "push",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["mirror_direction"] == "push"
+
+
+@pytest.mark.asyncio
+async def test_pairs_list_returns_all_pairs(client, session_maker):
+    """Test listing multiple pairs."""
+    src_id = await seed_instance(session_maker, name="src")
+    tgt_id = await seed_instance(session_maker, name="tgt")
+
+    # Create multiple pairs
+    await client.post(
+        "/api/pairs",
+        json={"name": "pair1", "source_instance_id": src_id, "target_instance_id": tgt_id},
+    )
+    await client.post(
+        "/api/pairs",
+        json={"name": "pair2", "source_instance_id": tgt_id, "target_instance_id": src_id},
+    )
+
+    resp = await client.get("/api/pairs")
+    assert resp.status_code == 200
+    pairs = resp.json()
+    assert len(pairs) >= 2
+    assert any(p["name"] == "pair1" for p in pairs)
+    assert any(p["name"] == "pair2" for p in pairs)
+
