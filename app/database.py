@@ -39,6 +39,11 @@ async def _maybe_migrate_sqlite(conn) -> None:
         # PRAGMA table_info: cid, name, type, notnull, dflt_value, pk
         return {row[1] for row in res.fetchall()}
 
+    async def _existing_indexes(table: str) -> set[str]:
+        res = await conn.execute(text(f"PRAGMA index_list({table})"))
+        # PRAGMA index_list: seq, name, unique, origin, partial
+        return {row[1] for row in res.fetchall()}
+
     # Columns added after initial release.
     desired: dict[str, dict[str, str]] = {
         "gitlab_instances": {
@@ -61,6 +66,49 @@ async def _maybe_migrate_sqlite(conn) -> None:
             if col in existing:
                 continue
             await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+
+    # Add unique constraints via unique indexes for existing databases
+    # (New databases will get these from __table_args__ in models)
+    unique_constraints = {
+        "group_access_tokens": {
+            "index_name": "uq_group_access_token_instance_group",
+            "columns": "(gitlab_instance_id, group_path)"
+        },
+        "group_mirror_defaults": {
+            "index_name": "uq_group_mirror_defaults_pair_group",
+            "columns": "(instance_pair_id, group_path)"
+        }
+    }
+
+    for table, constraint in unique_constraints.items():
+        existing_indexes = await _existing_indexes(table)
+        if constraint["index_name"] not in existing_indexes:
+            # Check if there are any duplicate rows before creating the unique index
+            # If duplicates exist, we keep the most recent one
+            if table == "group_access_tokens":
+                await conn.execute(text("""
+                    DELETE FROM group_access_tokens
+                    WHERE id NOT IN (
+                        SELECT MAX(id)
+                        FROM group_access_tokens
+                        GROUP BY gitlab_instance_id, group_path
+                    )
+                """))
+            elif table == "group_mirror_defaults":
+                await conn.execute(text("""
+                    DELETE FROM group_mirror_defaults
+                    WHERE id NOT IN (
+                        SELECT MAX(id)
+                        FROM group_mirror_defaults
+                        GROUP BY instance_pair_id, group_path
+                    )
+                """))
+
+            # Now create the unique index
+            await conn.execute(text(
+                f"CREATE UNIQUE INDEX {constraint['index_name']} "
+                f"ON {table} {constraint['columns']}"
+            ))
 
 
 async def get_db() -> AsyncSession:
