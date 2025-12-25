@@ -684,3 +684,218 @@ async def test_mirrors_remove_existing_deletes_same_direction(client, session_ma
     assert body["deleted_ids"] == [11]
     assert FakeGitLabClient.delete_calls[-1] == (2, 11)
 
+
+@pytest.mark.asyncio
+async def test_mirrors_list_empty(client):
+    """Test listing mirrors when none exist."""
+    resp = await client.get("/api/mirrors")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_mirrors_list_returns_all_mirrors(client, session_maker):
+    """Test listing all mirrors."""
+    # Create instances and pair
+    async with session_maker() as s:
+        src_inst = GitLabInstance(
+            name="src", url="https://src.com", encrypted_token="enc:src"
+        )
+        tgt_inst = GitLabInstance(
+            name="tgt", url="https://tgt.com", encrypted_token="enc:tgt"
+        )
+        s.add_all([src_inst, tgt_inst])
+        await s.commit()
+        await s.refresh(src_inst)
+        await s.refresh(tgt_inst)
+
+        pair = InstancePair(
+            name="pair",
+            source_instance_id=src_inst.id,
+            target_instance_id=tgt_inst.id,
+            mirror_direction="pull",
+        )
+        s.add(pair)
+        await s.commit()
+        await s.refresh(pair)
+
+        # Create multiple mirrors
+        mirror1 = Mirror(
+            instance_pair_id=pair.id,
+            source_project_id=1,
+            source_project_path="group/proj1",
+            target_project_id=2,
+            target_project_path="group/proj1",
+            mirror_id=101,
+            enabled=True,
+            last_update_status="finished",
+        )
+        mirror2 = Mirror(
+            instance_pair_id=pair.id,
+            source_project_id=3,
+            source_project_path="group/proj2",
+            target_project_id=4,
+            target_project_path="group/proj2",
+            mirror_id=102,
+            enabled=True,
+            last_update_status="pending",
+        )
+        s.add_all([mirror1, mirror2])
+        await s.commit()
+
+    resp = await client.get("/api/mirrors")
+    assert resp.status_code == 200
+    mirrors = resp.json()
+    assert len(mirrors) == 2
+    assert mirrors[0]["source_project_path"] == "group/proj1"
+    assert mirrors[1]["source_project_path"] == "group/proj2"
+
+
+@pytest.mark.asyncio
+async def test_mirrors_get_by_id(client, session_maker):
+    """Test getting a single mirror by ID."""
+    # Create instance, pair, and mirror
+    async with session_maker() as s:
+        src_inst = GitLabInstance(
+            name="src", url="https://src.com", encrypted_token="enc:src"
+        )
+        tgt_inst = GitLabInstance(
+            name="tgt", url="https://tgt.com", encrypted_token="enc:tgt"
+        )
+        s.add_all([src_inst, tgt_inst])
+        await s.commit()
+        await s.refresh(src_inst)
+        await s.refresh(tgt_inst)
+
+        pair = InstancePair(
+            name="pair",
+            source_instance_id=src_inst.id,
+            target_instance_id=tgt_inst.id,
+            mirror_direction="pull",
+        )
+        s.add(pair)
+        await s.commit()
+        await s.refresh(pair)
+
+        mirror = Mirror(
+            instance_pair_id=pair.id,
+            source_project_id=123,
+            source_project_path="group/project",
+            target_project_id=456,
+            target_project_path="group/project",
+            mirror_id=789,
+            enabled=True,
+            last_update_status="finished",
+        )
+        s.add(mirror)
+        await s.commit()
+        await s.refresh(mirror)
+        mirror_id = mirror.id
+
+    resp = await client.get(f"/api/mirrors/{mirror_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == mirror_id
+    assert data["source_project_id"] == 123
+    assert data["target_project_id"] == 456
+    assert data["mirror_id"] == 789
+    assert data["last_update_status"] == "finished"
+
+
+@pytest.mark.asyncio
+async def test_mirrors_get_not_found(client):
+    """Test 404 when mirror doesn't exist."""
+    resp = await client.get("/api/mirrors/9999")
+    assert resp.status_code == 404
+    assert "not found" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_mirrors_create_invalid_pair(client):
+    """Test creating mirror with non-existent pair."""
+    payload = {
+        "instance_pair_id": 9999,
+        "source_project_id": 1,
+        "source_project_path": "group/proj",
+        "target_project_id": 2,
+        "target_project_path": "group/proj",
+    }
+    resp = await client.post("/api/mirrors", json=payload)
+    assert resp.status_code == 404
+    assert "pair" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_mirrors_create_gitlab_api_failure(client, session_maker, monkeypatch):
+    """Test error handling when GitLab API fails during mirror creation."""
+    from app.api import mirrors as mod
+
+    # Set up fake client that fails
+    class FailingGitLabClient:
+        def __init__(self, url: str, encrypted_token: str):
+            pass
+
+        def create_pull_mirror(self, *args, **kwargs):
+            raise Exception("GitLab API error")
+
+    monkeypatch.setattr(mod, "GitLabClient", FailingGitLabClient)
+
+    # Create instances and pair
+    async with session_maker() as s:
+        src_inst = GitLabInstance(
+            name="src", url="https://src.com", encrypted_token="enc:src"
+        )
+        tgt_inst = GitLabInstance(
+            name="tgt", url="https://tgt.com", encrypted_token="enc:tgt"
+        )
+        s.add_all([src_inst, tgt_inst])
+        await s.commit()
+        await s.refresh(src_inst)
+        await s.refresh(tgt_inst)
+
+        pair = InstancePair(
+            name="pair",
+            source_instance_id=src_inst.id,
+            target_instance_id=tgt_inst.id,
+            mirror_direction="pull",
+        )
+        s.add(pair)
+        await s.commit()
+        await s.refresh(pair)
+        pair_id = pair.id
+
+    payload = {
+        "instance_pair_id": pair_id,
+        "source_project_id": 1,
+        "source_project_path": "group/proj",
+        "target_project_id": 2,
+        "target_project_path": "group/proj",
+    }
+    resp = await client.post("/api/mirrors", json=payload)
+    # API returns 500 for unhandled exceptions during GitLab API calls
+    assert resp.status_code in [400, 500]
+    detail = resp.json()["detail"]
+    assert "error" in detail.lower() or "failed" in detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_mirrors_update_not_found(client):
+    """Test updating a non-existent mirror."""
+    payload = {"enabled": False}
+    resp = await client.put("/api/mirrors/9999", json=payload)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_mirrors_delete_not_found(client):
+    """Test deleting a non-existent mirror."""
+    resp = await client.delete("/api/mirrors/9999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_mirrors_trigger_update_not_found(client):
+    """Test triggering update on non-existent mirror."""
+    resp = await client.post("/api/mirrors/9999/update")
+    assert resp.status_code == 404
+
