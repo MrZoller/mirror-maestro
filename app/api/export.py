@@ -169,11 +169,14 @@ async def import_pair_mirrors(
                 last_update_status="pending"
             )
             db.add(db_mirror)
+            # Commit each mirror individually to ensure partial imports work correctly
+            # This way, if one mirror fails, previously imported mirrors are still persisted
+            await db.commit()
             imported_count += 1
         except Exception as e:
+            # Rollback the failed mirror and continue with others
+            await db.rollback()
             errors.append(f"Failed to import {mirror_data.source_project_path}: {str(e)}")
-
-    await db.commit()
 
     return {
         "status": "completed",

@@ -79,8 +79,15 @@ async def create_instance(
         client = GitLabClient(instance.url, encrypted_token)
         if not client.test_connection():
             raise HTTPException(status_code=400, detail="Failed to connect to GitLab instance")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to connect to GitLab: {str(e)}")
+        import logging
+        logging.error(f"Failed to connect to GitLab: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to connect to GitLab instance. Check server logs for details."
+        )
 
     # Best-effort: resolve token user for a friendly display / defaults
     token_user_id = None
@@ -292,7 +299,12 @@ async def get_instance_projects(
         projects = client.get_projects(search=search, per_page=per_page, page=page, get_all=get_all)
         return {"projects": projects}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch projects: {str(e)}")
+        import logging
+        logging.error(f"Failed to fetch projects: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch projects from GitLab. Check server logs for details."
+        )
 
 
 @router.get("/{instance_id}/groups")
@@ -321,4 +333,9 @@ async def get_instance_groups(
         groups = client.get_groups(search=search, per_page=per_page, page=page, get_all=get_all)
         return {"groups": groups}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch groups: {str(e)}")
+        import logging
+        logging.error(f"Failed to fetch groups: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch groups from GitLab. Check server logs for details."
+        )
