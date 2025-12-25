@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Boolean, Integer, DateTime, Text, JSON
+from sqlalchemy import String, Boolean, Integer, DateTime, Text, JSON, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -35,7 +35,7 @@ class InstancePair(Base):
     target_instance_id: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Default mirror settings for this pair
-    mirror_direction: Mapped[str] = mapped_column(String(10), default="pull")  # "pull" or "push"
+    mirror_direction: Mapped[str] = mapped_column(String(10), default="pull", nullable=False)  # "pull" or "push"
     mirror_protected_branches: Mapped[bool] = mapped_column(Boolean, default=True)
     mirror_overwrite_diverged: Mapped[bool] = mapped_column(Boolean, default=False)
     mirror_trigger_builds: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -84,6 +84,9 @@ class Mirror(Base):
 class GroupAccessToken(Base):
     """Stores encrypted group access tokens for mirroring."""
     __tablename__ = "group_access_tokens"
+    __table_args__ = (
+        UniqueConstraint('gitlab_instance_id', 'group_path', name='uq_group_access_token_instance_group'),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     gitlab_instance_id: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -106,6 +109,9 @@ class GroupMirrorDefaults(Base):
     the namespace portion of `path_with_namespace` (project name excluded).
     """
     __tablename__ = "group_mirror_defaults"
+    __table_args__ = (
+        UniqueConstraint('instance_pair_id', 'group_path', name='uq_group_mirror_defaults_pair_group'),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     instance_pair_id: Mapped[int] = mapped_column(Integer, nullable=False)

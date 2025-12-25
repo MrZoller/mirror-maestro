@@ -473,6 +473,14 @@ async def create_mirror(
         or (group_defaults.mirror_direction if group_defaults else None)
         or pair.mirror_direction
     )
+
+    # Validate direction is set and valid
+    if not direction or direction not in ("push", "pull"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid mirror direction: {direction}. Must be 'push' or 'pull'"
+        )
+
     protected_branches = (
         mirror.mirror_protected_branches
         if mirror.mirror_protected_branches is not None
@@ -559,7 +567,13 @@ async def create_mirror(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create mirror in GitLab: {str(e)}")
+        # Log the full error but return a generic message to avoid exposing sensitive details
+        import logging
+        logging.error(f"Failed to create mirror in GitLab: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create mirror in GitLab. Check server logs for details."
+        )
 
     # Create the mirror record in database
     db_mirror = Mirror(
@@ -724,7 +738,12 @@ async def remove_existing_gitlab_mirrors(
             client.delete_mirror(owner_project_id, mid)
             deleted_ids.append(mid)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to delete existing mirror {mid} in GitLab: {str(e)}")
+            import logging
+            logging.error(f"Failed to delete existing mirror {mid} in GitLab: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete existing mirror {mid} in GitLab. Check server logs for details."
+            )
 
     return {"deleted": len(deleted_ids), "deleted_ids": deleted_ids, "direction": direction, "project_id": owner_project_id}
 
@@ -901,7 +920,12 @@ async def update_mirror(
             )
         except Exception as e:
             await db.rollback()
-            raise HTTPException(status_code=500, detail=f"Failed to update mirror in GitLab: {str(e)}")
+            import logging
+            logging.error(f"Failed to update mirror in GitLab: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to update mirror in GitLab. Check server logs for details."
+            )
 
     await db.commit()
     await db.refresh(mirror)
@@ -1058,4 +1082,9 @@ async def trigger_mirror_update(
 
         return {"status": "update_triggered"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to trigger update: {str(e)}")
+        import logging
+        logging.error(f"Failed to trigger update: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to trigger mirror update. Check server logs for details."
+        )

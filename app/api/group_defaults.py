@@ -105,18 +105,14 @@ async def upsert_group_defaults(
             mirror_user_id=payload.mirror_user_id,
         )
         db.add(row)
-        await db.commit()
-        await db.refresh(row)
     else:
-        row.mirror_direction = payload.mirror_direction
-        row.mirror_protected_branches = payload.mirror_protected_branches
-        row.mirror_overwrite_diverged = payload.mirror_overwrite_diverged
-        row.mirror_trigger_builds = payload.mirror_trigger_builds
-        row.only_mirror_protected_branches = payload.only_mirror_protected_branches
-        row.mirror_branch_regex = payload.mirror_branch_regex
-        row.mirror_user_id = payload.mirror_user_id
-        await db.commit()
-        await db.refresh(row)
+        # Only update fields that were explicitly set in the request
+        update_data = payload.model_dump(exclude_unset=True, exclude={'instance_pair_id', 'group_path'})
+        for field, value in update_data.items():
+            setattr(row, field, value)
+
+    await db.commit()
+    await db.refresh(row)
 
     return GroupMirrorDefaultsResponse(
         id=row.id,
