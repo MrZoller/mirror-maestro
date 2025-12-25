@@ -149,3 +149,24 @@ async def test_pairs_cannot_change_instances_when_mirrors_exist(client, session_
     assert resp.status_code == 400
     assert "cannot change" in resp.json()["detail"].lower()
 
+
+@pytest.mark.asyncio
+async def test_pairs_get_not_found(client):
+    """Test 404 when getting non-existent pair."""
+    resp = await client.get("/api/pairs/9999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_pairs_update_not_found(client):
+    """Test 404 when updating non-existent pair."""
+    resp = await client.put("/api/pairs/9999", json={"name": "test"})
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_pairs_delete_not_found(client):
+    """Test 404 when deleting non-existent pair."""
+    resp = await client.delete("/api/pairs/9999")
+    assert resp.status_code == 404
+

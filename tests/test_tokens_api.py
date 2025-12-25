@@ -69,3 +69,24 @@ async def test_tokens_create_requires_instance(client):
     assert resp.status_code == 404
     assert resp.json()["detail"] == "GitLab instance not found"
 
+
+@pytest.mark.asyncio
+async def test_tokens_get_not_found(client):
+    """Test 404 when getting non-existent token."""
+    resp = await client.get("/api/tokens/9999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_tokens_update_not_found(client):
+    """Test 404 when updating non-existent token."""
+    resp = await client.put("/api/tokens/9999", json={"token": "new-token"})
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_tokens_delete_not_found(client):
+    """Test 404 when deleting non-existent token."""
+    resp = await client.delete("/api/tokens/9999")
+    assert resp.status_code == 404
+
