@@ -260,3 +260,38 @@ async def test_instances_update_url_disallowed_when_used_by_pair(client, session
     assert resp.status_code == 400
     assert "cannot be changed" in resp.json()["detail"].lower()
 
+
+@pytest.mark.asyncio
+async def test_instances_get_not_found(client):
+    """Test 404 when getting non-existent instance."""
+    resp = await client.get("/api/instances/9999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_instances_update_not_found(client):
+    """Test 404 when updating non-existent instance."""
+    resp = await client.put("/api/instances/9999", json={"description": "test"})
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_instances_delete_not_found(client):
+    """Test 404 when deleting non-existent instance."""
+    resp = await client.delete("/api/instances/9999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_instances_projects_not_found(client):
+    """Test 404 when getting projects for non-existent instance."""
+    resp = await client.get("/api/instances/9999/projects")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_instances_groups_not_found(client):
+    """Test 404 when getting groups for non-existent instance."""
+    resp = await client.get("/api/instances/9999/groups")
+    assert resp.status_code == 404
+
