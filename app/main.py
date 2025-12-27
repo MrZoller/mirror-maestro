@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import instances, pairs, mirrors, export, tokens, group_defaults, topology
+from app.api import instances, pairs, mirrors, export, tokens, group_defaults, topology, dashboard
 from app.core.auth import verify_credentials
 
 
@@ -33,6 +33,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 # Include API routers
+app.include_router(dashboard.router)
 app.include_router(instances.router)
 app.include_router(pairs.router)
 app.include_router(mirrors.router)
