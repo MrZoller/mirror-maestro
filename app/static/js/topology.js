@@ -11,6 +11,10 @@
     resizeObserver: null,
     lastRenderKey: "",
     selected: null, // {type: 'node'|'link', data}
+    hovered: null, // {type: 'node'|'link', data}
+    animationFrame: null, // requestAnimationFrame ID for particles
+    zoomBehavior: null, // d3 zoom behavior
+    currentTransform: null, // current zoom transform
   };
 
   function byId(id) {
@@ -269,6 +273,11 @@
     });
 
     // Clear & re-render for simplicity (graph sizes are typically small).
+    // Cancel any existing particle animation
+    if (topology.animationFrame) {
+      cancelAnimationFrame(topology.animationFrame);
+      topology.animationFrame = null;
+    }
     canvas.innerHTML = "";
 
     const svg = window.d3
@@ -315,8 +324,13 @@
     const zoom = window.d3
       .zoom()
       .scaleExtent([0.4, 2.6])
-      .on("zoom", (event) => rootG.attr("transform", event.transform));
+      .on("zoom", (event) => {
+        rootG.attr("transform", event.transform);
+        topology.currentTransform = event.transform;
+      });
 
+    topology.zoomBehavior = zoom;
+    topology.currentTransform = window.d3.zoomIdentity;
     svg.call(zoom);
 
     // Background hint
@@ -329,6 +343,7 @@
       .text("drag nodes • scroll to zoom • click for details");
 
     const linkG = rootG.append("g").attr("stroke-linecap", "round");
+    const particleG = rootG.append("g"); // Animated particles layer
     const labelG = rootG.append("g");
     const nodeG = rootG.append("g");
 
@@ -374,6 +389,9 @@
       .attr("marker-end", (d) => `url(#arrow-${d.mirror_direction})`)
       .style("cursor", "pointer")
       .on("mousemove", (event, d) => {
+        topology.hovered = { type: "link", data: d };
+        highlightHovered();
+
         const srcId = typeof d.source === "object" && d.source ? d.source.id : d.source;
         const tgtId = typeof d.target === "object" && d.target ? d.target.id : d.target;
         const src = nodes.find((n) => n.id === srcId);
@@ -398,7 +416,11 @@
         `;
         setTooltip(html, event.offsetX, event.offsetY);
       })
-      .on("mouseout", () => hideTooltip())
+      .on("mouseout", () => {
+        topology.hovered = null;
+        highlightHovered();
+        hideTooltip();
+      })
       .on("click", (event, d) => {
         event.stopPropagation();
         topology.selected = { type: "link", data: d };
@@ -475,6 +497,9 @@
 
     nodeSel
       .on("mousemove", (event, d) => {
+        topology.hovered = { type: "node", data: d };
+        highlightHovered();
+
         const h = (nodeHealth.get(d.id)?.health || d.health || "unknown").toString().toLowerCase();
         const dot = healthDotClass(h);
         const lastIso = nodeHealth.get(d.id)?.last || d.last_successful_update || null;
@@ -494,7 +519,11 @@
         `;
         setTooltip(html, event.offsetX, event.offsetY);
       })
-      .on("mouseout", () => hideTooltip());
+      .on("mouseout", () => {
+        topology.hovered = null;
+        highlightHovered();
+        hideTooltip();
+      });
 
     svg.on("click", () => {
       topology.selected = null;
@@ -537,6 +566,52 @@
 
     sim.on("tick", ticked);
 
+    // Animated particles along links
+    const particles = [];
+    simLinks.forEach((link) => {
+      // Create 1-3 particles per link based on mirror count
+      const particleCount = Math.min(3, Math.max(1, Math.floor(Math.log2(link.shown_count + 1))));
+      for (let i = 0; i < particleCount; i++) {
+        particles.push({
+          link,
+          offset: i / particleCount, // Stagger particles along the link
+          speed: 0.008 + Math.random() * 0.004, // Random speed variation
+        });
+      }
+    });
+
+    const particleSel = particleG
+      .selectAll("circle")
+      .data(particles)
+      .join("circle")
+      .attr("r", 2.5)
+      .attr("fill", (d) => linkColor(d.link.mirror_direction))
+      .attr("opacity", 0.8)
+      .style("pointer-events", "none");
+
+    function animateParticles() {
+      particles.forEach((p) => {
+        p.offset = (p.offset + p.speed) % 1;
+      });
+
+      particleSel.attr("cx", (d) => {
+        const src = d.link.source;
+        const tgt = d.link.target;
+        return src.x + (tgt.x - src.x) * d.offset;
+      }).attr("cy", (d) => {
+        const src = d.link.source;
+        const tgt = d.link.target;
+        return src.y + (tgt.y - src.y) * d.offset;
+      });
+
+      topology.animationFrame = requestAnimationFrame(animateParticles);
+    }
+
+    // Start particle animation
+    if (simLinks.length > 0) {
+      animateParticles();
+    }
+
     // In demo screenshot mode (file:// with injected data), pre-tick the simulation
     // so the graph is visible and stable before Playwright captures the page.
     const isDemo = (window?.location?.protocol || "") === "file:" && !!window.__TOPOLOGY_DEMO_DATA__;
@@ -559,16 +634,49 @@
       });
 
       nodeSel.selectAll("circle").attr("stroke", (d) => {
-        if (!sel) return "rgba(17, 24, 39, 0.22)";
+        if (!sel) return healthStrokeColor((nodeHealth.get(d.id)?.health || d.health || "unknown"));
         if (sel.type !== "node") return "rgba(17, 24, 39, 0.14)";
         return d.id === sel.data.id ? "rgba(252, 109, 38, 0.95)" : "rgba(17, 24, 39, 0.14)";
       });
       nodeSel.selectAll("circle").attr("stroke-width", (d, i) => {
         if (i !== 0) return 1; // inner circle
-        if (!sel) return 1.2;
+        if (!sel) return 2.2;
         if (sel.type !== "node") return 1.1;
         return d.id === sel.data.id ? 2.2 : 1.1;
       });
+    }
+
+    function highlightHovered() {
+      const hover = topology.hovered;
+      if (!hover) {
+        // Reset to default or selection state
+        linkSel.attr("stroke-opacity", (d) => {
+          if (!topology.selected) return 0.75;
+          if (topology.selected.type !== "link") return 0.35;
+          return d === topology.selected.data ? 0.95 : 0.22;
+        });
+        linkSel.attr("stroke-width", (d) => linkWidth(d.shown_count));
+        return;
+      }
+
+      if (hover.type === "node") {
+        // Highlight all links connected to this node
+        const nodeId = hover.data.id;
+        linkSel.attr("stroke-opacity", (d) => {
+          const srcId = typeof d.source === "object" ? d.source.id : d.source;
+          const tgtId = typeof d.target === "object" ? d.target.id : d.target;
+          return srcId === nodeId || tgtId === nodeId ? 0.95 : 0.25;
+        });
+        linkSel.attr("stroke-width", (d) => {
+          const srcId = typeof d.source === "object" ? d.source.id : d.source;
+          const tgtId = typeof d.target === "object" ? d.target.id : d.target;
+          return srcId === nodeId || tgtId === nodeId ? linkWidth(d.shown_count) * 1.3 : linkWidth(d.shown_count);
+        });
+      } else if (hover.type === "link") {
+        // Highlight this specific link
+        linkSel.attr("stroke-opacity", (d) => (d === hover.data ? 0.95 : 0.25));
+        linkSel.attr("stroke-width", (d) => (d === hover.data ? linkWidth(d.shown_count) * 1.3 : linkWidth(d.shown_count)));
+      }
     }
 
     // Default panel (summary) when nothing selected.
@@ -881,6 +989,43 @@
 
     const refreshBtn = byId("topology-refresh-btn");
     if (refreshBtn) refreshBtn.addEventListener("click", () => refresh());
+
+    // Zoom controls
+    const zoomInBtn = byId("topology-zoom-in");
+    const zoomOutBtn = byId("topology-zoom-out");
+    const zoomResetBtn = byId("topology-zoom-reset");
+
+    if (zoomInBtn) {
+      zoomInBtn.addEventListener("click", () => {
+        if (topology.svg && topology.zoomBehavior) {
+          topology.svg.transition().duration(300).call(topology.zoomBehavior.scaleBy, 1.3);
+        }
+      });
+    }
+
+    if (zoomOutBtn) {
+      zoomOutBtn.addEventListener("click", () => {
+        if (topology.svg && topology.zoomBehavior) {
+          topology.svg.transition().duration(300).call(topology.zoomBehavior.scaleBy, 0.7);
+        }
+      });
+    }
+
+    if (zoomResetBtn) {
+      zoomResetBtn.addEventListener("click", () => {
+        if (topology.svg && topology.zoomBehavior) {
+          const canvas = byId("topology-canvas");
+          const { width, height } = canvasSize();
+          topology.svg
+            .transition()
+            .duration(500)
+            .call(
+              topology.zoomBehavior.transform,
+              window.d3.zoomIdentity.translate(0, 0).scale(1)
+            );
+        }
+      });
+    }
 
     const pairSel = byId("topology-pair-filter");
     if (pairSel) {
