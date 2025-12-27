@@ -52,6 +52,10 @@ class InstancePair(Base):
 class Mirror(Base):
     """Represents a mirror configuration between two GitLab projects."""
     __tablename__ = "mirrors"
+    __table_args__ = (
+        UniqueConstraint('instance_pair_id', 'source_project_id', 'target_project_id',
+                         name='uq_mirror_pair_projects'),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     instance_pair_id: Mapped[int] = mapped_column(Integer, nullable=False)
