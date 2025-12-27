@@ -33,6 +33,9 @@ ENV/
 *.swo
 *~
 
+# Claude Code CLI
+.claude/
+
 # Environment files
 .env
 .env.local
