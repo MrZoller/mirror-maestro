@@ -94,7 +94,7 @@ class MirrorCreate(BaseModel):
     source_project_path: str
     target_project_id: int
     target_project_path: str
-    mirror_direction: str | None = None
+    # Direction is determined by the instance pair, not overridable per-mirror
     mirror_protected_branches: bool | None = None
     mirror_overwrite_diverged: bool | None = None
     mirror_trigger_builds: bool | None = None
@@ -102,14 +102,6 @@ class MirrorCreate(BaseModel):
     mirror_branch_regex: str | None = None
     mirror_user_id: int | None = None
     enabled: bool = True
-
-    @field_validator('mirror_direction')
-    @classmethod
-    def validate_direction(cls, v):
-        """Validate mirror direction is either 'push' or 'pull'."""
-        if v is not None and v.lower() not in ('push', 'pull'):
-            raise ValueError("Mirror direction must be 'push' or 'pull'")
-        return v.lower() if v else None
 
     @field_validator('mirror_branch_regex')
     @classmethod
@@ -141,22 +133,13 @@ class MirrorCreate(BaseModel):
 class MirrorPreflight(BaseModel):
     """
     Preflight a mirror creation by checking GitLab for existing remote mirrors
-    on the owning project.
+    on the owning project. Direction is determined by the instance pair.
     """
     instance_pair_id: int
     source_project_id: int
     source_project_path: str
     target_project_id: int
     target_project_path: str
-    mirror_direction: str | None = None
-
-    @field_validator('mirror_direction')
-    @classmethod
-    def validate_direction(cls, v):
-        """Validate mirror direction is either 'push' or 'pull'."""
-        if v is not None and v.lower() not in ('push', 'pull'):
-            raise ValueError("Mirror direction must be 'push' or 'pull'")
-        return v.lower() if v else None
 
     @field_validator('source_project_path', 'target_project_path')
     @classmethod
@@ -181,7 +164,7 @@ class MirrorPreflightResponse(BaseModel):
 
 class MirrorRemoveExisting(BaseModel):
     """
-    Remove existing GitLab remote mirrors on the owning project for the effective direction.
+    Remove existing GitLab remote mirrors on the owning project for the pair's direction.
     If `remote_mirror_ids` is omitted, deletes all mirrors for that direction.
     """
     instance_pair_id: int
@@ -189,16 +172,7 @@ class MirrorRemoveExisting(BaseModel):
     source_project_path: str
     target_project_id: int
     target_project_path: str
-    mirror_direction: str | None = None
     remote_mirror_ids: list[int] | None = None
-
-    @field_validator('mirror_direction')
-    @classmethod
-    def validate_direction(cls, v):
-        """Validate mirror direction is either 'push' or 'pull'."""
-        if v is not None and v.lower() not in ('push', 'pull'):
-            raise ValueError("Mirror direction must be 'push' or 'pull'")
-        return v.lower() if v else None
 
     @field_validator('source_project_path', 'target_project_path')
     @classmethod
@@ -215,7 +189,7 @@ class MirrorRemoveExisting(BaseModel):
 
 
 class MirrorUpdate(BaseModel):
-    mirror_direction: str | None = None
+    # Direction cannot be changed - it's determined by the instance pair
     mirror_protected_branches: bool | None = None
     mirror_overwrite_diverged: bool | None = None
     mirror_trigger_builds: bool | None = None
@@ -223,14 +197,6 @@ class MirrorUpdate(BaseModel):
     mirror_branch_regex: str | None = None
     mirror_user_id: int | None = None
     enabled: bool | None = None
-
-    @field_validator('mirror_direction')
-    @classmethod
-    def validate_direction(cls, v):
-        """Validate mirror direction is either 'push' or 'pull'."""
-        if v is not None and v.lower() not in ('push', 'pull'):
-            raise ValueError("Mirror direction must be 'push' or 'pull'")
-        return v.lower() if v else None
 
     @field_validator('mirror_branch_regex')
     @classmethod
@@ -251,7 +217,7 @@ class MirrorResponse(BaseModel):
     source_project_path: str
     target_project_id: int
     target_project_path: str
-    mirror_direction: str | None
+    # Per-mirror setting overrides (direction is pair-only, not here)
     mirror_protected_branches: bool | None
     mirror_overwrite_diverged: bool | None
     mirror_trigger_builds: bool | None
@@ -306,9 +272,8 @@ async def _resolve_effective_settings(
     Note: some settings are pull-only in GitLab and are intentionally treated as
     not applicable for push mirrors.
     """
-    # Two-tier resolution: mirror -> pair
-    direction = mirror.mirror_direction or pair.mirror_direction
-    direction = (direction or "").lower()
+    # Direction comes from pair only (not overridable per-mirror)
+    direction = (pair.mirror_direction or "").lower()
 
     overwrite_diverged = (
         mirror.mirror_overwrite_diverged
@@ -414,7 +379,6 @@ async def list_mirrors(
                 source_project_path=mirror.source_project_path,
                 target_project_id=mirror.target_project_id,
                 target_project_path=mirror.target_project_path,
-                mirror_direction=mirror.mirror_direction,
                 mirror_protected_branches=mirror.mirror_protected_branches,
                 mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
                 mirror_trigger_builds=mirror.mirror_trigger_builds,
@@ -485,8 +449,8 @@ async def create_mirror(
             }
         )
 
-    # Two-tier resolution: mirror overrides -> pair defaults
-    direction = mirror.mirror_direction or pair.mirror_direction
+    # Direction comes from the instance pair (not overridable per-mirror)
+    direction = pair.mirror_direction
 
     # Validate direction is set and valid
     if not direction or direction not in ("push", "pull"):
@@ -659,8 +623,7 @@ async def create_mirror(
         source_project_path=mirror.source_project_path,
         target_project_id=mirror.target_project_id,
         target_project_path=mirror.target_project_path,
-        # Persist resolved direction to avoid ambiguity if pair defaults change later.
-        mirror_direction=direction,
+        # Direction is determined by pair, not stored on mirror
         mirror_protected_branches=mirror.mirror_protected_branches,
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=mirror.mirror_trigger_builds,
@@ -720,7 +683,6 @@ async def create_mirror(
         source_project_path=db_mirror.source_project_path,
         target_project_id=db_mirror.target_project_id,
         target_project_path=db_mirror.target_project_path,
-        mirror_direction=db_mirror.mirror_direction,
         mirror_protected_branches=db_mirror.mirror_protected_branches,
         mirror_overwrite_diverged=db_mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=db_mirror.mirror_trigger_builds,
@@ -768,9 +730,8 @@ async def preflight_mirror(
     if not source_instance or not target_instance:
         raise HTTPException(status_code=404, detail="Source or target instance not found")
 
-    # Two-tier resolution: request -> pair
-    direction = req.mirror_direction or pair.mirror_direction or "pull"
-    direction = (direction or "pull").lower()
+    # Direction comes from pair only
+    direction = (pair.mirror_direction or "pull").lower()
 
     owner_project_id = req.source_project_id if direction == "push" else req.target_project_id
     owner_instance = source_instance if direction == "push" else target_instance
@@ -806,9 +767,8 @@ async def remove_existing_gitlab_mirrors(
     if not source_instance or not target_instance:
         raise HTTPException(status_code=404, detail="Source or target instance not found")
 
-    # Two-tier resolution: request -> pair
-    direction = req.mirror_direction or pair.mirror_direction or "pull"
-    direction = (direction or "pull").lower()
+    # Direction comes from pair only
+    direction = (pair.mirror_direction or "pull").lower()
 
     owner_project_id = req.source_project_id if direction == "push" else req.target_project_id
     owner_instance = source_instance if direction == "push" else target_instance
@@ -879,7 +839,6 @@ async def get_mirror(
         source_project_path=mirror.source_project_path,
         target_project_id=mirror.target_project_id,
         target_project_path=mirror.target_project_path,
-        mirror_direction=mirror.mirror_direction,
         mirror_protected_branches=mirror.mirror_protected_branches,
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=mirror.mirror_trigger_builds,
@@ -914,17 +873,11 @@ async def update_mirror(
     if not mirror:
         raise HTTPException(status_code=404, detail="Mirror not found")
 
-    if mirror_update.mirror_direction is not None and mirror.mirror_id:
-        # GitLab doesn't support switching direction in-place; UI expects delete/re-add.
-        raise HTTPException(status_code=400, detail="Mirror direction cannot be changed after creation. Delete and recreate the mirror.")
-
     # Update database fields.
-    #
+    # Direction is pair-only, not updatable here.
     # Important: allow clearing overrides by accepting explicit nulls in the payload.
     # (FastAPI/Pydantic v2 tracks presence via `model_fields_set`.)
     fields = getattr(mirror_update, "model_fields_set", set())
-    if "mirror_direction" in fields:
-        mirror.mirror_direction = mirror_update.mirror_direction
     if "mirror_protected_branches" in fields:
         mirror.mirror_protected_branches = mirror_update.mirror_protected_branches
     if "mirror_overwrite_diverged" in fields:
@@ -951,8 +904,8 @@ async def update_mirror(
             if not pair:
                 raise HTTPException(status_code=404, detail="Instance pair not found")
 
-            # Two-tier resolution: mirror -> pair
-            direction = mirror.mirror_direction or pair.mirror_direction
+            # Direction comes from pair only
+            direction = pair.mirror_direction
 
             # Resolve which GitLab project holds the remote mirror entry.
             instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
@@ -1046,7 +999,6 @@ async def update_mirror(
         source_project_path=mirror.source_project_path,
         target_project_id=mirror.target_project_id,
         target_project_path=mirror.target_project_path,
-        mirror_direction=mirror.mirror_direction,
         mirror_protected_branches=mirror.mirror_protected_branches,
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=mirror.mirror_trigger_builds,
@@ -1091,8 +1043,8 @@ async def delete_mirror(
             pair = pair_result.scalar_one_or_none()
 
             if pair:
-                # Two-tier resolution: mirror → pair
-                direction = mirror.mirror_direction or pair.mirror_direction
+                # Direction comes from pair only
+                direction = pair.mirror_direction
                 instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
                 project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
 
@@ -1137,7 +1089,7 @@ async def delete_mirror(
             pair = pair_result.scalar_one_or_none()
 
             if pair:
-                direction = mirror.mirror_direction or pair.mirror_direction
+                direction = pair.mirror_direction
                 # Token is on the "remote" project: target for push, source for pull
                 token_instance_id = pair.target_instance_id if direction == "push" else pair.source_instance_id
 
@@ -1209,8 +1161,8 @@ async def trigger_mirror_update(
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
 
-    # Two-tier resolution: mirror → pair
-    direction = mirror.mirror_direction or pair.mirror_direction
+    # Direction comes from pair only
+    direction = pair.mirror_direction
     instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
     project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
 
@@ -1271,8 +1223,8 @@ async def rotate_mirror_token(
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
 
-    # Two-tier resolution: mirror → pair
-    direction = mirror.mirror_direction or pair.mirror_direction
+    # Direction comes from pair only
+    direction = pair.mirror_direction
 
     # Get both instances
     source_result = await db.execute(
