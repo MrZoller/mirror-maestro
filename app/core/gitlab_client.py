@@ -664,3 +664,111 @@ class GitLabClient:
             return True
         except Exception as e:
             raise Exception(f"Failed to delete project: {str(e)}")
+
+    # -------------------------------------------------------------------------
+    # Project Access Token Operations (for automatic mirror authentication)
+    # -------------------------------------------------------------------------
+
+    def create_project_access_token(
+        self,
+        project_id: int,
+        name: str,
+        scopes: List[str],
+        expires_at: str,
+        access_level: int = 40,  # Maintainer by default
+    ) -> Dict[str, Any]:
+        """
+        Create a project access token.
+
+        Args:
+            project_id: The project ID to create the token for.
+            name: A descriptive name for the token.
+            scopes: List of scopes (e.g., ["read_repository", "write_repository"]).
+            expires_at: Expiration date in YYYY-MM-DD format.
+            access_level: Access level (10=Guest, 20=Reporter, 30=Developer, 40=Maintainer).
+
+        Returns:
+            Dict with token details including the plaintext token value (only available on creation).
+        """
+        try:
+            data = {
+                "name": name,
+                "scopes": scopes,
+                "expires_at": expires_at,
+                "access_level": access_level,
+            }
+            result = self.gl.http_post(
+                f"/projects/{project_id}/access_tokens",
+                post_data=data,
+            )
+            if not isinstance(result, dict):
+                raise Exception("Unexpected response from GitLab API")
+            return {
+                "id": result.get("id"),
+                "name": result.get("name"),
+                "token": result.get("token"),  # Plaintext token, only returned on creation
+                "scopes": result.get("scopes"),
+                "expires_at": result.get("expires_at"),
+                "access_level": result.get("access_level"),
+                "active": result.get("active"),
+            }
+        except Exception as e:
+            raise Exception(f"Failed to create project access token: {str(e)}")
+
+    def delete_project_access_token(self, project_id: int, token_id: int) -> bool:
+        """
+        Revoke/delete a project access token.
+
+        Args:
+            project_id: The project ID.
+            token_id: The token ID to revoke.
+
+        Returns:
+            True if successful.
+        """
+        try:
+            self.gl.http_delete(f"/projects/{project_id}/access_tokens/{token_id}")
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to delete project access token: {str(e)}")
+
+    def rotate_project_access_token(
+        self,
+        project_id: int,
+        token_id: int,
+        expires_at: str,
+    ) -> Dict[str, Any]:
+        """
+        Rotate a project access token (revoke old, create new with same settings).
+
+        GitLab 16.0+ has a native rotate endpoint, but for compatibility we
+        implement this as delete + create with the same parameters.
+
+        Args:
+            project_id: The project ID.
+            token_id: The existing token ID to rotate.
+            expires_at: New expiration date in YYYY-MM-DD format.
+
+        Returns:
+            Dict with new token details.
+        """
+        try:
+            # Try native rotation first (GitLab 16.0+)
+            result = self.gl.http_post(
+                f"/projects/{project_id}/access_tokens/{token_id}/rotate",
+                post_data={"expires_at": expires_at},
+            )
+            if isinstance(result, dict):
+                return {
+                    "id": result.get("id"),
+                    "name": result.get("name"),
+                    "token": result.get("token"),
+                    "scopes": result.get("scopes"),
+                    "expires_at": result.get("expires_at"),
+                    "access_level": result.get("access_level"),
+                    "active": result.get("active"),
+                }
+            raise Exception("Unexpected response from rotation endpoint")
+        except Exception as e:
+            # If rotation endpoint doesn't exist, the error will propagate
+            raise Exception(f"Failed to rotate project access token: {str(e)}")

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.database import get_db
-from app.models import GitLabInstance, InstancePair, Mirror, GroupAccessToken, GroupMirrorDefaults
+from app.models import GitLabInstance, InstancePair, Mirror
 from app.core.auth import verify_credentials
 from app.core.encryption import encryption
 from app.core.gitlab_client import GitLabClient
@@ -341,13 +341,8 @@ async def delete_instance(
         if pair_ids:
             # Delete mirrors first (they reference pairs)
             await db.execute(delete(Mirror).where(Mirror.instance_pair_id.in_(pair_ids)))
-            # Delete group defaults (they reference pairs)
-            await db.execute(delete(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id.in_(pair_ids)))
             # Delete pairs (they reference the instance)
             await db.execute(delete(InstancePair).where(InstancePair.id.in_(pair_ids)))
-
-        # Delete group access tokens (they reference the instance)
-        await db.execute(delete(GroupAccessToken).where(GroupAccessToken.gitlab_instance_id == instance_id))
 
         # Finally delete the instance itself
         await db.delete(instance)

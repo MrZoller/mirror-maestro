@@ -9,13 +9,27 @@ The following HTML files contain mockups with sample data for taking screenshots
 - `demo-dashboard.html` - Dashboard view with quick stats
 - `demo-instances.html` - GitLab Instances management view
 - `demo-pairs.html` - Instance Pairs configuration view
-- `demo-tokens.html` - Group Settings view (tokens + group defaults)
+- `demo-mirrors.html` - Mirrors management view (with token status)
 - `demo-topology.html` - Topology graph view
-- `demo-mirrors.html` - Mirrors management view
+- `demo-dashboard-dark.html` - Dashboard in dark mode
 
 ## Taking Screenshots
 
-### Method 1: Using Demo HTML Files (Recommended)
+### Method 1: Using Automated Script (Recommended)
+
+Run the automated screenshot script (requires Node.js and Playwright):
+
+```bash
+# Install Playwright if not already installed
+npx playwright install chromium
+
+# Run the screenshot script
+node scripts/take-screenshots.js
+```
+
+This will automatically generate all screenshots in the correct format.
+
+### Method 2: Using Demo HTML Files (Manual)
 
 1. Open each demo HTML file in your browser:
    ```bash
@@ -23,9 +37,9 @@ The following HTML files contain mockups with sample data for taking screenshots
    open docs/screenshots/demo-dashboard.html
    open docs/screenshots/demo-instances.html
    open docs/screenshots/demo-pairs.html
-   open docs/screenshots/demo-tokens.html
-   open docs/screenshots/demo-topology.html
    open docs/screenshots/demo-mirrors.html
+   open docs/screenshots/demo-topology.html
+   open docs/screenshots/demo-dashboard-dark.html
    ```
 
 2. Take screenshots using your browser's built-in tools or OS screenshot utility
@@ -37,23 +51,11 @@ The following HTML files contain mockups with sample data for taking screenshots
    - `01-dashboard.png`
    - `02-instances.png`
    - `03-pairs.png`
-   - `04-tokens.png`
-   - `05-mirrors.png`
-   - `06-topology.png`
+   - `04-mirrors.png`
+   - `05-topology.png`
+   - `06-dashboard-dark.png`
 
 **Tip for Topology screenshot:** click a link to show the mirror drilldown list (health, staleness thresholds, and never-succeeded classification are visible in the details panel).
-
-### Method 2: Using Automated Script
-
-Run the automated screenshot script (requires Node.js and Playwright):
-
-```bash
-cd scripts
-npm install playwright
-node take-screenshots.js
-```
-
-This will automatically generate all screenshots in the correct format.
 
 ### Method 3: Using Live Application with Sample Data
 
@@ -85,11 +87,9 @@ This will automatically generate all screenshots in the correct format.
 - `01-dashboard.png` - Main dashboard view
 - `02-instances.png` - GitLab Instances management
 - `03-pairs.png` - Instance Pairs configuration
-- `04-tokens.png` - Group Settings (tokens + group defaults)
-- `05-mirrors.png` - Mirrors management
-- `06-topology.png` - Topology graph (health/staleness + drilldown)
-- `05-mirror-detail.png` - (Optional) Detailed view of a specific mirror
- - `07-export.png` - (Optional) Import/Export functionality
+- `04-mirrors.png` - Mirrors management (with token status badges)
+- `05-topology.png` - Topology graph (health/staleness + drilldown)
+- `06-dashboard-dark.png` - Dashboard in dark mode
 
 ## Image Optimization
 
