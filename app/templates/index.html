@@ -5,12 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <header>
         <div class="container">
-            <h1>{{ title }}</h1>
-            <p>Orchestrate GitLab mirrors across multiple instance pairs with precision</p>
+            <div class="header-content">
+                <div>
+                    <h1>{{ title }}</h1>
+                    <p>Orchestrate GitLab mirrors across multiple instance pairs with precision</p>
+                </div>
+                <button id="dark-mode-toggle" class="dark-mode-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+                    <span class="theme-icon theme-icon-light">☀️</span>
+                    <span class="theme-icon theme-icon-dark">🌙</span>
+                </button>
+            </div>
         </div>
     </header>
 
@@ -29,51 +38,110 @@
 
         <!-- Dashboard Tab -->
         <div id="dashboard-tab" class="tab-content active">
-            <div class="card">
-                <h2>Welcome to Mirror Maestro</h2>
-                <p>Orchestrate GitLab mirrors across multiple instance pairs with precision. Here's how to get started:</p>
-
-                <div class="grid-2 mt-20">
-                    <div>
-                        <h3>1. Add GitLab Instances</h3>
-                        <p class="text-muted">Configure your source and target GitLab instances with their API tokens.</p>
+            <!-- Stats Cards -->
+            <div class="dashboard-stats">
+                <div class="stat-card stat-card-primary">
+                    <div class="stat-icon">📦</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="stat-total-mirrors">-</div>
+                        <div class="stat-label">Total Mirrors</div>
                     </div>
-                    <div>
-                        <h3>2. Create Instance Pairs</h3>
-                        <p class="text-muted">Define pairs of GitLab instances where mirrors will be created.</p>
+                </div>
+                <div class="stat-card stat-card-success">
+                    <div class="stat-icon">✓</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="stat-health-percentage">-</div>
+                        <div class="stat-label">Health</div>
                     </div>
-                    <div>
-                        <h3>3. Configure Group Settings</h3>
-                        <p class="text-muted">Add group access tokens and (optionally) group-level mirror default overrides.</p>
+                </div>
+                <div class="stat-card stat-card-danger">
+                    <div class="stat-icon">⚠</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="stat-failed-mirrors">-</div>
+                        <div class="stat-label">Failed</div>
                     </div>
-                    <div>
-                        <h3>4. Configure Mirrors</h3>
-                        <p class="text-muted">Create and manage mirrors between projects in your instance pairs.</p>
-                    </div>
-                    <div>
-                        <h3>5. Monitor & Maintain</h3>
-                        <p class="text-muted">View mirror status, trigger updates, and import/export configurations.</p>
+                </div>
+                <div class="stat-card stat-card-info">
+                    <div class="stat-icon">↻</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="stat-syncing-mirrors">-</div>
+                        <div class="stat-label">Syncing Now</div>
                     </div>
                 </div>
             </div>
 
-            <div class="grid-2">
-                <div class="card">
-                    <h3>Features</h3>
-                    <ul style="margin-left: 20px; margin-top: 10px;">
-                        <li>Easy mirror creation with minimal configuration</li>
-                        <li>Support for multiple GitLab instance pairs</li>
-                        <li>Push and pull mirror support</li>
-                        <li>Bulk import/export of mirror configurations</li>
-                        <li>Real-time status monitoring</li>
-                        <li>Force mirror updates on demand</li>
-                    </ul>
+            <!-- Main Dashboard Content -->
+            <div class="dashboard-grid">
+                <!-- Recent Activity -->
+                <div class="card dashboard-activity">
+                    <div class="flex-between">
+                        <h3>Recent Activity</h3>
+                        <span class="text-muted" id="activity-timestamp">Just now</span>
+                    </div>
+                    <div id="recent-activity-list" class="activity-list mt-20">
+                        <div class="skeleton">
+                            <div class="skeleton-text"></div>
+                            <div class="skeleton-text"></div>
+                            <div class="skeleton-text"></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="card">
-                    <h3>Quick Stats</h3>
-                    <p><strong>GitLab Instances:</strong> <span id="stats-instances">0</span></p>
-                    <p><strong>Instance Pairs:</strong> <span id="stats-pairs">0</span></p>
-                    <p><strong>Total Mirrors:</strong> <span id="stats-mirrors">0</span></p>
+
+                <!-- Health Distribution -->
+                <div class="card dashboard-health">
+                    <h3>Mirror Health</h3>
+                    <div class="health-chart mt-20">
+                        <canvas id="health-chart"></canvas>
+                    </div>
+                    <div class="health-legend mt-20">
+                        <div class="health-legend-item">
+                            <span class="health-dot health-dot-success"></span>
+                            <span id="health-success-count">0</span> Success
+                        </div>
+                        <div class="health-legend-item">
+                            <span class="health-dot health-dot-failed"></span>
+                            <span id="health-failed-count">0</span> Failed
+                        </div>
+                        <div class="health-legend-item">
+                            <span class="health-dot health-dot-pending"></span>
+                            <span id="health-pending-count">0</span> Pending
+                        </div>
+                        <div class="health-legend-item">
+                            <span class="health-dot health-dot-unknown"></span>
+                            <span id="health-unknown-count">0</span> Unknown
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Top Pairs -->
+                <div class="card dashboard-pairs">
+                    <h3>Mirrors by Pair</h3>
+                    <div id="pairs-distribution" class="pairs-list mt-20">
+                        <div class="skeleton">
+                            <div class="skeleton-text"></div>
+                            <div class="skeleton-text"></div>
+                            <div class="skeleton-text"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="card dashboard-actions">
+                    <h3>Quick Actions</h3>
+                    <div class="quick-actions mt-20">
+                        <button class="btn btn-primary" onclick="switchTab('mirrors-tab')">
+                            Create Mirror
+                        </button>
+                        <button class="btn btn-secondary" onclick="switchTab('instances-tab')">
+                            Add Instance
+                        </button>
+                        <button class="btn btn-secondary" onclick="switchTab('pairs-tab')">
+                            Create Pair
+                        </button>
+                        <button class="btn btn-secondary" onclick="switchTab('topology-tab')">
+                            View Topology
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -511,6 +579,11 @@
                     <div class="topology-canvas" id="topology-canvas">
                         <div class="text-muted text-center" id="topology-loading" style="padding:24px">
                             <div class="spinner"></div>
+                        </div>
+                        <div class="topology-zoom-controls">
+                            <button id="topology-zoom-in" class="zoom-btn" title="Zoom in">+</button>
+                            <button id="topology-zoom-reset" class="zoom-btn" title="Reset zoom">⊙</button>
+                            <button id="topology-zoom-out" class="zoom-btn" title="Zoom out">−</button>
                         </div>
                     </div>
                     <aside class="topology-panel">

@@ -17,6 +17,7 @@ const state = {
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', () => {
+    initDarkMode();
     initTabs();
     setupEventListeners();
     initTableEnhancements();
@@ -24,8 +25,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Demo screenshots open static HTML files via file://; avoid API calls there.
     const isFileDemo = (window?.location?.protocol || '') === 'file:';
     if (!isFileDemo) {
+        loadDashboard();
         loadInstances();
         loadPairs();
+        startLivePolling();
     }
 });
 
@@ -943,6 +946,237 @@ function showButtonLoading(button, isLoading = true) {
             button.removeAttribute('data-original-text');
         }
     }
+}
+
+// ----------------------------
+// Dark Mode
+// ----------------------------
+
+function initDarkMode() {
+    // Check localStorage for saved theme, default to light
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+
+    // Set up toggle button
+    const toggle = document.getElementById('dark-mode-toggle');
+    if (toggle) {
+        toggle.addEventListener('click', toggleDarkMode);
+    }
+}
+
+function toggleDarkMode() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+}
+
+// ----------------------------
+// Dashboard
+// ----------------------------
+
+let healthChart = null;
+let livePollingInterval = null;
+
+async function loadDashboard() {
+    try {
+        const metrics = await apiRequest('/api/dashboard/metrics');
+        renderDashboard(metrics);
+    } catch (error) {
+        console.error('Failed to load dashboard:', error);
+    }
+}
+
+function renderDashboard(metrics) {
+    // Update summary stats
+    updateStatCard('stat-total-mirrors', metrics.summary.total_mirrors);
+    updateStatCard('stat-health-percentage', `${metrics.summary.health_percentage}%`);
+    updateStatCard('stat-failed-mirrors', metrics.health.failed);
+
+    // Update syncing count from quick stats (will be updated by polling)
+    updateStatCard('stat-syncing-mirrors', '0');
+
+    // Render health chart
+    renderHealthChart(metrics.health);
+
+    // Render recent activity
+    renderRecentActivity(metrics.recent_activity);
+
+    // Render pairs distribution
+    renderPairsDistribution(metrics.mirrors_by_pair);
+}
+
+function updateStatCard(elementId, value) {
+    const el = document.getElementById(elementId);
+    if (el) {
+        // Add count-up animation
+        el.classList.add('animating');
+        el.textContent = value;
+        setTimeout(() => el.classList.remove('animating'), 400);
+    }
+}
+
+function renderHealthChart(healthData) {
+    const canvas = document.getElementById('health-chart');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+
+    // Destroy existing chart
+    if (healthChart) {
+        healthChart.destroy();
+    }
+
+    const data = {
+        labels: ['Success', 'Failed', 'Pending', 'Unknown'],
+        datasets: [{
+            data: [
+                healthData.success,
+                healthData.failed,
+                healthData.pending,
+                healthData.unknown
+            ],
+            backgroundColor: [
+                getComputedStyle(document.documentElement).getPropertyValue('--success-color').trim(),
+                getComputedStyle(document.documentElement).getPropertyValue('--danger-color').trim(),
+                getComputedStyle(document.documentElement).getPropertyValue('--warning-color').trim(),
+                getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim(),
+            ],
+            borderWidth: 0
+        }]
+    };
+
+    healthChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: data,
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed || 0;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+                            return `${label}: ${value} (${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Update legend counts
+    document.getElementById('health-success-count').textContent = healthData.success;
+    document.getElementById('health-failed-count').textContent = healthData.failed;
+    document.getElementById('health-pending-count').textContent = healthData.pending;
+    document.getElementById('health-unknown-count').textContent = healthData.unknown;
+}
+
+function renderRecentActivity(activities) {
+    const container = document.getElementById('recent-activity-list');
+    if (!container) return;
+
+    if (activities.length === 0) {
+        container.innerHTML = '<div class="text-center text-muted">No recent activity</div>';
+        return;
+    }
+
+    const iconClasses = {
+        'created': 'activity-icon-created',
+        'synced': 'activity-icon-success',
+        'failed': 'activity-icon-failed',
+        'updated': 'activity-icon-updated'
+    };
+
+    container.innerHTML = activities.map(activity => `
+        <div class="activity-item">
+            <div class="activity-icon ${iconClasses[activity.activity_type] || ''}">
+                ${activity.icon}
+            </div>
+            <div class="activity-content">
+                <div class="activity-project">${escapeHtml(activity.project)}</div>
+                <div class="activity-description">${activity.activity_type}</div>
+            </div>
+            <div class="activity-time">${activity.time_ago}</div>
+        </div>
+    `).join('');
+
+    // Update timestamp
+    const timestampEl = document.getElementById('activity-timestamp');
+    if (timestampEl) {
+        timestampEl.textContent = 'Just now';
+    }
+}
+
+function renderPairsDistribution(pairs) {
+    const container = document.getElementById('pairs-distribution');
+    if (!container) return;
+
+    if (pairs.length === 0) {
+        container.innerHTML = '<div class="text-center text-muted">No instance pairs configured</div>';
+        return;
+    }
+
+    container.innerHTML = pairs.map(pair => `
+        <div class="pair-item">
+            <span class="pair-name">${escapeHtml(pair.pair_name)}</span>
+            <span class="pair-count">${pair.count}</span>
+        </div>
+    `).join('');
+}
+
+// ----------------------------
+// Live Status Polling
+// ----------------------------
+
+function startLivePolling() {
+    // Poll every 30 seconds
+    livePollingInterval = setInterval(updateLiveStats, 30000);
+
+    // Initial update
+    updateLiveStats();
+}
+
+async function updateLiveStats() {
+    try {
+        const quickStats = await apiRequest('/api/dashboard/quick-stats');
+
+        // Update syncing count
+        updateStatCard('stat-syncing-mirrors', quickStats.syncing_count);
+
+        // Update status indicators for currently syncing mirrors
+        updateMirrorStatusIndicators(quickStats.syncing_mirror_ids);
+
+    } catch (error) {
+        console.error('Failed to update live stats:', error);
+    }
+}
+
+function updateMirrorStatusIndicators(syncingIds) {
+    // Add pulsing dots to mirrors that are currently syncing
+    const mirrorRows = document.querySelectorAll('#mirrors-list tr[data-mirror-id]');
+    mirrorRows.forEach(row => {
+        const mirrorId = parseInt(row.dataset.mirrorId);
+        const statusCell = row.querySelector('.mirror-status');
+
+        if (statusCell && syncingIds.includes(mirrorId)) {
+            // Add syncing indicator
+            if (!statusCell.querySelector('.status-dot-syncing')) {
+                const indicator = document.createElement('span');
+                indicator.className = 'status-indicator';
+                indicator.innerHTML = '<span class="status-dot status-dot-syncing"></span> Syncing...';
+                statusCell.innerHTML = '';
+                statusCell.appendChild(indicator);
+            }
+        }
+    });
 }
 
 // GitLab Instances
