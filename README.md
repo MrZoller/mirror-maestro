@@ -486,6 +486,7 @@ export E2E_GITLAB_GROUP_PATH_2="target-group"
 ```bash
 export E2E_GITLAB_HTTP_USERNAME="oauth2"          # username for HTTPS clone auth (default: oauth2)
 export E2E_GITLAB_MIRROR_TIMEOUT_S="120"          # timeout for mirror sync (default: 120)
+export E2E_KEEP_RESOURCES=1                       # skip cleanup - keep projects/groups for manual inspection
 ```
 
 #### Running E2E Tests
@@ -530,6 +531,18 @@ pytest -m live_gitlab -v
 #### Cleanup
 
 All tests automatically clean up created resources (projects, groups, mirrors) in a `finally` block, even if tests fail. Resources are deleted in reverse creation order to respect dependencies.
+
+**Keep resources for manual inspection:**
+```bash
+E2E_KEEP_RESOURCES=1 pytest -m multi_project -v
+```
+
+When `E2E_KEEP_RESOURCES=1` is set, the test will:
+- Skip deleting GitLab projects and groups
+- Print a summary of all created resources with their IDs
+- Leave mirrors configured on the projects so you can inspect them in GitLab
+
+This is useful for debugging or manually exploring the test setup. Remember to delete the resources manually when done (delete projects first, then groups).
 
 ### Run Live GitLab E2E via GitHub Actions (manual)
 
