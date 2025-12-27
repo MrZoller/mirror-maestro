@@ -452,44 +452,114 @@ pip install -e ".[dev]"
 pytest
 ```
 
-### Live GitLab End-to-End Test (opt-in)
+### Live GitLab End-to-End Tests (opt-in)
 
-There is an end-to-end test that provisions temporary projects and configures a mirror against a **real GitLab instance**:
-- Test file: `tests/test_e2e_live_gitlab.py`
-- Markers: `e2e`, `live_gitlab`
+The project includes comprehensive E2E tests that provision temporary projects and configure mirrors against **real GitLab instances**. These tests create realistic project content (files, branches, tags) and verify that mirroring actually works.
 
-Required environment variables:
+#### Test Categories
+
+| Marker | Description | Test Files |
+|--------|-------------|------------|
+| `live_gitlab` | All live GitLab tests | All `test_e2e_*.py` files |
+| `multi_project` | Multiple projects in one group | `test_e2e_multi_project.py` |
+| `multi_group` | Group hierarchy with defaults | `test_e2e_multi_group.py` |
+| `dual_instance` | Cross-instance mirroring | `test_e2e_cross_instance.py` |
+
+#### Environment Variables
+
+**Required for all E2E tests:**
 ```bash
-export E2E_LIVE_GITLAB=1
+export E2E_LIVE_GITLAB=1                          # opt-in guard (must be set)
 export E2E_GITLAB_URL="https://gitlab.example.com"
-export E2E_GITLAB_TOKEN="glpat-..."              # must be able to create/delete projects and mirrors
-export E2E_GITLAB_GROUP_PATH="my-group/subgroup"  # group full_path / path
+export E2E_GITLAB_TOKEN="glpat-..."               # must be able to create/delete projects, groups, and mirrors
+export E2E_GITLAB_GROUP_PATH="my-group/subgroup"  # group where test resources will be created
 ```
 
-Optional:
+**Additional variables for dual-instance tests:**
 ```bash
-export E2E_GITLAB_HTTP_USERNAME="oauth2"          # username used for HTTPS clone auth (PAT usually works with "oauth2")
-export E2E_GITLAB_MIRROR_TIMEOUT_S="60"           # polling timeout for mirror status visibility
+export E2E_GITLAB_URL_2="https://gitlab2.example.com"
+export E2E_GITLAB_TOKEN_2="glpat-..."
+export E2E_GITLAB_GROUP_PATH_2="target-group"
 ```
 
-Run it:
+**Optional tuning:**
 ```bash
-pytest -m live_gitlab -q
+export E2E_GITLAB_HTTP_USERNAME="oauth2"          # username for HTTPS clone auth (default: oauth2)
+export E2E_GITLAB_MIRROR_TIMEOUT_S="120"          # timeout for mirror sync (default: 120)
+export E2E_KEEP_RESOURCES=1                       # skip cleanup - keep projects/groups for manual inspection
 ```
+
+#### Running E2E Tests
+
+```bash
+# Run all single-instance E2E tests
+pytest -m "live_gitlab and not dual_instance" -v
+
+# Run only multi-project tests
+pytest -m multi_project -v
+
+# Run only multi-group hierarchy tests
+pytest -m multi_group -v
+
+# Run cross-instance tests (requires two GitLab instances)
+pytest -m dual_instance -v
+
+# Run all E2E tests (single + dual instance)
+pytest -m live_gitlab -v
+```
+
+#### What the Tests Do
+
+**Multi-Project Tests** (`test_e2e_multi_project.py`):
+- Creates 3 projects with different content (Python, JavaScript, Go templates)
+- Each project has multiple files, branches (main, develop, feature/*), and tags
+- Tests both push and pull mirroring
+- Verifies content (commits, branches, tags, files) syncs correctly
+
+**Multi-Group Tests** (`test_e2e_multi_group.py`):
+- Creates a group hierarchy: `e2e-root/{frontend,backend,shared}`
+- Sets different group-level defaults for each subgroup
+- Verifies defaults inheritance works correctly
+- Tests token inheritance across group hierarchy
+
+**Cross-Instance Tests** (`test_e2e_cross_instance.py`):
+- Creates source projects on instance 1
+- Creates empty target projects on instance 2
+- Sets up push/pull mirrors between instances
+- Verifies content propagates across GitLab instances
+
+#### Cleanup
+
+All tests automatically clean up created resources (projects, groups, mirrors) in a `finally` block, even if tests fail. Resources are deleted in reverse creation order to respect dependencies.
+
+**Keep resources for manual inspection:**
+```bash
+E2E_KEEP_RESOURCES=1 pytest -m multi_project -v
+```
+
+When `E2E_KEEP_RESOURCES=1` is set, the test will:
+- Skip deleting GitLab projects and groups
+- Print a summary of all created resources with their IDs
+- Leave mirrors configured on the projects so you can inspect them in GitLab
+
+This is useful for debugging or manually exploring the test setup. Remember to delete the resources manually when done (delete projects first, then groups).
 
 ### Run Live GitLab E2E via GitHub Actions (manual)
 
 This repo includes a manual workflow: `.github/workflows/e2e-live-gitlab.yml`.
 
-Add these repository secrets:
+**Repository Secrets (add in Settings → Secrets):**
 - `E2E_GITLAB_TOKEN` (required)
-- `E2E_GITLAB_URL` (recommended unless you want to type it each run)
-- `E2E_GITLAB_GROUP_PATH` (recommended unless you want to type it each run)
+- `E2E_GITLAB_URL` (recommended)
+- `E2E_GITLAB_GROUP_PATH` (recommended)
+- `E2E_GITLAB_TOKEN_2` (for dual-instance tests)
+- `E2E_GITLAB_URL_2` (for dual-instance tests)
+- `E2E_GITLAB_GROUP_PATH_2` (for dual-instance tests)
 
-Then trigger the workflow from the GitHub UI:
-- Actions → **Live GitLab E2E (manual)** → Run workflow
-
-You can optionally override `gitlab_url` / `gitlab_group_path` in the dispatch inputs.
+**Trigger the workflow:**
+1. Go to Actions → **Live GitLab E2E (manual)** → Run workflow
+2. Select test scope: `single`, `dual`, `multi-project`, `multi-group`, or `all`
+3. Optionally override URLs and group paths in the dispatch inputs
 
 ### Code Style
 The project follows standard Python conventions:

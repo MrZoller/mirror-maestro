@@ -3,12 +3,31 @@ name: Live GitLab E2E (manual)
 on:
   workflow_dispatch:
     inputs:
+      test_scope:
+        description: "Test scope"
+        required: false
+        default: "single"
+        type: choice
+        options:
+          - single
+          - dual
+          - multi-project
+          - multi-group
+          - all
       gitlab_url:
-        description: "GitLab base URL (optional override; otherwise uses secret E2E_GITLAB_URL)"
+        description: "GitLab 1 base URL (optional override)"
         required: false
         type: string
       gitlab_group_path:
-        description: "GitLab group full_path (optional override; otherwise uses secret E2E_GITLAB_GROUP_PATH)"
+        description: "GitLab 1 group full_path (optional override)"
+        required: false
+        type: string
+      gitlab_url_2:
+        description: "GitLab 2 base URL (for dual-instance tests)"
+        required: false
+        type: string
+      gitlab_group_path_2:
+        description: "GitLab 2 group full_path (for dual-instance tests)"
         required: false
         type: string
       http_username:
@@ -17,9 +36,9 @@ on:
         default: "oauth2"
         type: string
       mirror_timeout_s:
-        description: "Seconds to wait for mirror status visibility (default: 60)"
+        description: "Seconds to wait for mirror sync (default: 120)"
         required: false
-        default: "60"
+        default: "120"
         type: string
 
 permissions:
@@ -33,7 +52,7 @@ jobs:
   e2e:
     name: Run live GitLab E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -54,19 +73,45 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Run live GitLab E2E tests
+      - name: Run E2E tests
         env:
-          # Hard opt-in guardrail for the test.
+          # Hard opt-in guardrail
           E2E_LIVE_GITLAB: "1"
 
-          # Prefer workflow inputs, fall back to secrets.
+          # Instance 1: prefer workflow inputs, fall back to secrets
           E2E_GITLAB_URL: ${{ inputs.gitlab_url || secrets.E2E_GITLAB_URL }}
           E2E_GITLAB_GROUP_PATH: ${{ inputs.gitlab_group_path || secrets.E2E_GITLAB_GROUP_PATH }}
           E2E_GITLAB_TOKEN: ${{ secrets.E2E_GITLAB_TOKEN }}
 
-          # Optional tuning.
+          # Instance 2 (for dual-instance tests)
+          E2E_GITLAB_URL_2: ${{ inputs.gitlab_url_2 || secrets.E2E_GITLAB_URL_2 }}
+          E2E_GITLAB_GROUP_PATH_2: ${{ inputs.gitlab_group_path_2 || secrets.E2E_GITLAB_GROUP_PATH_2 }}
+          E2E_GITLAB_TOKEN_2: ${{ secrets.E2E_GITLAB_TOKEN_2 }}
+
+          # Optional tuning
           E2E_GITLAB_HTTP_USERNAME: ${{ inputs.http_username }}
           E2E_GITLAB_MIRROR_TIMEOUT_S: ${{ inputs.mirror_timeout_s }}
         run: |
-          python -m pytest -q -m live_gitlab
-
+          MARKERS=""
+          case "${{ inputs.test_scope }}" in
+            single)
+              MARKERS="-m 'live_gitlab and not dual_instance'"
+              ;;
+            dual)
+              MARKERS="-m dual_instance"
+              ;;
+            multi-project)
+              MARKERS="-m multi_project"
+              ;;
+            multi-group)
+              MARKERS="-m multi_group"
+              ;;
+            all)
+              MARKERS="-m live_gitlab"
+              ;;
+            *)
+              MARKERS="-m 'live_gitlab and not dual_instance'"
+              ;;
+          esac
+          echo "Running tests with markers: $MARKERS"
+          python -m pytest -v $MARKERS
