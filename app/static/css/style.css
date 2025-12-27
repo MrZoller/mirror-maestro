@@ -1616,3 +1616,80 @@ table tbody tr:hover {
         right: 20px;
     }
 }
+
+/* Help Page Styles */
+#help-tab h3 {
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    color: var(--text-primary);
+    font-size: 1.1rem;
+}
+
+#help-tab h3:first-of-type {
+    margin-top: 1rem;
+}
+
+#help-tab p {
+    margin-bottom: 0.75rem;
+    line-height: 1.7;
+}
+
+#help-tab ul,
+#help-tab ol {
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+}
+
+#help-tab li {
+    margin-bottom: 0.5rem;
+    line-height: 1.6;
+}
+
+#help-tab code {
+    background: rgba(17, 24, 39, 0.06);
+    padding: 0.15rem 0.4rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.9em;
+    color: var(--primary-color);
+}
+
+[data-theme="dark"] #help-tab code {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+#help-tab a {
+    color: var(--secondary-color);
+    text-decoration: none;
+}
+
+#help-tab a:hover {
+    text-decoration: underline;
+}
+
+.help-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.95rem;
+}
+
+.help-table th,
+.help-table td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.help-table th {
+    background: rgba(17, 24, 39, 0.04);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .help-table th {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.help-table tbody tr:hover {
+    background: rgba(252, 109, 38, 0.04);
+}
