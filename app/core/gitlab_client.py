@@ -325,3 +325,342 @@ class GitLabClient:
             data.pop("mirror_branch_regex", None)
             data.pop("mirror_user_id", None)
         return data
+
+    # -------------------------------------------------------------------------
+    # File Operations (for E2E testing)
+    # -------------------------------------------------------------------------
+
+    def create_file(
+        self,
+        project_id: int,
+        file_path: str,
+        content: str,
+        branch: str,
+        commit_message: str,
+        author_email: Optional[str] = None,
+        author_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create or update a file in a repository."""
+        try:
+            project = self.gl.projects.get(project_id)
+            try:
+                # Try to get existing file first
+                existing = project.files.get(file_path=file_path, ref=branch)
+                # File exists, update it
+                existing.content = content
+                existing.save(branch=branch, commit_message=commit_message)
+                return {"file_path": file_path, "branch": branch, "action": "updated"}
+            except gitlab.exceptions.GitlabGetError:
+                # File doesn't exist, create it
+                create_data: Dict[str, Any] = {
+                    "file_path": file_path,
+                    "branch": branch,
+                    "content": content,
+                    "commit_message": commit_message,
+                }
+                if author_email:
+                    create_data["author_email"] = author_email
+                if author_name:
+                    create_data["author_name"] = author_name
+                project.files.create(create_data)
+                return {"file_path": file_path, "branch": branch, "action": "created"}
+        except Exception as e:
+            raise Exception(f"Failed to create/update file: {str(e)}")
+
+    def get_file(
+        self,
+        project_id: int,
+        file_path: str,
+        ref: str = "main",
+    ) -> Dict[str, Any]:
+        """Get a file from a repository."""
+        try:
+            project = self.gl.projects.get(project_id)
+            f = project.files.get(file_path=file_path, ref=ref)
+            return {
+                "file_path": f.file_path,
+                "content": f.decode().decode("utf-8"),
+                "size": f.size,
+                "encoding": f.encoding,
+                "ref": ref,
+            }
+        except Exception as e:
+            raise Exception(f"Failed to get file: {str(e)}")
+
+    # -------------------------------------------------------------------------
+    # Branch Operations (for E2E testing)
+    # -------------------------------------------------------------------------
+
+    def create_branch(
+        self,
+        project_id: int,
+        branch_name: str,
+        ref: str = "main",
+    ) -> Dict[str, Any]:
+        """Create a new branch from a reference."""
+        try:
+            project = self.gl.projects.get(project_id)
+            branch = project.branches.create({"branch": branch_name, "ref": ref})
+            return {
+                "name": branch.name,
+                "commit_sha": branch.commit["id"],
+                "protected": branch.protected,
+            }
+        except Exception as e:
+            raise Exception(f"Failed to create branch: {str(e)}")
+
+    def get_branches(self, project_id: int) -> List[Dict[str, Any]]:
+        """List all branches in a project."""
+        try:
+            project = self.gl.projects.get(project_id)
+            branches = project.branches.list(get_all=True)
+            return [
+                {
+                    "name": b.name,
+                    "commit_sha": b.commit["id"],
+                    "protected": b.protected,
+                    "default": getattr(b, "default", False),
+                }
+                for b in branches
+            ]
+        except Exception as e:
+            raise Exception(f"Failed to get branches: {str(e)}")
+
+    def protect_branch(
+        self,
+        project_id: int,
+        branch_name: str,
+        push_access_level: int = 40,  # Maintainers
+        merge_access_level: int = 40,
+    ) -> Dict[str, Any]:
+        """Protect a branch."""
+        try:
+            project = self.gl.projects.get(project_id)
+            protection = project.protectedbranches.create({
+                "name": branch_name,
+                "push_access_level": push_access_level,
+                "merge_access_level": merge_access_level,
+            })
+            return {"name": protection.name, "protected": True}
+        except Exception as e:
+            raise Exception(f"Failed to protect branch: {str(e)}")
+
+    # -------------------------------------------------------------------------
+    # Tag Operations (for E2E testing)
+    # -------------------------------------------------------------------------
+
+    def create_tag(
+        self,
+        project_id: int,
+        tag_name: str,
+        ref: str,
+        message: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a tag."""
+        try:
+            project = self.gl.projects.get(project_id)
+            data: Dict[str, Any] = {"tag_name": tag_name, "ref": ref}
+            if message:
+                data["message"] = message
+            tag = project.tags.create(data)
+            return {
+                "name": tag.name,
+                "commit_sha": tag.commit["id"],
+                "message": getattr(tag, "message", None),
+            }
+        except Exception as e:
+            raise Exception(f"Failed to create tag: {str(e)}")
+
+    def get_tags(self, project_id: int) -> List[Dict[str, Any]]:
+        """List all tags in a project."""
+        try:
+            project = self.gl.projects.get(project_id)
+            tags = project.tags.list(get_all=True)
+            return [
+                {
+                    "name": t.name,
+                    "commit_sha": t.commit["id"],
+                    "message": getattr(t, "message", None),
+                }
+                for t in tags
+            ]
+        except Exception as e:
+            raise Exception(f"Failed to get tags: {str(e)}")
+
+    # -------------------------------------------------------------------------
+    # Commit Operations (for E2E testing)
+    # -------------------------------------------------------------------------
+
+    def get_commits(
+        self,
+        project_id: int,
+        ref_name: str = "main",
+        per_page: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """List commits on a branch."""
+        try:
+            project = self.gl.projects.get(project_id)
+            commits = project.commits.list(ref_name=ref_name, per_page=per_page)
+            return [
+                {
+                    "id": c.id,
+                    "short_id": c.short_id,
+                    "title": c.title,
+                    "message": c.message,
+                    "author_name": c.author_name,
+                    "authored_date": c.authored_date,
+                }
+                for c in commits
+            ]
+        except Exception as e:
+            raise Exception(f"Failed to get commits: {str(e)}")
+
+    def get_commit(self, project_id: int, commit_sha: str) -> Dict[str, Any]:
+        """Get a specific commit."""
+        try:
+            project = self.gl.projects.get(project_id)
+            commit = project.commits.get(commit_sha)
+            return {
+                "id": commit.id,
+                "short_id": commit.short_id,
+                "title": commit.title,
+                "message": commit.message,
+                "author_name": commit.author_name,
+                "authored_date": commit.authored_date,
+            }
+        except Exception as e:
+            raise Exception(f"Failed to get commit: {str(e)}")
+
+    def create_commit(
+        self,
+        project_id: int,
+        branch: str,
+        commit_message: str,
+        actions: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Create a commit with multiple file actions.
+
+        Actions format:
+        [
+            {"action": "create", "file_path": "foo.txt", "content": "..."},
+            {"action": "update", "file_path": "bar.txt", "content": "..."},
+            {"action": "delete", "file_path": "baz.txt"},
+        ]
+        """
+        try:
+            project = self.gl.projects.get(project_id)
+            commit = project.commits.create({
+                "branch": branch,
+                "commit_message": commit_message,
+                "actions": actions,
+            })
+            return {
+                "id": commit.id,
+                "short_id": commit.short_id,
+                "title": commit.title,
+            }
+        except Exception as e:
+            raise Exception(f"Failed to create commit: {str(e)}")
+
+    # -------------------------------------------------------------------------
+    # Group Operations (for E2E testing)
+    # -------------------------------------------------------------------------
+
+    def create_group(
+        self,
+        name: str,
+        path: str,
+        parent_id: Optional[int] = None,
+        visibility: str = "private",
+        description: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a group or subgroup."""
+        try:
+            data: Dict[str, Any] = {
+                "name": name,
+                "path": path,
+                "visibility": visibility,
+            }
+            if parent_id:
+                data["parent_id"] = parent_id
+            if description:
+                data["description"] = description
+
+            group = self.gl.groups.create(data)
+            return {
+                "id": group.id,
+                "name": group.name,
+                "path": group.path,
+                "full_path": group.full_path,
+                "visibility": group.visibility,
+            }
+        except Exception as e:
+            raise Exception(f"Failed to create group: {str(e)}")
+
+    def delete_group(self, group_id: int) -> bool:
+        """Delete a group."""
+        try:
+            self.gl.groups.delete(group_id)
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to delete group: {str(e)}")
+
+    def get_group(self, group_id_or_path: int | str) -> Dict[str, Any]:
+        """Get a group by ID or path."""
+        try:
+            group = self.gl.groups.get(group_id_or_path)
+            return {
+                "id": group.id,
+                "name": group.name,
+                "path": group.path,
+                "full_path": group.full_path,
+                "visibility": group.visibility,
+            }
+        except Exception as e:
+            raise Exception(f"Failed to get group: {str(e)}")
+
+    # -------------------------------------------------------------------------
+    # Project Operations (for E2E testing)
+    # -------------------------------------------------------------------------
+
+    def create_project(
+        self,
+        name: str,
+        path: str,
+        namespace_id: int,
+        visibility: str = "private",
+        initialize_with_readme: bool = False,
+        description: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a project in a namespace."""
+        try:
+            data: Dict[str, Any] = {
+                "name": name,
+                "path": path,
+                "namespace_id": namespace_id,
+                "visibility": visibility,
+                "initialize_with_readme": initialize_with_readme,
+            }
+            if description:
+                data["description"] = description
+
+            project = self.gl.projects.create(data)
+            return {
+                "id": project.id,
+                "name": project.name,
+                "path": project.path,
+                "path_with_namespace": project.path_with_namespace,
+                "http_url_to_repo": project.http_url_to_repo,
+                "ssh_url_to_repo": getattr(project, "ssh_url_to_repo", None),
+            }
+        except Exception as e:
+            raise Exception(f"Failed to create project: {str(e)}")
+
+    def delete_project(self, project_id: int) -> bool:
+        """Delete a project."""
+        try:
+            self.gl.projects.delete(project_id)
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to delete project: {str(e)}")

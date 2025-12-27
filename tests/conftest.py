@@ -113,3 +113,127 @@ async def client(app):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
+
+# -----------------------------------------------------------------------------
+# E2E Test Fixtures
+# -----------------------------------------------------------------------------
+
+
+def _env(name: str) -> str | None:
+    """Get environment variable, stripping whitespace."""
+    import os
+
+    v = os.getenv(name)
+    return v.strip() if v and v.strip() else None
+
+
+def _should_run_live() -> bool:
+    """Check if live GitLab tests are enabled."""
+    return (_env("E2E_LIVE_GITLAB") or "").lower() in {"1", "true", "yes", "on"}
+
+
+@pytest.fixture
+def e2e_config_single():
+    """
+    Configuration for single-instance E2E tests.
+
+    Requires:
+    - E2E_LIVE_GITLAB=1 (opt-in guard)
+    - E2E_GITLAB_URL
+    - E2E_GITLAB_TOKEN
+    - E2E_GITLAB_GROUP_PATH
+    """
+    if not _should_run_live():
+        pytest.skip("Live GitLab E2E is opt-in. Set E2E_LIVE_GITLAB=1 to run.")
+
+    url = _env("E2E_GITLAB_URL")
+    token = _env("E2E_GITLAB_TOKEN")
+    group_path = _env("E2E_GITLAB_GROUP_PATH")
+
+    missing = []
+    if not url:
+        missing.append("E2E_GITLAB_URL")
+    if not token:
+        missing.append("E2E_GITLAB_TOKEN")
+    if not group_path:
+        missing.append("E2E_GITLAB_GROUP_PATH")
+
+    if missing:
+        pytest.skip(f"Single-instance E2E requires: {', '.join(missing)}")
+
+    return {
+        "url": url,
+        "token": token,
+        "group_path": group_path,
+        "http_username": _env("E2E_GITLAB_HTTP_USERNAME") or "oauth2",
+        "mirror_timeout_s": float(_env("E2E_GITLAB_MIRROR_TIMEOUT_S") or "120"),
+    }
+
+
+@pytest.fixture
+def e2e_config_dual():
+    """
+    Configuration for dual-instance E2E tests.
+
+    Requires:
+    - E2E_LIVE_GITLAB=1 (opt-in guard)
+    - E2E_GITLAB_URL, E2E_GITLAB_TOKEN, E2E_GITLAB_GROUP_PATH (instance 1)
+    - E2E_GITLAB_URL_2, E2E_GITLAB_TOKEN_2, E2E_GITLAB_GROUP_PATH_2 (instance 2)
+    """
+    if not _should_run_live():
+        pytest.skip("Live GitLab E2E is opt-in. Set E2E_LIVE_GITLAB=1 to run.")
+
+    # Instance 1
+    url1 = _env("E2E_GITLAB_URL")
+    token1 = _env("E2E_GITLAB_TOKEN")
+    group1 = _env("E2E_GITLAB_GROUP_PATH")
+
+    # Instance 2
+    url2 = _env("E2E_GITLAB_URL_2")
+    token2 = _env("E2E_GITLAB_TOKEN_2")
+    group2 = _env("E2E_GITLAB_GROUP_PATH_2")
+
+    missing = []
+    if not url1:
+        missing.append("E2E_GITLAB_URL")
+    if not token1:
+        missing.append("E2E_GITLAB_TOKEN")
+    if not group1:
+        missing.append("E2E_GITLAB_GROUP_PATH")
+    if not url2:
+        missing.append("E2E_GITLAB_URL_2")
+    if not token2:
+        missing.append("E2E_GITLAB_TOKEN_2")
+    if not group2:
+        missing.append("E2E_GITLAB_GROUP_PATH_2")
+
+    if missing:
+        pytest.skip(f"Dual-instance E2E requires: {', '.join(missing)}")
+
+    http_username = _env("E2E_GITLAB_HTTP_USERNAME") or "oauth2"
+    timeout = float(_env("E2E_GITLAB_MIRROR_TIMEOUT_S") or "120")
+
+    return {
+        "instance1": {
+            "url": url1,
+            "token": token1,
+            "group_path": group1,
+            "http_username": http_username,
+        },
+        "instance2": {
+            "url": url2,
+            "token": token2,
+            "group_path": group2,
+            "http_username": http_username,
+        },
+        "mirror_timeout_s": timeout,
+    }
+
+
+@pytest.fixture
+def resource_tracker():
+    """Provides a ResourceTracker for test cleanup."""
+    from tests.e2e_helpers import ResourceTracker
+
+    return ResourceTracker()
+
