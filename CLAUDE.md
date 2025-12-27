@@ -1,6 +1,6 @@
-# GitLab Mirror Wizard - AI Assistant Guide
+# Mirror Maestro - AI Assistant Guide
 
-This document provides comprehensive guidance for AI assistants working on the GitLab Mirror Wizard codebase. It covers architecture, conventions, patterns, and best practices to maintain consistency and quality.
+This document provides comprehensive guidance for AI assistants working on the Mirror Maestro codebase. It covers architecture, conventions, patterns, and best practices to maintain consistency and quality.
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ This document provides comprehensive guidance for AI assistants working on the G
 
 ## Project Overview
 
-**GitLab Mirror Wizard** is a modern web application for managing GitLab mirrors across multiple instance pairs. It streamlines the process of viewing, creating, and maintaining a large set of GitLab mirrors with an intuitive web interface.
+**Mirror Maestro** is a modern web application for managing GitLab mirrors across multiple instance pairs. It streamlines the process of viewing, creating, and maintaining a large set of GitLab mirrors with an intuitive web interface.
 
 ### Technology Stack
 

@@ -1,6 +1,6 @@
 # Screenshot Generation Guide
 
-This guide explains how to generate screenshots for the GitLab Mirror Wizard documentation.
+This guide explains how to generate screenshots for the Mirror Maestro documentation.
 
 ## Quick Start
 

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing to **GitLab Mirror Wizard**!
+Thanks for your interest in contributing to **Mirror Maestro**!
 
 ## Ways to contribute
 
