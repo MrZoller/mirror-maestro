@@ -576,6 +576,7 @@ async def create_mirror(
         )
 
     # Create the mirror record in database
+    # CRITICAL: If DB commit fails, we must clean up the GitLab mirror to prevent orphaned resources
     db_mirror = Mirror(
         instance_pair_id=mirror.instance_pair_id,
         source_project_id=mirror.source_project_id,
@@ -595,8 +596,38 @@ async def create_mirror(
         last_update_status="pending"
     )
     db.add(db_mirror)
-    await db.commit()
-    await db.refresh(db_mirror)
+
+    try:
+        await db.commit()
+        await db.refresh(db_mirror)
+    except Exception as db_error:
+        # Rollback the failed transaction
+        await db.rollback()
+
+        # Cleanup: Delete the GitLab mirror that was just created to prevent orphaned resource
+        if gitlab_mirror_id:
+            try:
+                import logging
+                logging.warning(f"Database commit failed after creating GitLab mirror {gitlab_mirror_id}. Attempting cleanup...")
+
+                # Determine which instance has the mirror
+                cleanup_instance = source_instance if direction == "push" else target_instance
+                cleanup_project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
+
+                cleanup_client = GitLabClient(cleanup_instance.url, cleanup_instance.encrypted_token)
+                cleanup_client.delete_mirror(cleanup_project_id, gitlab_mirror_id)
+                logging.info(f"Successfully cleaned up orphaned GitLab mirror {gitlab_mirror_id}")
+            except Exception as cleanup_error:
+                # Log but don't fail - the original DB error is more important
+                logging.error(f"Failed to cleanup GitLab mirror {gitlab_mirror_id} after DB error: {str(cleanup_error)}")
+
+        # Re-raise the original database error
+        import logging
+        logging.error(f"Failed to save mirror to database: {str(db_error)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to save mirror to database. GitLab mirror has been cleaned up."
+        )
 
     return MirrorResponse(
         id=db_mirror.id,
@@ -844,68 +875,70 @@ async def update_mirror(
         mirror.enabled = mirror_update.enabled
 
     # Best-effort: if this mirror is configured in GitLab, apply settings there too.
-    if mirror.mirror_id:
-        pair_result = await db.execute(
-            select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
-        )
-        pair = pair_result.scalar_one_or_none()
-        if not pair:
-            raise HTTPException(status_code=404, detail="Instance pair not found")
+    # CRITICAL: Only commit DB changes if GitLab update succeeds to maintain consistency
+    try:
+        if mirror.mirror_id:
+            pair_result = await db.execute(
+                select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+            )
+            pair = pair_result.scalar_one_or_none()
+            if not pair:
+                raise HTTPException(status_code=404, detail="Instance pair not found")
 
-        group_defaults = await _get_group_defaults(
-            db,
-            instance_pair_id=pair.id,
-            source_project_path=mirror.source_project_path,
-            target_project_path=mirror.target_project_path,
-        )
+            group_defaults = await _get_group_defaults(
+                db,
+                instance_pair_id=pair.id,
+                source_project_path=mirror.source_project_path,
+                target_project_path=mirror.target_project_path,
+            )
 
-        direction = (
-            mirror.mirror_direction
-            or (group_defaults.mirror_direction if group_defaults else None)
-            or pair.mirror_direction
-        )
+            direction = (
+                mirror.mirror_direction
+                or (group_defaults.mirror_direction if group_defaults else None)
+                or pair.mirror_direction
+            )
 
-        # Resolve which GitLab project holds the remote mirror entry.
-        instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
-        project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
+            # Resolve which GitLab project holds the remote mirror entry.
+            instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
+            project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
 
-        instance_result = await db.execute(
-            select(GitLabInstance).where(GitLabInstance.id == instance_id)
-        )
-        instance = instance_result.scalar_one_or_none()
-        if not instance:
-            raise HTTPException(status_code=404, detail="GitLab instance not found")
+            instance_result = await db.execute(
+                select(GitLabInstance).where(GitLabInstance.id == instance_id)
+            )
+            instance = instance_result.scalar_one_or_none()
+            if not instance:
+                raise HTTPException(status_code=404, detail="GitLab instance not found")
 
-        # Effective settings: mirror overrides -> group overrides -> pair defaults.
-        overwrite_diverged = (
-            mirror.mirror_overwrite_diverged
-            if mirror.mirror_overwrite_diverged is not None
-            else (group_defaults.mirror_overwrite_diverged if group_defaults and group_defaults.mirror_overwrite_diverged is not None else pair.mirror_overwrite_diverged)
-        )
-        only_protected = (
-            mirror.only_mirror_protected_branches
-            if mirror.only_mirror_protected_branches is not None
-            else (group_defaults.only_mirror_protected_branches if group_defaults and group_defaults.only_mirror_protected_branches is not None else pair.only_mirror_protected_branches)
-        )
-        trigger_builds = (
-            mirror.mirror_trigger_builds
-            if mirror.mirror_trigger_builds is not None
-            else (group_defaults.mirror_trigger_builds if group_defaults and group_defaults.mirror_trigger_builds is not None else pair.mirror_trigger_builds)
-        )
-        branch_regex = (
-            mirror.mirror_branch_regex
-            if mirror.mirror_branch_regex is not None
-            else (group_defaults.mirror_branch_regex if group_defaults and group_defaults.mirror_branch_regex is not None else pair.mirror_branch_regex)
-        )
-        mirror_user_id = (
-            mirror.mirror_user_id
-            if mirror.mirror_user_id is not None
-            else (group_defaults.mirror_user_id if group_defaults and group_defaults.mirror_user_id is not None else pair.mirror_user_id)
-        )
-        if mirror_user_id is None and direction == "pull":
-            mirror_user_id = instance.api_user_id
+            # Effective settings: mirror overrides -> group overrides -> pair defaults.
+            overwrite_diverged = (
+                mirror.mirror_overwrite_diverged
+                if mirror.mirror_overwrite_diverged is not None
+                else (group_defaults.mirror_overwrite_diverged if group_defaults and group_defaults.mirror_overwrite_diverged is not None else pair.mirror_overwrite_diverged)
+            )
+            only_protected = (
+                mirror.only_mirror_protected_branches
+                if mirror.only_mirror_protected_branches is not None
+                else (group_defaults.only_mirror_protected_branches if group_defaults and group_defaults.only_mirror_protected_branches is not None else pair.only_mirror_protected_branches)
+            )
+            trigger_builds = (
+                mirror.mirror_trigger_builds
+                if mirror.mirror_trigger_builds is not None
+                else (group_defaults.mirror_trigger_builds if group_defaults and group_defaults.mirror_trigger_builds is not None else pair.mirror_trigger_builds)
+            )
+            branch_regex = (
+                mirror.mirror_branch_regex
+                if mirror.mirror_branch_regex is not None
+                else (group_defaults.mirror_branch_regex if group_defaults and group_defaults.mirror_branch_regex is not None else pair.mirror_branch_regex)
+            )
+            mirror_user_id = (
+                mirror.mirror_user_id
+                if mirror.mirror_user_id is not None
+                else (group_defaults.mirror_user_id if group_defaults and group_defaults.mirror_user_id is not None else pair.mirror_user_id)
+            )
+            if mirror_user_id is None and direction == "pull":
+                mirror_user_id = instance.api_user_id
 
-        try:
+            # Update the mirror in GitLab
             client = GitLabClient(instance.url, instance.encrypted_token)
             client.update_mirror(
                 project_id=project_id,
@@ -918,17 +951,23 @@ async def update_mirror(
                 mirror_user_id=mirror_user_id if direction == "pull" else None,
                 mirror_direction=direction,
             )
-        except Exception as e:
-            await db.rollback()
-            import logging
-            logging.error(f"Failed to update mirror in GitLab: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to update mirror in GitLab. Check server logs for details."
-            )
 
-    await db.commit()
-    await db.refresh(mirror)
+        # Only commit if all operations succeeded
+        await db.commit()
+        await db.refresh(mirror)
+    except HTTPException:
+        # Re-raise HTTPExceptions as-is
+        await db.rollback()
+        raise
+    except Exception as e:
+        # Rollback DB changes if GitLab update or commit fails
+        await db.rollback()
+        import logging
+        logging.error(f"Failed to update mirror: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update mirror. Database changes have been rolled back."
+        )
 
     pair_result = await db.execute(select(InstancePair).where(InstancePair.id == mirror.instance_pair_id))
     pair = pair_result.scalar_one_or_none()
