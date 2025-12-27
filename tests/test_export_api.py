@@ -23,13 +23,30 @@ async def seed_pair(session_maker, *, name: str, src_id: int, tgt_id: int) -> in
         return pair.id
 
 
-async def seed_mirror(session_maker, *, pair_id: int, src_path: str, tgt_path: str) -> int:
+# Counter to generate unique project IDs for tests
+_project_id_counter = 0
+
+def _get_unique_project_id() -> int:
+    """Generate unique project IDs for test mirrors to avoid constraint violations."""
+    global _project_id_counter
+    _project_id_counter += 1
+    return _project_id_counter
+
+async def seed_mirror(
+    session_maker,
+    *,
+    pair_id: int,
+    src_path: str,
+    tgt_path: str,
+    src_project_id: int = None,
+    tgt_project_id: int = None
+) -> int:
     async with session_maker() as s:
         m = Mirror(
             instance_pair_id=pair_id,
-            source_project_id=1,
+            source_project_id=src_project_id or _get_unique_project_id(),
             source_project_path=src_path,
-            target_project_id=2,
+            target_project_id=tgt_project_id or _get_unique_project_id(),
             target_project_path=tgt_path,
             enabled=True,
             last_update_status="pending",
@@ -309,8 +326,15 @@ async def test_import_mixed_success_and_skips(client, session_maker):
     tgt_id = await seed_instance(session_maker, name="tgt")
     pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id)
 
-    # Create one existing mirror
-    await seed_mirror(session_maker, pair_id=pair_id, src_path="existing", tgt_path="existing-mirror")
+    # Create one existing mirror with explicit IDs
+    await seed_mirror(
+        session_maker,
+        pair_id=pair_id,
+        src_path="existing",
+        tgt_path="existing-mirror",
+        src_project_id=100,
+        tgt_project_id=200
+    )
 
     # Try to import 3 mirrors: 1 existing (should skip), 2 new (should import)
     payload = {
@@ -319,8 +343,8 @@ async def test_import_mixed_success_and_skips(client, session_maker):
             {
                 "source_project_path": "existing",
                 "target_project_path": "existing-mirror",
-                "source_project_id": 1,
-                "target_project_id": 2,
+                "source_project_id": 100,
+                "target_project_id": 200,
                 "enabled": True,
             },
             {
