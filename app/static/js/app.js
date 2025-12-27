@@ -481,6 +481,12 @@ function initTabs() {
     });
 }
 
+// Switch to a tab programmatically (used by Help page links)
+function switchTab(tabId) {
+    const tab = document.querySelector(`[data-tab="${tabId}"]`);
+    if (tab) tab.click();
+}
+
 // Setup event listeners
 function setupEventListeners() {
     // Instance form

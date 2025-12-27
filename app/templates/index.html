@@ -34,6 +34,7 @@
             <button class="tab" data-tab="tokens-tab">Group Settings</button>
             <button class="tab" data-tab="topology-tab">Topology</button>
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
+            <button class="tab" data-tab="help-tab">Help</button>
         </div>
 
         <!-- Dashboard Tab -->
@@ -606,6 +607,309 @@
                         </div>
                     </aside>
                 </div>
+            </div>
+        </div>
+
+        <!-- Help Tab -->
+        <div id="help-tab" class="tab-content">
+            <!-- Getting Started -->
+            <div class="card">
+                <h2>Getting Started</h2>
+                <p class="text-muted">Welcome to Mirror Maestro - your tool for orchestrating GitLab mirrors across multiple instances.</p>
+
+                <h3>What is Mirror Maestro?</h3>
+                <p>Mirror Maestro simplifies the management of GitLab repository mirrors. Whether you need to sync repositories between GitLab instances, create backups, or maintain read-only copies, Mirror Maestro provides a centralized interface to configure and monitor all your mirrors.</p>
+
+                <h3>Core Concepts</h3>
+                <ul>
+                    <li><strong>GitLab Instances</strong> - Your GitLab servers (self-hosted or GitLab.com). Each instance needs an access token with API permissions.</li>
+                    <li><strong>Instance Pairs</strong> - A connection between two instances (or the same instance) that defines the mirroring direction and default settings.</li>
+                    <li><strong>Mirrors</strong> - Individual repository mirrors that sync content from a source project to a target project.</li>
+                    <li><strong>Group Tokens</strong> - Access tokens stored at the group level for HTTPS authentication during mirror operations.</li>
+                </ul>
+
+                <h3>Quick Start: Create Your First Mirror</h3>
+                <ol>
+                    <li><strong>Add a GitLab Instance</strong> - Go to <a href="#" onclick="switchTab('instances-tab'); return false;">GitLab Instances</a> and add your GitLab server with an access token.</li>
+                    <li><strong>Create an Instance Pair</strong> - Go to <a href="#" onclick="switchTab('pairs-tab'); return false;">Instance Pairs</a> and create a pair (can be the same instance for internal mirroring).</li>
+                    <li><strong>Add a Group Token</strong> - Go to <a href="#" onclick="switchTab('tokens-tab'); return false;">Group Settings</a> and add an access token for the group containing your projects.</li>
+                    <li><strong>Create a Mirror</strong> - Go to <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a>, select your pair, choose source and target projects, and create the mirror.</li>
+                </ol>
+            </div>
+
+            <!-- GitLab Instances -->
+            <div class="card">
+                <h2>GitLab Instances</h2>
+                <p class="text-muted">Configure connections to your GitLab servers.</p>
+
+                <h3>Required Token Permissions</h3>
+                <p>The instance access token needs the following scopes:</p>
+                <ul>
+                    <li><strong>api</strong> - Full API access (required for creating and managing mirrors)</li>
+                    <li><strong>read_repository</strong> - Read access to repositories (for pull mirrors)</li>
+                    <li><strong>write_repository</strong> - Write access to repositories (for push mirrors)</li>
+                </ul>
+                <p>You can use a Personal Access Token (PAT) or a Project/Group Access Token with these scopes.</p>
+
+                <h3>Adding an Instance</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('instances-tab'); return false;">GitLab Instances</a> tab</li>
+                    <li>Fill in the instance name (e.g., "Production GitLab")</li>
+                    <li>Enter the instance URL (e.g., <code>https://gitlab.example.com</code>)</li>
+                    <li>Paste your access token</li>
+                    <li>Click "Add Instance" - the connection will be tested automatically</li>
+                </ol>
+
+                <h3>Testing Connections</h3>
+                <p>After adding an instance, Mirror Maestro verifies the token by fetching the authenticated user's information. If successful, you'll see the API username displayed in the instances table.</p>
+            </div>
+
+            <!-- Instance Pairs -->
+            <div class="card">
+                <h2>Instance Pairs</h2>
+                <p class="text-muted">Define mirroring relationships between GitLab instances.</p>
+
+                <h3>Push vs Pull Mirroring</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Direction</th>
+                            <th>Use Case</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Push</strong></td>
+                            <td>Source → Target</td>
+                            <td>The source repository pushes changes to the target. Best for active development repos pushing to backups or read-only copies.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Pull</strong></td>
+                            <td>Target ← Source</td>
+                            <td>The target repository pulls changes from the source. Best when you want the target to control when it syncs.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Creating a Pair</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('pairs-tab'); return false;">Instance Pairs</a> tab</li>
+                    <li>Enter a descriptive name (e.g., "Dev to Prod Sync")</li>
+                    <li>Select the source and target instances</li>
+                    <li>Choose the mirror direction (push or pull)</li>
+                    <li>Configure default settings for mirrors in this pair</li>
+                    <li>Click "Create Pair"</li>
+                </ol>
+
+                <h3>Pair-Level Default Settings</h3>
+                <p>Settings configured on a pair become defaults for all mirrors in that pair. Individual mirrors can override these settings.</p>
+                <ul>
+                    <li><strong>Mirror protected branches only</strong> - Only sync branches that are protected</li>
+                    <li><strong>Trigger builds</strong> - Run CI/CD pipelines on the target after sync</li>
+                    <li><strong>Overwrite diverged branches</strong> - Force-update branches that have diverged</li>
+                </ul>
+            </div>
+
+            <!-- Group Access Tokens -->
+            <div class="card">
+                <h2>Group Access Tokens</h2>
+                <p class="text-muted">Manage authentication tokens for HTTPS-based mirroring.</p>
+
+                <h3>Why Tokens Are Needed</h3>
+                <p>GitLab mirrors use HTTPS URLs with embedded credentials. Group access tokens provide authentication for all projects within a group hierarchy.</p>
+
+                <h3>Token Inheritance</h3>
+                <p>Tokens are inherited from parent groups to child groups. If you set a token at <code>my-org</code>, it will be used for projects in <code>my-org/team-a</code>, <code>my-org/team-b</code>, etc.</p>
+                <p><strong>Tip:</strong> Set tokens at the highest group level that contains all your mirrored projects to minimize token management.</p>
+
+                <h3>Adding a Token</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('tokens-tab'); return false;">Group Settings</a> tab</li>
+                    <li>Select the GitLab instance</li>
+                    <li>Enter the group path (e.g., <code>my-org/team-a</code>)</li>
+                    <li>Paste the access token</li>
+                    <li>Enter the token name/username (usually <code>oauth2</code> for PATs or the token name for group tokens)</li>
+                    <li>Click "Add Token"</li>
+                </ol>
+
+                <h3>Token Rotation</h3>
+                <p>To rotate a token, simply update it with a new value. The new token will be used for all subsequent mirror operations in that group.</p>
+            </div>
+
+            <!-- Group Defaults -->
+            <div class="card">
+                <h2>Group Defaults</h2>
+                <p class="text-muted">Configure mirror settings at the group level.</p>
+
+                <h3>Settings Hierarchy</h3>
+                <p>Mirror settings are resolved in this order (first non-null value wins):</p>
+                <ol>
+                    <li><strong>Mirror-level</strong> - Settings on the individual mirror (highest priority)</li>
+                    <li><strong>Group-level</strong> - Settings for the project's group</li>
+                    <li><strong>Pair-level</strong> - Default settings on the instance pair (lowest priority)</li>
+                </ol>
+
+                <h3>Use Cases</h3>
+                <ul>
+                    <li><strong>CI/CD control</strong> - Enable "trigger builds" only for production groups</li>
+                    <li><strong>Protected branches</strong> - Mirror only protected branches for release groups</li>
+                    <li><strong>Override handling</strong> - Allow diverged overwrites for development groups only</li>
+                </ul>
+            </div>
+
+            <!-- Creating Mirrors -->
+            <div class="card">
+                <h2>Creating Mirrors</h2>
+                <p class="text-muted">Step-by-step guide to setting up repository mirrors.</p>
+
+                <h3>Prerequisites</h3>
+                <ul>
+                    <li>At least one GitLab instance configured</li>
+                    <li>An instance pair created</li>
+                    <li>A group token for the source and/or target groups</li>
+                    <li>Source and target projects must exist (Mirror Maestro doesn't create projects)</li>
+                </ul>
+
+                <h3>Creating a Mirror</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a> tab</li>
+                    <li>Select an instance pair from the dropdown</li>
+                    <li>Search and select the source project</li>
+                    <li>Search and select the target project</li>
+                    <li>Click "Preflight Check" to validate the configuration</li>
+                    <li>Review the effective settings shown in the preflight results</li>
+                    <li>Click "Create Mirror" to set up the mirror on GitLab</li>
+                </ol>
+
+                <h3>Preflight Checks</h3>
+                <p>Before creating a mirror, the preflight check verifies:</p>
+                <ul>
+                    <li>Both projects are accessible</li>
+                    <li>Required tokens are available</li>
+                    <li>The effective mirror settings (combining mirror, group, and pair defaults)</li>
+                </ul>
+
+                <h3>Mirror Settings</h3>
+                <ul>
+                    <li><strong>Enabled</strong> - Toggle to enable/disable the mirror without deleting it</li>
+                    <li><strong>Only protected branches</strong> - Sync only branches marked as protected</li>
+                    <li><strong>Trigger builds</strong> - Run CI/CD on target after successful sync</li>
+                    <li><strong>Overwrite diverged</strong> - Force-push if target has diverged from source</li>
+                </ul>
+
+                <h3>Syncing Mirrors</h3>
+                <p>Mirrors sync automatically based on GitLab's schedule (typically every 5 minutes for push, on-demand for pull). You can manually trigger a sync using the "Update Now" button in the mirrors table.</p>
+            </div>
+
+            <!-- Topology View -->
+            <div class="card">
+                <h2>Topology View</h2>
+                <p class="text-muted">Visualize your mirror network with an interactive graph.</p>
+
+                <h3>Understanding the Graph</h3>
+                <ul>
+                    <li><strong>Nodes</strong> - Each node represents a GitLab instance</li>
+                    <li><strong>Links</strong> - Lines between nodes represent instance pairs</li>
+                    <li><strong>Link colors</strong> - Blue for pull mirrors, orange for push mirrors</li>
+                    <li><strong>Link thickness</strong> - Thicker links have more mirrors</li>
+                </ul>
+
+                <h3>Interacting with the Graph</h3>
+                <ul>
+                    <li><strong>Drag nodes</strong> - Rearrange the layout by dragging instances</li>
+                    <li><strong>Click a node</strong> - See instance details and statistics</li>
+                    <li><strong>Click a link</strong> - View all mirrors for that pair</li>
+                    <li><strong>Zoom</strong> - Scroll to zoom in/out</li>
+                    <li><strong>Pan</strong> - Click and drag the background to pan</li>
+                </ul>
+
+                <h3>Status Indicators</h3>
+                <p>The graph shows mirror health at a glance:</p>
+                <ul>
+                    <li><strong>Green</strong> - All mirrors syncing successfully</li>
+                    <li><strong>Yellow</strong> - Some mirrors have warnings or are stale</li>
+                    <li><strong>Red</strong> - Mirrors have errors that need attention</li>
+                </ul>
+            </div>
+
+            <!-- Troubleshooting -->
+            <div class="card">
+                <h2>Troubleshooting</h2>
+                <p class="text-muted">Common issues and how to resolve them.</p>
+
+                <h3>Connection Errors</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Error</th>
+                            <th>Cause</th>
+                            <th>Solution</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>401 Unauthorized</code></td>
+                            <td>Invalid or expired token</td>
+                            <td>Regenerate the access token and update the instance configuration</td>
+                        </tr>
+                        <tr>
+                            <td><code>403 Forbidden</code></td>
+                            <td>Token lacks required scopes</td>
+                            <td>Ensure the token has <code>api</code>, <code>read_repository</code>, and <code>write_repository</code> scopes</td>
+                        </tr>
+                        <tr>
+                            <td><code>Connection refused</code></td>
+                            <td>Network/firewall issue</td>
+                            <td>Check that the GitLab instance is reachable from the Mirror Maestro server</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Mirror Sync Failures</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Error</th>
+                            <th>Cause</th>
+                            <th>Solution</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>Remote host key changed</code></td>
+                            <td>SSH host key mismatch</td>
+                            <td>Use HTTPS URLs instead of SSH, or update known hosts on GitLab server</td>
+                        </tr>
+                        <tr>
+                            <td><code>Diverged branches</code></td>
+                            <td>Target has commits not in source</td>
+                            <td>Enable "Overwrite diverged branches" if you want to force-sync</td>
+                        </tr>
+                        <tr>
+                            <td><code>Repository not found</code></td>
+                            <td>Project deleted or moved</td>
+                            <td>Update the mirror with the new project path or delete the mirror</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Checking Mirror Status</h3>
+                <ol>
+                    <li>Go to the <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a> tab</li>
+                    <li>Find your mirror in the table</li>
+                    <li>Check the "Status" column for the current state</li>
+                    <li>Click "Details" or "Refresh Status" for more information</li>
+                    <li>The "Last Sync" column shows when the mirror last synced successfully</li>
+                </ol>
+
+                <h3>Getting Help</h3>
+                <p>If you encounter issues not covered here:</p>
+                <ul>
+                    <li>Check the GitLab project's mirror settings directly in the GitLab UI</li>
+                    <li>Review GitLab's documentation on <a href="https://docs.gitlab.com/ee/user/project/repository/mirror/" target="_blank" rel="noopener">repository mirroring</a></li>
+                    <li>Open an issue on the <a href="https://github.com/MrZoller/mirror-maestro/issues" target="_blank" rel="noopener">Mirror Maestro GitHub repository</a></li>
+                </ul>
             </div>
         </div>
     </div>
