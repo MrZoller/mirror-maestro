@@ -160,6 +160,24 @@ async def update_token(
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
 
+    # CRITICAL: Check for unique constraint violations before updating
+    # The (gitlab_instance_id, group_path) combination must be unique
+    if token_update.group_path is not None and token_update.group_path != token.group_path:
+        # Check if another token exists with this group_path for the same instance
+        existing_result = await db.execute(
+            select(GroupAccessToken).where(
+                GroupAccessToken.gitlab_instance_id == token.gitlab_instance_id,
+                GroupAccessToken.group_path == token_update.group_path,
+                GroupAccessToken.id != token_id  # Exclude the current token
+            )
+        )
+        existing_token = existing_result.scalar_one_or_none()
+        if existing_token:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A token for group '{token_update.group_path}' already exists for this GitLab instance"
+            )
+
     # Update fields
     if token_update.group_path is not None:
         token.group_path = token_update.group_path
@@ -168,8 +186,17 @@ async def update_token(
     if token_update.token_name is not None:
         token.token_name = token_update.token_name
 
-    await db.commit()
-    await db.refresh(token)
+    try:
+        await db.commit()
+        await db.refresh(token)
+    except Exception as e:
+        await db.rollback()
+        import logging
+        logging.error(f"Failed to update token {token_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update token. Database changes have been rolled back."
+        )
 
     return GroupAccessTokenResponse(
         id=token.id,
