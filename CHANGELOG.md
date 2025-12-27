@@ -12,7 +12,7 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 ## [0.1.0] - 2025-12-21
 
 ### Added
-- Initial release of GitLab Mirror Wizard.
+- Initial release of Mirror Maestro.
 
 <!--
 Links (optional):
