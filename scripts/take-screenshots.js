@@ -19,7 +19,8 @@ const DEMO_FILES = [
   { file: 'demo-pairs.html', output: '03-pairs.png', name: 'Instance Pairs' },
   { file: 'demo-tokens.html', output: '04-tokens.png', name: 'Group Settings' },
   { file: 'demo-mirrors.html', output: '05-mirrors.png', name: 'Mirrors' },
-  { file: 'demo-topology.html', output: '06-topology.png', name: 'Topology' }
+  { file: 'demo-topology.html', output: '06-topology.png', name: 'Topology' },
+  { file: 'demo-dashboard-dark.html', output: '07-dashboard-dark.png', name: 'Dashboard (Dark Mode)' }
 ];
 
 async function takeScreenshots() {
@@ -49,8 +50,9 @@ async function takeScreenshots() {
     // Load the demo HTML file
     await page.goto(`file://${filePath}`, { waitUntil: 'networkidle' });
 
-    // Wait a bit for any animations to complete
-    await page.waitForTimeout(1000);
+    // Wait for any animations to complete (longer for topology and dashboard with charts)
+    const waitTime = demo.file.includes('topology') ? 2000 : demo.file.includes('dashboard') ? 1500 : 1000;
+    await page.waitForTimeout(waitTime);
 
     // Take screenshot
     await page.screenshot({
