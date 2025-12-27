@@ -69,10 +69,9 @@ This document provides comprehensive guidance for AI assistants working on the M
 │   - instances.py                    │
 │   - pairs.py                        │
 │   - mirrors.py                      │
-│   - tokens.py                       │
-│   - group_defaults.py               │
 │   - topology.py                     │
 │   - export.py                       │
+│   - dashboard.py                    │
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
@@ -104,10 +103,9 @@ mirror-maestro/
 │   │   ├── __init__.py
 │   │   ├── instances.py              # GitLab instance CRUD
 │   │   ├── pairs.py                  # Instance pair CRUD
-│   │   ├── mirrors.py                # Mirror CRUD and sync operations
-│   │   ├── tokens.py                 # Group access token management
-│   │   ├── group_defaults.py         # Group-level mirror defaults
+│   │   ├── mirrors.py                # Mirror CRUD, sync, and token management
 │   │   ├── topology.py               # Topology visualization API
+│   │   ├── dashboard.py              # Dashboard metrics
 │   │   └── export.py                 # Import/export functionality
 │   │
 │   ├── core/                         # Core business logic
@@ -232,9 +230,7 @@ class GitLabInstance(Base):
 **Models**:
 1. `GitLabInstance` - GitLab instance configuration
 2. `InstancePair` - Pairs of instances for mirroring
-3. `Mirror` - Individual mirror configurations
-4. `GroupAccessToken` - Encrypted tokens for HTTPS mirroring
-5. `GroupMirrorDefaults` - Group-level setting overrides
+3. `Mirror` - Individual mirror configurations (includes auto-managed token fields)
 
 #### 3. Database Access (`app/database.py`)
 
@@ -387,15 +383,12 @@ const state = {
     instances: [],
     pairs: [],
     mirrors: [],
-    tokens: [],
-    groupDefaults: [],
     selectedPair: null,
     mirrorProjectInstances: { source: null, target: null },
     editing: {
         instanceId: null,
         pairId: null,
-        mirrorId: null,
-        tokenId: null
+        mirrorId: null
     }
 };
 ```
@@ -857,18 +850,10 @@ function loadInstances() {
 ```
 GitLabInstance (1)
     ├──> InstancePair (N) via source_instance_id
-    ├──> InstancePair (N) via target_instance_id
-    └──> GroupAccessToken (N) via gitlab_instance_id
+    └──> InstancePair (N) via target_instance_id
 
 InstancePair (1)
-    ├──> Mirror (N) via instance_pair_id
-    └──> GroupMirrorDefaults (N) via instance_pair_id
-
-GroupAccessToken
-    - Logical key: (gitlab_instance_id, group_path)
-
-GroupMirrorDefaults
-    - Logical key: (instance_pair_id, group_path)
+    └──> Mirror (N) via instance_pair_id
 ```
 
 ### Cascade Delete Behavior
@@ -889,30 +874,27 @@ async def delete_instance(db: AsyncSession, instance_id: int):
     # 2. Delete all mirrors for these pairs
     for pair in pairs:
         await db.execute(delete(Mirror).where(Mirror.instance_pair_id == pair.id))
-        await db.execute(delete(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id == pair.id))
 
     # 3. Delete the pairs
     await db.execute(delete(InstancePair).where(InstancePair.id.in_([p.id for p in pairs])))
 
-    # 4. Delete group tokens
-    await db.execute(delete(GroupAccessToken).where(GroupAccessToken.gitlab_instance_id == instance_id))
-
-    # 5. Delete the instance
+    # 4. Delete the instance
     await db.execute(delete(GitLabInstance).where(GitLabInstance.id == instance_id))
 
     await db.commit()
 ```
 
+**Note**: When deleting a mirror, the application also deletes the automatically-created project access token from GitLab.
+
 ### Settings Resolution Hierarchy
 
-**Three-Tier Configuration**:
+**Two-Tier Configuration**:
 ```python
-def resolve_mirror_settings(mirror: Mirror, group_defaults: Optional[GroupMirrorDefaults], pair: InstancePair) -> dict:
+def resolve_mirror_settings(mirror: Mirror, pair: InstancePair) -> dict:
     """
-    Resolve effective mirror settings from three sources:
+    Resolve effective mirror settings from two sources:
     1. Per-mirror overrides (highest priority)
-    2. Group-level defaults
-    3. Pair defaults (lowest priority)
+    2. Pair defaults (lowest priority)
     """
     effective = {}
 
@@ -921,17 +903,9 @@ def resolve_mirror_settings(mirror: Mirror, group_defaults: Optional[GroupMirror
         mirror_value = getattr(mirror, setting)
         if mirror_value is not None:
             effective[setting] = mirror_value
-            continue
-
-        # Try group-level default
-        if group_defaults:
-            group_value = getattr(group_defaults, setting)
-            if group_value is not None:
-                effective[setting] = group_value
-                continue
-
-        # Fall back to pair default
-        effective[setting] = getattr(pair, setting)
+        else:
+            # Fall back to pair default
+            effective[setting] = getattr(pair, setting)
 
     return effective
 ```
@@ -1747,7 +1721,7 @@ function handleTabChange(tabName) {
 
 **Example: Adding a New Mirror Setting**:
 
-1. **Add to All Models** (in `app/models.py`):
+1. **Add to Models** (in `app/models.py`):
 ```python
 class InstancePair(Base):
     # ... existing fields ...
@@ -1756,23 +1730,18 @@ class InstancePair(Base):
 class Mirror(Base):
     # ... existing fields ...
     new_setting: Mapped[Optional[bool]] = mapped_column(Boolean)
-
-class GroupMirrorDefaults(Base):
-    # ... existing fields ...
-    new_setting: Mapped[Optional[bool]] = mapped_column(Boolean)
 ```
 
 2. **Add Migration**:
 ```python
 async def _maybe_migrate_sqlite():
     async with async_engine.begin() as conn:
-        for table in ["instance_pairs", "mirrors", "group_mirror_defaults"]:
+        for table in ["instance_pairs", "mirrors"]:
             result = await conn.execute(text(f"PRAGMA table_info({table})"))
             columns = {row[1] for row in result}
             if "new_setting" not in columns:
-                default_value = "0" if table != "instance_pairs" else "0"
                 await conn.execute(text(
-                    f"ALTER TABLE {table} ADD COLUMN new_setting BOOLEAN DEFAULT {default_value}"
+                    f"ALTER TABLE {table} ADD COLUMN new_setting BOOLEAN DEFAULT 0"
                 ))
 ```
 
@@ -1847,7 +1816,7 @@ app.add_middleware(
 
 **Solution**:
 1. Check token hasn't expired
-2. Verify token has required scopes (`api` for instance tokens, `read_repository`/`write_repository` for group tokens)
+2. Verify token has required scopes (`api` for instance tokens)
 3. Test token manually: `curl -H "PRIVATE-TOKEN: xxx" https://gitlab.example.com/api/v4/user`
 
 #### Database Lock Errors

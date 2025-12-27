@@ -81,54 +81,14 @@ class Mirror(Base):
     last_update_status: Mapped[Optional[str]] = mapped_column(String(50))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class GroupAccessToken(Base):
-    """Stores encrypted group access tokens for mirroring."""
-    __tablename__ = "group_access_tokens"
-    __table_args__ = (
-        UniqueConstraint('gitlab_instance_id', 'group_path', name='uq_group_access_token_instance_group'),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    gitlab_instance_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    group_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    encrypted_token: Mapped[str] = mapped_column(Text, nullable=False)
-    token_name: Mapped[str] = mapped_column(String(100), nullable=False)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class GroupMirrorDefaults(Base):
-    """
-    Group-level mirror default overrides for a specific instance pair.
-
-    These settings sit between:
-      per-mirror overrides (Mirror.*) -> group overrides (this table) -> pair defaults (InstancePair.*)
-
-    `group_path` is the GitLab namespace path (e.g. "platform/core") that matches
-    the namespace portion of `path_with_namespace` (project name excluded).
-    """
-    __tablename__ = "group_mirror_defaults"
-    __table_args__ = (
-        UniqueConstraint('instance_pair_id', 'group_path', name='uq_group_mirror_defaults_pair_group'),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    instance_pair_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    group_path: Mapped[str] = mapped_column(String(500), nullable=False)
-
-    # Optional overrides (None => inherit from pair defaults)
-    mirror_direction: Mapped[Optional[str]] = mapped_column(String(10))  # "pull" or "push"
-    mirror_protected_branches: Mapped[Optional[bool]] = mapped_column(Boolean)
-    mirror_overwrite_diverged: Mapped[Optional[bool]] = mapped_column(Boolean)
-    mirror_trigger_builds: Mapped[Optional[bool]] = mapped_column(Boolean)
-    only_mirror_protected_branches: Mapped[Optional[bool]] = mapped_column(Boolean)
-    mirror_branch_regex: Mapped[Optional[str]] = mapped_column(String(255))
-    mirror_user_id: Mapped[Optional[int]] = mapped_column(Integer)
+    # Project access token for mirror authentication (auto-managed)
+    # Token is created on the "remote" project: target for push, source for pull
+    encrypted_mirror_token: Mapped[Optional[str]] = mapped_column(Text)
+    mirror_token_name: Mapped[Optional[str]] = mapped_column(String(100))
+    mirror_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    gitlab_token_id: Mapped[Optional[int]] = mapped_column(Integer)  # GitLab's token ID for rotation/deletion
+    # Which project has the token (needed for token management)
+    token_project_id: Mapped[Optional[int]] = mapped_column(Integer)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

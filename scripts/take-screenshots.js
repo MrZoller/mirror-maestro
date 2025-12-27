@@ -17,10 +17,9 @@ const DEMO_FILES = [
   { file: 'demo-dashboard.html', output: '01-dashboard.png', name: 'Dashboard' },
   { file: 'demo-instances.html', output: '02-instances.png', name: 'GitLab Instances' },
   { file: 'demo-pairs.html', output: '03-pairs.png', name: 'Instance Pairs' },
-  { file: 'demo-tokens.html', output: '04-tokens.png', name: 'Group Settings' },
-  { file: 'demo-mirrors.html', output: '05-mirrors.png', name: 'Mirrors' },
-  { file: 'demo-topology.html', output: '06-topology.png', name: 'Topology' },
-  { file: 'demo-dashboard-dark.html', output: '07-dashboard-dark.png', name: 'Dashboard (Dark Mode)' }
+  { file: 'demo-mirrors.html', output: '04-mirrors.png', name: 'Mirrors' },
+  { file: 'demo-topology.html', output: '05-topology.png', name: 'Topology' },
+  { file: 'demo-dashboard-dark.html', output: '06-dashboard-dark.png', name: 'Dashboard (Dark Mode)' }
 ];
 
 async function takeScreenshots() {

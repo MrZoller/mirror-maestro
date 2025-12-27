@@ -33,8 +33,6 @@ async def test_init_db_creates_all_tables():
             'gitlab_instances',
             'instance_pairs',
             'mirrors',
-            'group_access_tokens',
-            'group_mirror_defaults'
         }
         assert expected_tables.issubset(tables), f"Missing tables: {expected_tables - tables}"
 
