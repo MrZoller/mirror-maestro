@@ -35,4 +35,7 @@ asyncio_mode = "auto"
 markers = [
     "e2e: end-to-end tests (may be slow or require external services)",
     "live_gitlab: tests that talk to a real GitLab instance (opt-in via env vars)",
+    "dual_instance: tests requiring two separate GitLab instances",
+    "multi_project: tests with multiple projects in a group",
+    "multi_group: tests with multiple groups/subgroups",
 ]
