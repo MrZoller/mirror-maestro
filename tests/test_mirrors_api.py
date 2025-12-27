@@ -292,7 +292,7 @@ async def test_mirrors_update_can_clear_overrides_with_null(client, session_make
             mirror_id=None,  # avoid any GitLab client calls
             enabled=True,
             last_update_status="pending",
-            mirror_direction="pull",
+            # Direction comes from pair, not stored on mirror
             mirror_overwrite_diverged=True,  # explicit override
         )
         s.add(m)
@@ -896,7 +896,7 @@ async def test_mirrors_trigger_update_for_push_mirror(client, session_maker, mon
             target_project_id=20,
             target_project_path="platform/proj",
             mirror_id=88,
-            mirror_direction="push",
+            # Direction comes from pair (push), not stored on mirror
             enabled=True,
             last_update_status="finished",
         )
@@ -908,7 +908,7 @@ async def test_mirrors_trigger_update_for_push_mirror(client, session_maker, mon
     resp = await client.post(f"/api/mirrors/{mirror_id}/update")
     assert resp.status_code == 200
 
-    # Push mirror should trigger on source project
+    # Push mirror should trigger on source project (direction from pair)
     assert FakeGitLabClient.trigger_calls[-1] == (10, 88)
 
 

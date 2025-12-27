@@ -66,8 +66,7 @@ class Mirror(Base):
     target_project_id: Mapped[int] = mapped_column(Integer, nullable=False)
     target_project_path: Mapped[str] = mapped_column(String(500), nullable=False)
 
-    # Mirror settings (can override instance pair defaults)
-    mirror_direction: Mapped[Optional[str]] = mapped_column(String(10))
+    # Mirror settings (can override instance pair defaults, except direction which is pair-only)
     mirror_protected_branches: Mapped[Optional[bool]] = mapped_column(Boolean)
     mirror_overwrite_diverged: Mapped[Optional[bool]] = mapped_column(Boolean)
     mirror_trigger_builds: Mapped[Optional[bool]] = mapped_column(Boolean)

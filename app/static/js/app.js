@@ -524,17 +524,8 @@ function setupEventListeners() {
         await createMirror();
     });
 
-    // Mirror direction override (or "use pair default") toggles applicable fields
-    document.getElementById('mirror-direction')?.addEventListener('change', (e) => {
-        const selected = (e.target.value || '').toString().toLowerCase();
-        if (selected) {
-            applyMirrorDirectionUI(selected);
-            return;
-        }
-        // Use pair default if present
-        const pair = state.pairs.find(p => p.id === state.selectedPair);
-        applyMirrorDirectionUI(pair?.mirror_direction);
-    });
+    // Direction comes from pair (no per-mirror override)
+    // The UI is updated in handleEditMirror when a pair is selected
 
     // Pair selector for mirrors
     document.getElementById('pair-selector')?.addEventListener('change', (e) => {
@@ -1629,7 +1620,7 @@ function renderMirrors(mirrors) {
             `<span class="badge badge-info">${mirror.last_update_status}</span>` :
             '<span class="text-muted">N/A</span>';
 
-        const dir = (mirror.effective_mirror_direction || mirror.mirror_direction || '').toString().toLowerCase();
+        const dir = (mirror.effective_mirror_direction || '').toString().toLowerCase();
         const settingsCell = (() => {
             const pieces = [];
             if (dir) pieces.push(`<span class="badge badge-info">${escapeHtml(dir)}</span>`);
@@ -1826,7 +1817,7 @@ function applyMirrorEditControls(mirrorId) {
 async function saveMirrorEdit(id) {
     const mirror = (state.mirrors || []).find(m => m.id === id);
     if (!mirror) return;
-    const dir = (mirror.effective_mirror_direction || mirror.mirror_direction || '').toString().toLowerCase();
+    const dir = (mirror.effective_mirror_direction || '').toString().toLowerCase();
     const isPush = dir === 'push';
 
     const enabledEl = document.getElementById(`edit-mirror-enabled-${id}`);
@@ -1976,8 +1967,7 @@ function resetMirrorOverrides() {
     const userId = document.getElementById('mirror-mirror-user-id');
     if (userId) userId.value = '';
 
-    const dir = document.getElementById('mirror-direction');
-    if (dir) dir.value = '';
+    // Direction dropdown removed - direction comes from pair only
 
     const enabled = document.getElementById('mirror-enabled');
     if (enabled) enabled.checked = true;
@@ -2034,13 +2024,10 @@ async function createMirror() {
         enabled: formData.get('enabled') === 'on'
     };
 
-    const mirrorDirection = (formData.get('mirror_direction') || '').toString().trim();
+    // Direction comes from pair only (no per-mirror override)
     const pair = state.pairs.find(p => p.id === state.selectedPair);
-    const effectiveDirection = (mirrorDirection || pair?.mirror_direction || '').toString().toLowerCase();
+    const effectiveDirection = (pair?.mirror_direction || '').toString().toLowerCase();
     const isPush = effectiveDirection === 'push';
-    if (mirrorDirection) {
-        data.mirror_direction = mirrorDirection;
-    }
 
     const overwriteEl = document.getElementById('mirror-overwrite');
     if (overwriteEl && !overwriteEl.indeterminate) {
@@ -2066,6 +2053,7 @@ async function createMirror() {
 
     // Preflight: check for existing GitLab remote mirrors before attempting to create.
     // This is especially important for pull mirrors, where GitLab effectively supports only one.
+    // Direction comes from pair, so no need to pass it here.
     try {
         const preflightPayload = {
             instance_pair_id: data.instance_pair_id,
@@ -2074,7 +2062,6 @@ async function createMirror() {
             target_project_id: data.target_project_id,
             target_project_path: data.target_project_path,
         };
-        if (mirrorDirection) preflightPayload.mirror_direction = mirrorDirection;
 
         const preflight = await apiRequest('/api/mirrors/preflight', {
             method: 'POST',
