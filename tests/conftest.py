@@ -74,12 +74,10 @@ async def app(engine, session_maker: async_sessionmaker[AsyncSession], monkeypat
     # Swap encryption used across modules to avoid filesystem key creation
     from app.api import instances as instances_mod
     from app.api import mirrors as mirrors_mod
-    from app.api import tokens as tokens_mod
     from app.core import gitlab_client as gitlab_client_mod
 
     instances_mod.encryption = fake_encryption
     mirrors_mod.encryption = fake_encryption
-    tokens_mod.encryption = fake_encryption
     gitlab_client_mod.encryption = fake_encryption
 
     async def override_get_db():

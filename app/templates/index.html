@@ -31,7 +31,6 @@
             <button class="tab active" data-tab="dashboard-tab">Dashboard</button>
             <button class="tab" data-tab="instances-tab">GitLab Instances</button>
             <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
-            <button class="tab" data-tab="tokens-tab">Group Settings</button>
             <button class="tab" data-tab="topology-tab">Topology</button>
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
             <button class="tab" data-tab="help-tab">Help</button>
@@ -292,131 +291,6 @@
             </div>
         </div>
 
-        <!-- Group Settings Tab -->
-        <div id="tokens-tab" class="tab-content">
-            <div class="card">
-                <h2>Group Settings</h2>
-                <p class="text-muted">Manage group access tokens (for HTTPS mirroring) and group-level mirror default overrides (that take precedence over pair defaults).</p>
-
-                <form id="token-form" class="mt-20">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="token-instance">GitLab Instance *</label>
-                            <select id="token-instance" name="gitlab_instance_id" required>
-                                <option value="">Select instance...</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="token-group-path">Group Path *</label>
-                            <input type="text" id="token-group-path" name="group_path" required placeholder="e.g., platform, frontend, infrastructure" list="token-group-path-options">
-                            <datalist id="token-group-path-options"></datalist>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="token-name">Token Name *</label>
-                            <input type="text" id="token-name" name="token_name" required placeholder="e.g., mirror-token">
-                        </div>
-                        <div class="form-group">
-                            <label for="token-value">Token Value *</label>
-                            <input type="password" id="token-value" name="token" required placeholder="Group access token">
-                        </div>
-                    </div>
-
-                    <div class="flex" style="gap:10px; flex-wrap:wrap">
-                        <button type="submit" id="token-submit" class="btn btn-primary">Add Group Token</button>
-                        <button type="button" id="token-cancel-edit" class="btn btn-secondary hidden">Cancel edit</button>
-                    </div>
-                </form>
-
-                <div class="message message-info mt-20">
-                    <strong>Note:</strong> Group access tokens are required for mirrors to authenticate via HTTPS.
-                    Create a token for each group that contains projects you want to mirror.
-                    The token must have <code>read_repository</code> and <code>write_repository</code> scopes.
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>Group Mirror Default Overrides</h3>
-                <p class="text-muted">Optional: override an instance pair's default mirror settings for a specific GitLab group path. Mirrors can still override these settings per mirror.</p>
-
-                <form id="group-defaults-form" class="mt-20">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="group-defaults-pair">Instance Pair *</label>
-                            <select id="group-defaults-pair" name="instance_pair_id" required>
-                                <option value="">Select instance pair...</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="group-defaults-group-path">Group Path *</label>
-                            <input type="text" id="group-defaults-group-path" name="group_path" required placeholder="e.g., platform, platform/core" list="group-defaults-group-path-options">
-                            <datalist id="group-defaults-group-path-options"></datalist>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="group-defaults-direction">Default Mirror Direction</label>
-                            <select id="group-defaults-direction" name="mirror_direction">
-                                <option value="">Inherit pair default</option>
-                                <option value="pull">Pull</option>
-                                <option value="push">Push</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Default Mirror Settings (optional overrides)</label>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="group-defaults-overwrite" name="mirror_overwrite_diverged">
-                            <label for="group-defaults-overwrite">Overwrite divergent branches</label>
-                        </div>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="group-defaults-trigger" name="mirror_trigger_builds">
-                            <label for="group-defaults-trigger">Trigger builds on mirror update (pull only)</label>
-                        </div>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="group-defaults-only-protected" name="only_mirror_protected_branches">
-                            <label for="group-defaults-only-protected">Only mirror protected branches</label>
-                        </div>
-                        <div class="form-row mt-10">
-                            <div class="form-group">
-                                <label for="group-defaults-branch-regex">Mirror branch regex (pull only)</label>
-                                <input type="text" id="group-defaults-branch-regex" name="mirror_branch_regex" placeholder="Optional (e.g., ^main$|^release/.*$)">
-                            </div>
-                            <div class="form-group">
-                                <label for="group-defaults-mirror-user-id">Mirror user (pull only)</label>
-                                <input type="number" id="group-defaults-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
-                            </div>
-                        </div>
-                    </div>
-
-                    <button type="submit" class="btn btn-primary">Save Group Defaults</button>
-                </form>
-            </div>
-
-            <div class="card">
-                <h3>Configured Group Settings</h3>
-                <p class="text-muted">View group defaults (resolved with pair defaults) alongside token coverage for each instance pair.</p>
-                <table id="group-settings-table" class="enhanced-table">
-                    <thead>
-                        <tr>
-                            <th>Instance Pair</th>
-                            <th>Group Path</th>
-                            <th>Default Settings</th>
-                            <th>Tokens</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="group-settings-list">
-                        <tr><td colspan="5" class="text-center"><div class="spinner"></div></td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
         <!-- Mirrors Tab -->
         <div id="mirrors-tab" class="tab-content">
             <div class="card">
@@ -515,11 +389,12 @@
                             <th>Status</th>
                             <th>Sync Status</th>
                             <th>Last Sync</th>
+                            <th>Token</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="mirrors-list">
-                        <tr><td colspan="7" class="text-center text-muted">Select an instance pair to view mirrors</td></tr>
+                        <tr><td colspan="8" class="text-center text-muted">Select an instance pair to view mirrors</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -625,15 +500,13 @@
                     <li><strong>GitLab Instances</strong> - Your GitLab servers (self-hosted or GitLab.com). Each instance needs an access token with API permissions.</li>
                     <li><strong>Instance Pairs</strong> - A connection between two instances (or the same instance) that defines the mirroring direction and default settings.</li>
                     <li><strong>Mirrors</strong> - Individual repository mirrors that sync content from a source project to a target project.</li>
-                    <li><strong>Group Tokens</strong> - Access tokens stored at the group level for HTTPS authentication during mirror operations.</li>
                 </ul>
 
                 <h3>Quick Start: Create Your First Mirror</h3>
                 <ol>
                     <li><strong>Add a GitLab Instance</strong> - Go to <a href="#" onclick="switchTab('instances-tab'); return false;">GitLab Instances</a> and add your GitLab server with an access token.</li>
                     <li><strong>Create an Instance Pair</strong> - Go to <a href="#" onclick="switchTab('pairs-tab'); return false;">Instance Pairs</a> and create a pair (can be the same instance for internal mirroring).</li>
-                    <li><strong>Add a Group Token</strong> - Go to <a href="#" onclick="switchTab('tokens-tab'); return false;">Group Settings</a> and add an access token for the group containing your projects.</li>
-                    <li><strong>Create a Mirror</strong> - Go to <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a>, select your pair, choose source and target projects, and create the mirror.</li>
+                    <li><strong>Create a Mirror</strong> - Go to <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a>, select your pair, choose source and target projects, and create the mirror. Authentication tokens are managed automatically.</li>
                 </ol>
             </div>
 
@@ -711,51 +584,42 @@
                 </ul>
             </div>
 
-            <!-- Group Access Tokens -->
+            <!-- Authentication & Tokens -->
             <div class="card">
-                <h2>Group Access Tokens</h2>
-                <p class="text-muted">Manage authentication tokens for HTTPS-based mirroring.</p>
+                <h2>Authentication</h2>
+                <p class="text-muted">How Mirror Maestro handles mirror authentication.</p>
 
-                <h3>Why Tokens Are Needed</h3>
-                <p>GitLab mirrors use HTTPS URLs with embedded credentials. Group access tokens provide authentication for all projects within a group hierarchy.</p>
+                <h3>Automatic Token Management</h3>
+                <p>Mirror Maestro automatically creates and manages project access tokens for each mirror. When you create a mirror, a token is generated on the appropriate project with the required permissions.</p>
+                <ul>
+                    <li><strong>Push mirrors</strong> - Token is created on the <em>target</em> project (with <code>write_repository</code> scope)</li>
+                    <li><strong>Pull mirrors</strong> - Token is created on the <em>source</em> project (with <code>read_repository</code> scope)</li>
+                </ul>
 
-                <h3>Token Inheritance</h3>
-                <p>Tokens are inherited from parent groups to child groups. If you set a token at <code>my-org</code>, it will be used for projects in <code>my-org/team-a</code>, <code>my-org/team-b</code>, etc.</p>
-                <p><strong>Tip:</strong> Set tokens at the highest group level that contains all your mirrored projects to minimize token management.</p>
-
-                <h3>Adding a Token</h3>
-                <ol>
-                    <li>Navigate to the <a href="#" onclick="switchTab('tokens-tab'); return false;">Group Settings</a> tab</li>
-                    <li>Select the GitLab instance</li>
-                    <li>Enter the group path (e.g., <code>my-org/team-a</code>)</li>
-                    <li>Paste the access token</li>
-                    <li>Enter the token name/username (usually <code>oauth2</code> for PATs or the token name for group tokens)</li>
-                    <li>Click "Add Token"</li>
-                </ol>
+                <h3>Token Expiration</h3>
+                <p>Tokens are created with a 1-year expiration. The mirror list shows token status:</p>
+                <ul>
+                    <li><span class="badge badge-success">Active</span> - Token is valid</li>
+                    <li><span class="badge badge-warning">Expiring Soon</span> - Token expires within 30 days</li>
+                    <li><span class="badge badge-danger">Expired</span> - Token has expired and needs rotation</li>
+                </ul>
 
                 <h3>Token Rotation</h3>
-                <p>To rotate a token, simply update it with a new value. The new token will be used for all subsequent mirror operations in that group.</p>
+                <p>To rotate a token before it expires (or after it has expired), click the "Rotate Token" button on the mirror. This will create a new token and update the mirror configuration automatically.</p>
             </div>
 
-            <!-- Group Defaults -->
+            <!-- Settings Hierarchy -->
             <div class="card">
-                <h2>Group Defaults</h2>
-                <p class="text-muted">Configure mirror settings at the group level.</p>
+                <h2>Settings Hierarchy</h2>
+                <p class="text-muted">How mirror settings are resolved.</p>
 
-                <h3>Settings Hierarchy</h3>
+                <h3>Two-Tier Resolution</h3>
                 <p>Mirror settings are resolved in this order (first non-null value wins):</p>
                 <ol>
                     <li><strong>Mirror-level</strong> - Settings on the individual mirror (highest priority)</li>
-                    <li><strong>Group-level</strong> - Settings for the project's group</li>
-                    <li><strong>Pair-level</strong> - Default settings on the instance pair (lowest priority)</li>
+                    <li><strong>Pair-level</strong> - Default settings on the instance pair (fallback)</li>
                 </ol>
-
-                <h3>Use Cases</h3>
-                <ul>
-                    <li><strong>CI/CD control</strong> - Enable "trigger builds" only for production groups</li>
-                    <li><strong>Protected branches</strong> - Mirror only protected branches for release groups</li>
-                    <li><strong>Override handling</strong> - Allow diverged overwrites for development groups only</li>
-                </ul>
+                <p>This allows you to set sensible defaults on the instance pair and override them per-mirror as needed.</p>
             </div>
 
             <!-- Creating Mirrors -->

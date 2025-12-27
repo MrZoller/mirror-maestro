@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.models import GitLabInstance, InstancePair, Mirror, GroupMirrorDefaults
+from app.models import GitLabInstance, InstancePair, Mirror
 
 
 async def seed_instance(session_maker, *, name: str, url: str = "https://x") -> int:
@@ -78,13 +78,7 @@ async def test_pairs_delete_cascades_mirrors_and_group_defaults(client, session_
             enabled=True,
             last_update_status="pending",
         )
-        gd = GroupMirrorDefaults(
-            instance_pair_id=pair_id,
-            group_path="platform",
-            mirror_direction="pull",
-            mirror_overwrite_diverged=True,
-        )
-        s.add_all([m, gd])
+        s.add(m)
         await s.commit()
 
     resp = await client.delete(f"/api/pairs/{pair_id}")
@@ -97,9 +91,6 @@ async def test_pairs_delete_cascades_mirrors_and_group_defaults(client, session_
 
         mirrors = (await s.execute(select(Mirror).where(Mirror.instance_pair_id == pair_id))).scalars().all()
         assert mirrors == []
-
-        defaults = (await s.execute(select(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id == pair_id))).scalars().all()
-        assert defaults == []
 
 
 @pytest.mark.asyncio
