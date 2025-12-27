@@ -1,6 +1,6 @@
-# GitLab Mirror Wizard
+# Mirror Maestro
 
-A modern web application for managing GitLab mirrors across multiple instance pairs. Streamline the process of viewing, creating, and maintaining a large set of GitLab mirrors with an intuitive web interface.
+Orchestrate GitLab mirrors across multiple instance pairs with precision. A modern web application that streamlines the process of viewing, creating, and maintaining a large set of GitLab mirrors with an intuitive web interface.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
@@ -178,8 +178,8 @@ AUTH_PASSWORD=changeme
 LOG_LEVEL=INFO
 
 # Application Settings
-APP_TITLE=GitLab Mirror Wizard
-APP_DESCRIPTION=Manage GitLab mirrors across multiple instance pairs
+APP_TITLE=Mirror Maestro
+APP_DESCRIPTION=Orchestrate GitLab mirrors across multiple instance pairs with precision
 ```
 
 ### GitLab Access Tokens
@@ -255,7 +255,7 @@ Define pairs of instances where mirrors will be created:
      - `write_repository` - Write access to repositories (for push mirrors)
    - Save the token value (you won't be able to see it again)
 
-2. In GitLab Mirror Wizard:
+2. In Mirror Maestro:
    - Go to the **Group Settings** tab
    - Click **Add Group Token**
    - Provide:
