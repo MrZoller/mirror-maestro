@@ -14,5 +14,5 @@ async def test_root_serves_html(client):
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
     # Basic smoke: page title string should render
-    assert "GitLab Mirror Wizard" in resp.text
+    assert "Mirror Maestro" in resp.text
 
