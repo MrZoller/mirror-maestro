@@ -1,8 +1,9 @@
 from typing import List
+from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.database import get_db
 from app.models import GitLabInstance, InstancePair, Mirror, GroupAccessToken, GroupMirrorDefaults
@@ -20,12 +21,87 @@ class GitLabInstanceCreate(BaseModel):
     token: str
     description: str = ""
 
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        """Validate instance name is not empty and has reasonable length."""
+        if not v or not v.strip():
+            raise ValueError("Instance name cannot be empty")
+        v = v.strip()
+        if len(v) > 100:
+            raise ValueError("Instance name must be 100 characters or less")
+        return v
+
+    @field_validator('url')
+    @classmethod
+    def validate_url(cls, v):
+        """Validate GitLab instance URL format."""
+        if not v or not v.strip():
+            raise ValueError("Instance URL cannot be empty")
+        v = v.strip()
+        # Add scheme if missing for validation
+        test_url = v if '://' in v else f'https://{v}'
+        try:
+            parsed = urlparse(test_url)
+            if not parsed.hostname:
+                raise ValueError("Invalid URL: no hostname found")
+            # Return original value (normalization happens in the API logic)
+            return v
+        except Exception as e:
+            raise ValueError(f"Invalid URL format: {str(e)}")
+
+    @field_validator('token')
+    @classmethod
+    def validate_token(cls, v):
+        """Validate token is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Access token cannot be empty")
+        return v.strip()
+
 
 class GitLabInstanceUpdate(BaseModel):
     name: str | None = None
     url: str | None = None
     token: str | None = None
     description: str | None = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        """Validate instance name if provided."""
+        if v is not None:
+            if not v.strip():
+                raise ValueError("Instance name cannot be empty")
+            v = v.strip()
+            if len(v) > 100:
+                raise ValueError("Instance name must be 100 characters or less")
+        return v
+
+    @field_validator('url')
+    @classmethod
+    def validate_url(cls, v):
+        """Validate GitLab instance URL if provided."""
+        if v is not None:
+            if not v.strip():
+                raise ValueError("Instance URL cannot be empty")
+            v = v.strip()
+            test_url = v if '://' in v else f'https://{v}'
+            try:
+                parsed = urlparse(test_url)
+                if not parsed.hostname:
+                    raise ValueError("Invalid URL: no hostname found")
+                return v
+            except Exception as e:
+                raise ValueError(f"Invalid URL format: {str(e)}")
+        return v
+
+    @field_validator('token')
+    @classmethod
+    def validate_token(cls, v):
+        """Validate token if provided."""
+        if v is not None and not v.strip():
+            raise ValueError("Access token cannot be empty")
+        return v.strip() if v else None
 
 
 class GitLabInstanceResponse(BaseModel):
