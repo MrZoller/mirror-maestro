@@ -71,7 +71,7 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 
 ### Project Structure
 ```
-gitlab-mirror-wizard/
+mirror-maestro/
 ├── app/
 │   ├── api/              # API route handlers
 │   │   ├── instances.py  # GitLab instance management
@@ -103,8 +103,8 @@ gitlab-mirror-wizard/
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/MrZoller/gitlab-mirror-wizard.git
-   cd gitlab-mirror-wizard
+   git clone https://github.com/MrZoller/mirror-maestro.git
+   cd mirror-maestro
    ```
 
 2. **Configure environment**
@@ -512,7 +512,7 @@ MIT License - see LICENSE file for details
 ## Support
 
 For issues, questions, or contributions:
-- GitHub Issues: [MrZoller/gitlab-mirror-wizard issues](https://github.com/MrZoller/gitlab-mirror-wizard/issues)
+- GitHub Issues: [MrZoller/mirror-maestro issues](https://github.com/MrZoller/mirror-maestro/issues)
 - Documentation: This README and inline code documentation
 
 ## Acknowledgments
