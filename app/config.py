@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Application Settings
-    app_title: str = "GitLab Mirror Wizard"
-    app_description: str = "Manage GitLab mirrors across multiple instance pairs"
+    app_title: str = "Mirror Maestro"
+    app_description: str = "Orchestrate GitLab mirrors across multiple instance pairs with precision"
 
 
 settings = Settings()

@@ -1,6 +1,6 @@
 # Screenshots
 
-This directory contains screenshots and demo HTML files for the GitLab Mirror Wizard application.
+This directory contains screenshots and demo HTML files for the Mirror Maestro application.
 
 ## Demo HTML Files
 

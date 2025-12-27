@@ -1,1 +1,1 @@
-# GitLab Mirror Wizard Application
+# Mirror Maestro Application
