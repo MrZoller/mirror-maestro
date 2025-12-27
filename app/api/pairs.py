@@ -1,8 +1,9 @@
 from typing import List
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.database import get_db
 from app.models import InstancePair, GitLabInstance, Mirror, GroupMirrorDefaults
@@ -25,6 +26,44 @@ class InstancePairCreate(BaseModel):
     mirror_user_id: int | None = None
     description: str = ""
 
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        """Validate pair name is not empty and has reasonable length."""
+        if not v or not v.strip():
+            raise ValueError("Pair name cannot be empty")
+        v = v.strip()
+        if len(v) > 200:
+            raise ValueError("Pair name must be 200 characters or less")
+        return v
+
+    @field_validator('mirror_direction')
+    @classmethod
+    def validate_direction(cls, v):
+        """Validate mirror direction is either 'push' or 'pull'."""
+        if v is not None and v.lower() not in ('push', 'pull'):
+            raise ValueError("Mirror direction must be 'push' or 'pull'")
+        return v.lower() if v else None
+
+    @field_validator('mirror_branch_regex')
+    @classmethod
+    def validate_branch_regex(cls, v):
+        """Validate that branch regex is valid regex syntax."""
+        if v is not None and v.strip():
+            try:
+                re.compile(v)
+            except re.error as e:
+                raise ValueError(f"Invalid regex pattern: {str(e)}")
+        return v
+
+    @field_validator('source_instance_id', 'target_instance_id')
+    @classmethod
+    def validate_instance_ids(cls, v):
+        """Validate instance IDs are positive."""
+        if v <= 0:
+            raise ValueError("Instance ID must be a positive integer")
+        return v
+
 
 class InstancePairUpdate(BaseModel):
     name: str | None = None
@@ -38,6 +77,45 @@ class InstancePairUpdate(BaseModel):
     mirror_branch_regex: str | None = None
     mirror_user_id: int | None = None
     description: str | None = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        """Validate pair name if provided."""
+        if v is not None:
+            if not v.strip():
+                raise ValueError("Pair name cannot be empty")
+            v = v.strip()
+            if len(v) > 200:
+                raise ValueError("Pair name must be 200 characters or less")
+        return v
+
+    @field_validator('mirror_direction')
+    @classmethod
+    def validate_direction(cls, v):
+        """Validate mirror direction if provided."""
+        if v is not None and v.lower() not in ('push', 'pull'):
+            raise ValueError("Mirror direction must be 'push' or 'pull'")
+        return v.lower() if v else None
+
+    @field_validator('mirror_branch_regex')
+    @classmethod
+    def validate_branch_regex(cls, v):
+        """Validate that branch regex is valid regex syntax if provided."""
+        if v is not None and v.strip():
+            try:
+                re.compile(v)
+            except re.error as e:
+                raise ValueError(f"Invalid regex pattern: {str(e)}")
+        return v
+
+    @field_validator('source_instance_id', 'target_instance_id')
+    @classmethod
+    def validate_instance_ids(cls, v):
+        """Validate instance IDs are positive if provided."""
+        if v is not None and v <= 0:
+            raise ValueError("Instance ID must be a positive integer")
+        return v
 
 
 class InstancePairResponse(BaseModel):
@@ -269,10 +347,27 @@ async def delete_pair(
 
     # Cascade-delete dependent entities (mirrors + group defaults) to avoid leaving
     # orphaned rows referencing this pair.
-    await db.execute(delete(Mirror).where(Mirror.instance_pair_id == pair_id))
-    await db.execute(delete(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id == pair_id))
+    #
+    # CRITICAL: All delete operations must succeed atomically or be rolled back together
+    try:
+        # Delete mirrors first (they reference the pair)
+        await db.execute(delete(Mirror).where(Mirror.instance_pair_id == pair_id))
+        # Delete group defaults (they reference the pair)
+        await db.execute(delete(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id == pair_id))
 
-    await db.delete(pair)
-    await db.commit()
+        # Finally delete the pair itself
+        await db.delete(pair)
+
+        # Commit all changes atomically
+        await db.commit()
+    except Exception as e:
+        # Rollback all changes if any operation fails to maintain data integrity
+        await db.rollback()
+        import logging
+        logging.error(f"Failed to delete instance pair {pair_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete instance pair. Database changes have been rolled back to maintain data integrity."
+        )
 
     return {"status": "deleted"}

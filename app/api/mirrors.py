@@ -1,8 +1,9 @@
 from typing import List
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from datetime import datetime
 
 from app.database import get_db
@@ -181,6 +182,40 @@ class MirrorCreate(BaseModel):
     mirror_user_id: int | None = None
     enabled: bool = True
 
+    @field_validator('mirror_direction')
+    @classmethod
+    def validate_direction(cls, v):
+        """Validate mirror direction is either 'push' or 'pull'."""
+        if v is not None and v.lower() not in ('push', 'pull'):
+            raise ValueError("Mirror direction must be 'push' or 'pull'")
+        return v.lower() if v else None
+
+    @field_validator('mirror_branch_regex')
+    @classmethod
+    def validate_branch_regex(cls, v):
+        """Validate that branch regex is valid regex syntax."""
+        if v is not None and v.strip():
+            try:
+                re.compile(v)
+            except re.error as e:
+                raise ValueError(f"Invalid regex pattern: {str(e)}")
+        return v
+
+    @field_validator('source_project_path', 'target_project_path')
+    @classmethod
+    def validate_project_path(cls, v):
+        """Validate GitLab project path format."""
+        if not v or not v.strip():
+            raise ValueError("Project path cannot be empty")
+        # Remove leading/trailing slashes
+        v = v.strip().strip('/')
+        if not v:
+            raise ValueError("Project path cannot be empty")
+        # GitLab paths should be namespace/project or namespace/subgroup/project
+        if not re.match(r'^[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)+$', v):
+            raise ValueError("Invalid GitLab project path format. Expected: 'namespace/project' or 'namespace/subgroup/project'")
+        return v
+
 
 class MirrorPreflight(BaseModel):
     """
@@ -193,6 +228,27 @@ class MirrorPreflight(BaseModel):
     target_project_id: int
     target_project_path: str
     mirror_direction: str | None = None
+
+    @field_validator('mirror_direction')
+    @classmethod
+    def validate_direction(cls, v):
+        """Validate mirror direction is either 'push' or 'pull'."""
+        if v is not None and v.lower() not in ('push', 'pull'):
+            raise ValueError("Mirror direction must be 'push' or 'pull'")
+        return v.lower() if v else None
+
+    @field_validator('source_project_path', 'target_project_path')
+    @classmethod
+    def validate_project_path(cls, v):
+        """Validate GitLab project path format."""
+        if not v or not v.strip():
+            raise ValueError("Project path cannot be empty")
+        v = v.strip().strip('/')
+        if not v:
+            raise ValueError("Project path cannot be empty")
+        if not re.match(r'^[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)+$', v):
+            raise ValueError("Invalid GitLab project path format. Expected: 'namespace/project' or 'namespace/subgroup/project'")
+        return v
 
 
 class MirrorPreflightResponse(BaseModel):
@@ -215,6 +271,27 @@ class MirrorRemoveExisting(BaseModel):
     mirror_direction: str | None = None
     remote_mirror_ids: list[int] | None = None
 
+    @field_validator('mirror_direction')
+    @classmethod
+    def validate_direction(cls, v):
+        """Validate mirror direction is either 'push' or 'pull'."""
+        if v is not None and v.lower() not in ('push', 'pull'):
+            raise ValueError("Mirror direction must be 'push' or 'pull'")
+        return v.lower() if v else None
+
+    @field_validator('source_project_path', 'target_project_path')
+    @classmethod
+    def validate_project_path(cls, v):
+        """Validate GitLab project path format."""
+        if not v or not v.strip():
+            raise ValueError("Project path cannot be empty")
+        v = v.strip().strip('/')
+        if not v:
+            raise ValueError("Project path cannot be empty")
+        if not re.match(r'^[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)+$', v):
+            raise ValueError("Invalid GitLab project path format. Expected: 'namespace/project' or 'namespace/subgroup/project'")
+        return v
+
 
 class MirrorUpdate(BaseModel):
     mirror_direction: str | None = None
@@ -225,6 +302,25 @@ class MirrorUpdate(BaseModel):
     mirror_branch_regex: str | None = None
     mirror_user_id: int | None = None
     enabled: bool | None = None
+
+    @field_validator('mirror_direction')
+    @classmethod
+    def validate_direction(cls, v):
+        """Validate mirror direction is either 'push' or 'pull'."""
+        if v is not None and v.lower() not in ('push', 'pull'):
+            raise ValueError("Mirror direction must be 'push' or 'pull'")
+        return v.lower() if v else None
+
+    @field_validator('mirror_branch_regex')
+    @classmethod
+    def validate_branch_regex(cls, v):
+        """Validate that branch regex is valid regex syntax."""
+        if v is not None and v.strip():
+            try:
+                re.compile(v)
+            except re.error as e:
+                raise ValueError(f"Invalid regex pattern: {str(e)}")
+        return v
 
 
 class MirrorResponse(BaseModel):
@@ -459,6 +555,26 @@ async def create_mirror(
 
     if not source_instance or not target_instance:
         raise HTTPException(status_code=404, detail="Source or target instance not found")
+
+    # Check for duplicate mirror (same pair + source + target projects)
+    duplicate_check = await db.execute(
+        select(Mirror).where(
+            Mirror.instance_pair_id == mirror.instance_pair_id,
+            Mirror.source_project_id == mirror.source_project_id,
+            Mirror.target_project_id == mirror.target_project_id
+        )
+    )
+    existing_mirror = duplicate_check.scalar_one_or_none()
+    if existing_mirror:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"Mirror already exists for this project pair",
+                "existing_mirror_id": existing_mirror.id,
+                "source_project": mirror.source_project_path,
+                "target_project": mirror.target_project_path
+            }
+        )
 
     group_defaults = await _get_group_defaults(
         db,
@@ -1023,6 +1139,10 @@ async def delete_mirror(
         raise HTTPException(status_code=404, detail="Mirror not found")
 
     # Try to delete from GitLab (best effort)
+    # If GitLab deletion fails, we still delete from database but warn the user
+    gitlab_cleanup_failed = False
+    gitlab_error_msg = None
+
     try:
         if mirror.mirror_id:
             pair_result = await db.execute(
@@ -1051,15 +1171,39 @@ async def delete_mirror(
                 instance = instance_result.scalar_one_or_none()
 
                 if instance:
+                    import logging
+                    logging.info(f"Attempting to delete GitLab mirror {mirror.mirror_id} from project {project_id} on {instance.url}")
                     client = GitLabClient(instance.url, instance.encrypted_token)
                     client.delete_mirror(project_id, mirror.mirror_id)
-    except Exception:
-        pass  # Continue even if GitLab deletion fails
+                    logging.info(f"Successfully deleted GitLab mirror {mirror.mirror_id}")
+                else:
+                    import logging
+                    logging.warning(f"GitLab instance not found for mirror {mirror_id}, skipping GitLab cleanup")
+                    gitlab_cleanup_failed = True
+                    gitlab_error_msg = "GitLab instance not found"
+            else:
+                import logging
+                logging.warning(f"Instance pair not found for mirror {mirror_id}, skipping GitLab cleanup")
+                gitlab_cleanup_failed = True
+                gitlab_error_msg = "Instance pair not found"
+    except Exception as e:
+        # Log the error but continue with database deletion
+        import logging
+        logging.error(f"Failed to delete mirror {mirror.mirror_id} from GitLab (project {project_id if 'project_id' in locals() else 'unknown'}): {str(e)}")
+        gitlab_cleanup_failed = True
+        gitlab_error_msg = str(e)
 
+    # Always delete from database
     await db.delete(mirror)
     await db.commit()
 
-    return {"status": "deleted"}
+    # Return status with warning if GitLab cleanup failed
+    response = {"status": "deleted"}
+    if gitlab_cleanup_failed:
+        response["warning"] = f"Mirror deleted from database, but GitLab cleanup failed: {gitlab_error_msg}. The mirror may still exist in GitLab and should be manually removed."
+        response["gitlab_cleanup_failed"] = True
+
+    return response
 
 
 @router.post("/{mirror_id}/update")
