@@ -112,6 +112,10 @@ async def _maybe_migrate_sqlite(conn) -> None:
         "group_mirror_defaults": {
             "index_name": "uq_group_mirror_defaults_pair_group",
             "columns": "(instance_pair_id, group_path)"
+        },
+        "mirrors": {
+            "index_name": "uq_mirror_pair_projects",
+            "columns": "(instance_pair_id, source_project_id, target_project_id)"
         }
     }
 
@@ -136,6 +140,15 @@ async def _maybe_migrate_sqlite(conn) -> None:
                         SELECT MAX(id)
                         FROM group_mirror_defaults
                         GROUP BY instance_pair_id, group_path
+                    )
+                """))
+            elif table == "mirrors":
+                await conn.execute(text("""
+                    DELETE FROM mirrors
+                    WHERE id NOT IN (
+                        SELECT MAX(id)
+                        FROM mirrors
+                        GROUP BY instance_pair_id, source_project_id, target_project_id
                     )
                 """))
 

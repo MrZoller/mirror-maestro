@@ -710,7 +710,17 @@ async function searchGroupsForGroupDefaults() {
     }
 }
 
-// API Helper
+// API Helper with enhanced error handling
+class APIError extends Error {
+    constructor(message, type = 'unknown', statusCode = 0, details = null) {
+        super(message);
+        this.name = 'APIError';
+        this.type = type; // 'network', 'validation', 'server', 'auth', 'unknown'
+        this.statusCode = statusCode;
+        this.details = details;
+    }
+}
+
 async function apiRequest(url, options = {}) {
     try {
         const response = await fetch(url, {
@@ -722,26 +732,235 @@ async function apiRequest(url, options = {}) {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Request failed');
+            let errorData;
+            let errorMessage = 'Request failed';
+            let errorType = 'server';
+
+            try {
+                errorData = await response.json();
+                errorMessage = errorData.detail || errorMessage;
+
+                // Handle complex error details (like conflict with existing_mirror_id)
+                if (typeof errorData.detail === 'object' && errorData.detail.message) {
+                    errorMessage = errorData.detail.message;
+                }
+            } catch (e) {
+                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            }
+
+            // Classify error type based on status code
+            if (response.status === 401 || response.status === 403) {
+                errorType = 'auth';
+            } else if (response.status === 400 || response.status === 409 || response.status === 422) {
+                errorType = 'validation';
+            } else if (response.status >= 500) {
+                errorType = 'server';
+            }
+
+            throw new APIError(errorMessage, errorType, response.status, errorData);
         }
 
         return await response.json();
     } catch (error) {
-        showMessage(error.message, 'error');
-        throw error;
+        if (error instanceof APIError) {
+            throw error;
+        }
+
+        // Network error (fetch failed completely)
+        if (error instanceof TypeError && error.message.includes('fetch')) {
+            throw new APIError(
+                'Network error. Please check your connection.',
+                'network',
+                0,
+                error
+            );
+        }
+
+        throw new APIError(
+            error.message || 'An unexpected error occurred',
+            'unknown',
+            0,
+            error
+        );
+    }
+}
+
+// Loading state management
+function showLoadingState(container, message = 'Loading...') {
+    if (typeof container === 'string') {
+        container = document.getElementById(container);
+    }
+    if (!container) return;
+
+    container.classList.add('loading-overlay');
+    container.setAttribute('aria-busy', 'true');
+}
+
+function hideLoadingState(container) {
+    if (typeof container === 'string') {
+        container = document.getElementById(container);
+    }
+    if (!container) return;
+
+    container.classList.remove('loading-overlay');
+    container.removeAttribute('aria-busy');
+}
+
+function showSkeletonLoader(container, rowCount = 3) {
+    if (typeof container === 'string') {
+        container = document.getElementById(container);
+    }
+    if (!container) return;
+
+    const skeletonHTML = Array(rowCount).fill(0).map(() => `
+        <div class="skeleton-row">
+            <div class="skeleton skeleton-cell"></div>
+            <div class="skeleton skeleton-cell"></div>
+            <div class="skeleton skeleton-cell"></div>
+        </div>
+    `).join('');
+
+    container.innerHTML = `<div class="skeleton-table">${skeletonHTML}</div>`;
+}
+
+function showEmptyState(container, title, message, actionButton = null) {
+    if (typeof container === 'string') {
+        container = document.getElementById(container);
+    }
+    if (!container) return;
+
+    let actionHTML = '';
+    if (actionButton) {
+        actionHTML = `
+            <div class="empty-state-action">
+                <button class="btn btn-primary" onclick="${actionButton.onclick}">
+                    ${escapeHtml(actionButton.label)}
+                </button>
+            </div>
+        `;
+    }
+
+    container.innerHTML = `
+        <div class="empty-state">
+            <div class="empty-state-icon">📦</div>
+            <div class="empty-state-title">${escapeHtml(title)}</div>
+            <div class="empty-state-message">${escapeHtml(message)}</div>
+            ${actionHTML}
+        </div>
+    `;
+}
+
+function showErrorState(container, error, retryCallback = null) {
+    if (typeof container === 'string') {
+        container = document.getElementById(container);
+    }
+    if (!container) return;
+
+    let errorTitle = 'Something went wrong';
+    let errorMessage = error.message || 'An unexpected error occurred';
+    let errorIcon = '⚠️';
+
+    // Customize based on error type
+    if (error instanceof APIError) {
+        switch (error.type) {
+            case 'network':
+                errorTitle = 'Connection Error';
+                errorIcon = '🔌';
+                break;
+            case 'auth':
+                errorTitle = 'Authentication Error';
+                errorMessage = 'Your session may have expired. Please refresh the page.';
+                errorIcon = '🔒';
+                break;
+            case 'validation':
+                errorTitle = 'Validation Error';
+                errorIcon = '✋';
+                break;
+            case 'server':
+                errorTitle = 'Server Error';
+                errorMessage += ' Please try again later.';
+                errorIcon = '❌';
+                break;
+        }
+    }
+
+    let retryHTML = '';
+    if (retryCallback) {
+        const retryId = `retry-${Math.random().toString(36).substr(2, 9)}`;
+        retryHTML = `
+            <button class="btn btn-retry" id="${retryId}">
+                Retry
+            </button>
+        `;
+
+        // Set up retry button after rendering
+        setTimeout(() => {
+            const btn = document.getElementById(retryId);
+            if (btn) {
+                btn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    btn.classList.add('loading');
+                    btn.disabled = true;
+                    try {
+                        await retryCallback();
+                    } finally {
+                        btn.classList.remove('loading');
+                        btn.disabled = false;
+                    }
+                });
+            }
+        }, 0);
+    }
+
+    container.innerHTML = `
+        <div class="error-state">
+            <div class="error-state-icon">${errorIcon}</div>
+            <div class="error-state-title">${escapeHtml(errorTitle)}</div>
+            <div class="error-state-message">${escapeHtml(errorMessage)}</div>
+            <div class="error-state-actions">
+                ${retryHTML}
+            </div>
+        </div>
+    `;
+}
+
+function showButtonLoading(button, isLoading = true) {
+    if (typeof button === 'string') {
+        button = document.getElementById(button);
+    }
+    if (!button) return;
+
+    if (isLoading) {
+        button.classList.add('loading');
+        button.disabled = true;
+        button.setAttribute('data-original-text', button.textContent);
+    } else {
+        button.classList.remove('loading');
+        button.disabled = false;
+        const originalText = button.getAttribute('data-original-text');
+        if (originalText) {
+            button.textContent = originalText;
+            button.removeAttribute('data-original-text');
+        }
     }
 }
 
 // GitLab Instances
 async function loadInstances() {
+    const container = document.getElementById('instances-list');
+    if (!container) return;
+
     try {
+        showSkeletonLoader(container, 3);
+
         const instances = await apiRequest('/api/instances');
         state.instances = instances;
         renderInstances(instances);
         updateInstanceSelectors();
     } catch (error) {
         console.error('Failed to load instances:', error);
+        showErrorState(container, error, loadInstances);
+        showMessage(error.message, 'error');
     }
 }
 
@@ -750,7 +969,12 @@ function renderInstances(instances) {
     if (!tbody) return;
 
     if (instances.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No instances configured</td></tr>';
+        showEmptyState(
+            tbody,
+            'No GitLab Instances',
+            'Get started by adding your first GitLab instance. You\'ll need the instance URL and an access token.',
+            null
+        );
         return;
     }
 
@@ -843,8 +1067,11 @@ async function saveInstanceEdit(id) {
     }
 }
 
-async function createInstance() {
+async function createInstance(event) {
+    if (event) event.preventDefault();
+
     const form = document.getElementById('instance-form');
+    const submitButton = form.querySelector('button[type="submit"]');
     const formData = new FormData(form);
 
     const data = {
@@ -855,6 +1082,8 @@ async function createInstance() {
     };
 
     try {
+        showButtonLoading(submitButton, true);
+
         await apiRequest('/api/instances', {
             method: 'POST',
             body: JSON.stringify(data)
@@ -865,6 +1094,13 @@ async function createInstance() {
         await loadInstances();
     } catch (error) {
         console.error('Failed to create instance:', error);
+        // Error message is already shown by showErrorState/showMessage
+        if (error instanceof APIError && error.type === 'validation') {
+            // Validation errors should keep the form filled so user can correct
+            return;
+        }
+    } finally {
+        showButtonLoading(submitButton, false);
     }
 }
 
@@ -918,13 +1154,20 @@ function updateInstanceSelectors() {
 
 // Instance Pairs
 async function loadPairs() {
+    const container = document.getElementById('pairs-list');
+    if (!container) return;
+
     try {
+        showSkeletonLoader(container, 3);
+
         const pairs = await apiRequest('/api/pairs');
         state.pairs = pairs;
         renderPairs(pairs);
         updatePairSelector();
     } catch (error) {
         console.error('Failed to load pairs:', error);
+        showErrorState(container, error, loadPairs);
+        showMessage(error.message, 'error');
     }
 }
 
@@ -933,7 +1176,12 @@ function renderPairs(pairs) {
     if (!tbody) return;
 
     if (pairs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No instance pairs configured</td></tr>';
+        showEmptyState(
+            tbody,
+            'No Instance Pairs',
+            'Create an instance pair to define the source and target for your mirrors.',
+            null
+        );
         return;
     }
 
@@ -1706,18 +1954,29 @@ async function deleteGroupDefaults(id) {
 
 // Mirrors
 async function loadMirrors() {
+    const container = document.getElementById('mirrors-list');
+    if (!container) return;
+
     if (!state.selectedPair) {
-        document.getElementById('mirrors-list').innerHTML =
-            '<tr><td colspan="7" class="text-center text-muted">Select an instance pair to view mirrors</td></tr>';
+        showEmptyState(
+            container,
+            'Select an Instance Pair',
+            'Choose an instance pair from the dropdown above to view and manage its mirrors.',
+            null
+        );
         return;
     }
 
     try {
+        showSkeletonLoader(container, 5);
+
         const mirrors = await apiRequest(`/api/mirrors?instance_pair_id=${state.selectedPair}`);
         state.mirrors = mirrors;
         renderMirrors(mirrors);
     } catch (error) {
         console.error('Failed to load mirrors:', error);
+        showErrorState(container, error, loadMirrors);
+        showMessage(error.message, 'error');
     }
 }
 
@@ -1726,7 +1985,12 @@ function renderMirrors(mirrors) {
     if (!tbody) return;
 
     if (mirrors.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No mirrors configured for this pair</td></tr>';
+        showEmptyState(
+            tbody,
+            'No Mirrors Yet',
+            'This instance pair doesn\'t have any mirrors configured. Create one using the form above.',
+            null
+        );
         return;
     }
 
@@ -2212,17 +2476,28 @@ async function createMirror() {
         // Preflight is best-effort; creation endpoint will still enforce pull mirror uniqueness.
     }
 
+    const submitButton = form.querySelector('button[type="submit"]');
+
     try {
+        showButtonLoading(submitButton, true);
+
         await apiRequest('/api/mirrors', {
             method: 'POST',
             body: JSON.stringify(data)
         });
 
         showMessage('Mirror created successfully', 'success');
-        document.getElementById('mirror-form').reset();
+        form.reset();
         await loadMirrors();
     } catch (error) {
         console.error('Failed to create mirror:', error);
+        // Error message already shown via apiRequest
+        if (error instanceof APIError && error.type === 'validation') {
+            // Keep form filled for validation errors
+            return;
+        }
+    } finally {
+        showButtonLoading(submitButton, false);
     }
 }
 
