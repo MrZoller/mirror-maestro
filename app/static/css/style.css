@@ -255,6 +255,14 @@ header p {
     font-family: inherit;
     transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
     background: var(--card-background);
+    color: var(--text-primary);
+}
+
+.form-group select option,
+.table-filter-select option,
+.table-select option {
+    background: var(--card-background);
+    color: var(--text-primary);
 }
 
 .form-group input:focus,
@@ -271,6 +279,12 @@ header p {
     background: rgba(17, 24, 39, 0.04);
     color: var(--text-secondary);
     cursor: not-allowed;
+}
+
+[data-theme="dark"] .form-group input:disabled,
+[data-theme="dark"] .form-group select:disabled,
+[data-theme="dark"] .form-group textarea:disabled {
+    background: rgba(255, 255, 255, 0.04);
 }
 
 .form-group textarea {
@@ -493,6 +507,7 @@ table thead tr.table-filter-row th {
     border-radius: 10px;
     font-size: 0.9rem;
     background: var(--card-background);
+    color: var(--text-primary);
 }
 
 .table-filter-input:focus,
@@ -534,6 +549,7 @@ table tbody tr:hover {
     font-size: 0.95rem;
     font-family: inherit;
     background: var(--card-background);
+    color: var(--text-primary);
     transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
