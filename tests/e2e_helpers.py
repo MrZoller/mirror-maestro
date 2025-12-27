@@ -22,6 +22,12 @@ def generate_run_id() -> str:
     return uuid.uuid4().hex[:10]
 
 
+def should_keep_resources() -> bool:
+    """Check if E2E_KEEP_RESOURCES is set to skip cleanup."""
+    import os
+    return (os.getenv("E2E_KEEP_RESOURCES") or "").lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass
 class ProjectContent:
     """Defines the content structure for a test project."""
@@ -78,7 +84,24 @@ class ResourceTracker:
         """
         Clean up all tracked resources in reverse order.
         Returns list of cleanup errors (if any).
+
+        If E2E_KEEP_RESOURCES=1 is set, skips cleanup and prints resource info instead.
         """
+        if should_keep_resources():
+            print("\n" + "=" * 60)
+            print("E2E_KEEP_RESOURCES=1 is set - SKIPPING CLEANUP")
+            print("The following resources were kept for manual inspection:")
+            print("=" * 60)
+            for resource in self._resources:
+                extra_info = ""
+                if resource.extra:
+                    extra_info = f" ({resource.extra})"
+                print(f"  [{resource.resource_type}] ID={resource.resource_id} @ {resource.instance_url}{extra_info}")
+            print("=" * 60)
+            print("To clean up manually, delete in this order: projects, then groups")
+            print("=" * 60 + "\n")
+            return []
+
         errors = []
         # Reverse order: projects before groups
         for resource in reversed(self._resources):
