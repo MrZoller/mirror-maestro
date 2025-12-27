@@ -1,6 +1,6 @@
-# GitLab Mirror Wizard
+# Mirror Maestro
 
-A modern web application for managing GitLab mirrors across multiple instance pairs. Streamline the process of viewing, creating, and maintaining a large set of GitLab mirrors with an intuitive web interface.
+Orchestrate GitLab mirrors across multiple instance pairs with precision. A modern web application that streamlines the process of viewing, creating, and maintaining a large set of GitLab mirrors with an intuitive web interface.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
@@ -71,7 +71,7 @@ A modern web application for managing GitLab mirrors across multiple instance pa
 
 ### Project Structure
 ```
-gitlab-mirror-wizard/
+mirror-maestro/
 ├── app/
 │   ├── api/              # API route handlers
 │   │   ├── instances.py  # GitLab instance management
@@ -103,8 +103,8 @@ gitlab-mirror-wizard/
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/MrZoller/gitlab-mirror-wizard.git
-   cd gitlab-mirror-wizard
+   git clone https://github.com/MrZoller/mirror-maestro.git
+   cd mirror-maestro
    ```
 
 2. **Configure environment**
@@ -178,8 +178,8 @@ AUTH_PASSWORD=changeme
 LOG_LEVEL=INFO
 
 # Application Settings
-APP_TITLE=GitLab Mirror Wizard
-APP_DESCRIPTION=Manage GitLab mirrors across multiple instance pairs
+APP_TITLE=Mirror Maestro
+APP_DESCRIPTION=Orchestrate GitLab mirrors across multiple instance pairs with precision
 ```
 
 ### GitLab Access Tokens
@@ -255,7 +255,7 @@ Define pairs of instances where mirrors will be created:
      - `write_repository` - Write access to repositories (for push mirrors)
    - Save the token value (you won't be able to see it again)
 
-2. In GitLab Mirror Wizard:
+2. In Mirror Maestro:
    - Go to the **Group Settings** tab
    - Click **Add Group Token**
    - Provide:
@@ -512,7 +512,7 @@ MIT License - see LICENSE file for details
 ## Support
 
 For issues, questions, or contributions:
-- GitHub Issues: [MrZoller/gitlab-mirror-wizard issues](https://github.com/MrZoller/gitlab-mirror-wizard/issues)
+- GitHub Issues: [MrZoller/mirror-maestro issues](https://github.com/MrZoller/mirror-maestro/issues)
 - Documentation: This README and inline code documentation
 
 ## Acknowledgments

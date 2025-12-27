@@ -1,7 +1,7 @@
 [project]
-name = "gitlab-mirror-wizard"
+name = "mirror-maestro"
 version = "0.1.0"
-description = "A modern web interface for managing GitLab mirrors across multiple instance pairs"
+description = "Orchestrate GitLab mirrors across multiple instance pairs with precision"
 authors = [{name = "MrZoller"}]
 requires-python = ">=3.11"
 dependencies = [
