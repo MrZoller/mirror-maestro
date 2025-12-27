@@ -1,17 +1,21 @@
 from typing import List
 import re
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, field_validator
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.database import get_db
-from app.models import Mirror, InstancePair, GitLabInstance, GroupAccessToken, GroupMirrorDefaults
+from app.models import Mirror, InstancePair, GitLabInstance
 from app.core.auth import verify_credentials
 from app.core.gitlab_client import GitLabClient
 from app.core.encryption import encryption
 from urllib.parse import urlparse, quote
+
+# Token expiration: 1 year from creation
+TOKEN_EXPIRY_DAYS = 365
 
 
 router = APIRouter(prefix="/api/mirrors", tags=["mirrors"])
@@ -46,20 +50,17 @@ def _build_git_url(*, scheme: str, hostname: str, port: int | None, project_path
     return f"{scheme}://{userinfo}{hostport}/{safe_path}.git"
 
 
-async def get_authenticated_url(
-    db: AsyncSession,
+def build_authenticated_url(
     instance: GitLabInstance,
-    project_path: str
+    project_path: str,
+    token_name: str | None = None,
+    token_value: str | None = None,
 ) -> str:
     """
     Build an authenticated Git URL for mirroring.
 
-    Supports multi-level group paths by searching for tokens from most specific
-    to least specific. For example, for "platform/core/api-gateway":
-    1. Try "platform/core" (parent group, excluding project name)
-    2. Try "platform" (top-level group)
-
-    This allows tokens to be created at any level of the group hierarchy.
+    If token_name and token_value are provided, builds an authenticated URL.
+    Otherwise, builds an unauthenticated URL.
     """
     # Parse the instance URL first
     parsed = urlparse(_normalize_instance_url(instance.url))
@@ -72,99 +73,19 @@ async def get_authenticated_url(
     if not hostname:
         raise HTTPException(status_code=400, detail="Invalid GitLab instance URL")
 
-    # Extract group path from project path
-    # For "platform/core/api-gateway", parts are ["platform", "core", "api-gateway"]
-    path_parts = project_path.split("/")
-
-    # The last part is the project name, everything before is the namespace/group
-    if len(path_parts) < 2:
-        # Single-level project (no group), unlikely to have a token
-        return _build_git_url(scheme=scheme, hostname=hostname, port=port, project_path=project_path)
-
-    # Try to find a token, starting from the most specific group path
-    # For "platform/core/api-gateway", try: "platform/core", then "platform"
-    group_token = None
-    for i in range(len(path_parts) - 1, 0, -1):
-        candidate_group_path = "/".join(path_parts[:i])
-
-        token_result = await db.execute(
-            select(GroupAccessToken).where(
-                GroupAccessToken.gitlab_instance_id == instance.id,
-                GroupAccessToken.group_path == candidate_group_path
-            )
-        )
-        group_token = token_result.scalar_one_or_none()
-
-        if group_token:
-            # Found a token at this level
-            break
-
-    if group_token:
-        # Decrypt the token
-        token_value = encryption.decrypt(group_token.encrypted_token)
-        # Build authenticated URL: https://token_name:token@hostname/path.git
-        # NOTE: userinfo must be percent-encoded to avoid URL corruption/injection.
+    if token_name and token_value:
         return _build_git_url(
             scheme=scheme,
             hostname=hostname,
             port=port,
             project_path=project_path,
-            username=group_token.token_name,
+            username=token_name,
             password=token_value,
         )
     else:
-        # No token found at any level - return unauthenticated URL
-        # In production, you might want to raise an exception here
         return _build_git_url(scheme=scheme, hostname=hostname, port=port, project_path=project_path)
 
 
-def _namespace_candidates(project_path: str) -> list[str]:
-    """
-    For "platform/core/api-gateway" return ["platform/core", "platform"].
-    Returns [] for projects without a namespace.
-    """
-    parts = [p for p in (project_path or "").split("/") if p]
-    if len(parts) < 2:
-        return []
-    ns_parts = parts[:-1]
-    out: list[str] = []
-    for i in range(len(ns_parts), 0, -1):
-        out.append("/".join(ns_parts[:i]))
-    return out
-
-
-async def _get_group_defaults(
-    db: AsyncSession,
-    *,
-    instance_pair_id: int,
-    source_project_path: str,
-    target_project_path: str,
-) -> GroupMirrorDefaults | None:
-    """
-    Find the most specific group defaults for this pair.
-
-    We check both source and target namespaces (most specific -> least), since
-    users may mirror across different namespaces.
-    """
-    candidates: list[str] = []
-    seen: set[str] = set()
-    for c in _namespace_candidates(source_project_path) + _namespace_candidates(target_project_path):
-        if c in seen:
-            continue
-        seen.add(c)
-        candidates.append(c)
-
-    for group_path in candidates:
-        res = await db.execute(
-            select(GroupMirrorDefaults).where(
-                GroupMirrorDefaults.instance_pair_id == instance_pair_id,
-                GroupMirrorDefaults.group_path == group_path,
-            )
-        )
-        row = res.scalar_one_or_none()
-        if row:
-            return row
-    return None
 
 
 class MirrorCreate(BaseModel):
@@ -337,7 +258,7 @@ class MirrorResponse(BaseModel):
     only_mirror_protected_branches: bool | None
     mirror_branch_regex: str | None
     mirror_user_id: int | None
-    # Effective settings (mirror overrides -> group defaults -> pair defaults)
+    # Effective settings (mirror overrides -> pair defaults)
     effective_mirror_direction: str | None = None
     effective_mirror_overwrite_diverged: bool | None = None
     effective_mirror_trigger_builds: bool | None = None
@@ -348,10 +269,26 @@ class MirrorResponse(BaseModel):
     last_successful_update: str | None
     last_update_status: str | None
     enabled: bool
+    # Token status fields
+    mirror_token_expires_at: str | None = None
+    token_status: str | None = None  # "active", "expiring_soon", "expired", "none"
     created_at: str
     updated_at: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def _compute_token_status(expires_at: datetime | None) -> str:
+    """Compute token status based on expiration date."""
+    if expires_at is None:
+        return "none"
+    now = datetime.utcnow()
+    if expires_at <= now:
+        return "expired"
+    elif expires_at <= now + timedelta(days=30):
+        return "expiring_soon"
+    else:
+        return "active"
 
 
 async def _resolve_effective_settings(
@@ -364,69 +301,39 @@ async def _resolve_effective_settings(
 ) -> dict[str, object]:
     """
     Compute the effective mirror settings as the tool will apply them:
-    mirror overrides -> group defaults -> pair defaults (+ pull mirror user fallback).
+    mirror overrides -> pair defaults (+ pull mirror user fallback).
 
     Note: some settings are pull-only in GitLab and are intentionally treated as
     not applicable for push mirrors.
     """
-    group_defaults = await _get_group_defaults(
-        db,
-        instance_pair_id=pair.id,
-        source_project_path=mirror.source_project_path,
-        target_project_path=mirror.target_project_path,
-    )
-
-    direction = (
-        mirror.mirror_direction
-        or (group_defaults.mirror_direction if group_defaults else None)
-        or pair.mirror_direction
-    )
+    # Two-tier resolution: mirror -> pair
+    direction = mirror.mirror_direction or pair.mirror_direction
     direction = (direction or "").lower()
 
     overwrite_diverged = (
         mirror.mirror_overwrite_diverged
         if mirror.mirror_overwrite_diverged is not None
-        else (
-            group_defaults.mirror_overwrite_diverged
-            if group_defaults and group_defaults.mirror_overwrite_diverged is not None
-            else pair.mirror_overwrite_diverged
-        )
+        else pair.mirror_overwrite_diverged
     )
     only_protected = (
         mirror.only_mirror_protected_branches
         if mirror.only_mirror_protected_branches is not None
-        else (
-            group_defaults.only_mirror_protected_branches
-            if group_defaults and group_defaults.only_mirror_protected_branches is not None
-            else pair.only_mirror_protected_branches
-        )
+        else pair.only_mirror_protected_branches
     )
     trigger_builds = (
         mirror.mirror_trigger_builds
         if mirror.mirror_trigger_builds is not None
-        else (
-            group_defaults.mirror_trigger_builds
-            if group_defaults and group_defaults.mirror_trigger_builds is not None
-            else pair.mirror_trigger_builds
-        )
+        else pair.mirror_trigger_builds
     )
     branch_regex = (
         mirror.mirror_branch_regex
         if mirror.mirror_branch_regex is not None
-        else (
-            group_defaults.mirror_branch_regex
-            if group_defaults and group_defaults.mirror_branch_regex is not None
-            else pair.mirror_branch_regex
-        )
+        else pair.mirror_branch_regex
     )
     mirror_user_id = (
         mirror.mirror_user_id
         if mirror.mirror_user_id is not None
-        else (
-            group_defaults.mirror_user_id
-            if group_defaults and group_defaults.mirror_user_id is not None
-            else pair.mirror_user_id
-        )
+        else pair.mirror_user_id
     )
 
     # Pull-only settings: if direction is push, treat as not applicable.
@@ -518,6 +425,8 @@ async def list_mirrors(
                 last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
                 last_update_status=mirror.last_update_status,
                 enabled=mirror.enabled,
+                mirror_token_expires_at=mirror.mirror_token_expires_at.isoformat() if mirror.mirror_token_expires_at else None,
+                token_status=_compute_token_status(mirror.mirror_token_expires_at),
                 created_at=mirror.created_at.isoformat(),
                 updated_at=mirror.updated_at.isoformat(),
                 **eff,
@@ -533,7 +442,7 @@ async def create_mirror(
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
-    """Create a new mirror."""
+    """Create a new mirror with automatic project access token."""
     # Get the instance pair
     pair_result = await db.execute(
         select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
@@ -576,19 +485,8 @@ async def create_mirror(
             }
         )
 
-    group_defaults = await _get_group_defaults(
-        db,
-        instance_pair_id=pair.id,
-        source_project_path=mirror.source_project_path,
-        target_project_path=mirror.target_project_path,
-    )
-
-    # Effective defaults: mirror overrides -> group overrides -> pair defaults
-    direction = (
-        mirror.mirror_direction
-        or (group_defaults.mirror_direction if group_defaults else None)
-        or pair.mirror_direction
-    )
+    # Two-tier resolution: mirror overrides -> pair defaults
+    direction = mirror.mirror_direction or pair.mirror_direction
 
     # Validate direction is set and valid
     if not direction or direction not in ("push", "pull"):
@@ -600,36 +498,92 @@ async def create_mirror(
     protected_branches = (
         mirror.mirror_protected_branches
         if mirror.mirror_protected_branches is not None
-        else (group_defaults.mirror_protected_branches if group_defaults and group_defaults.mirror_protected_branches is not None else pair.mirror_protected_branches)
+        else pair.mirror_protected_branches
     )
     overwrite_diverged = (
         mirror.mirror_overwrite_diverged
         if mirror.mirror_overwrite_diverged is not None
-        else (group_defaults.mirror_overwrite_diverged if group_defaults and group_defaults.mirror_overwrite_diverged is not None else pair.mirror_overwrite_diverged)
+        else pair.mirror_overwrite_diverged
     )
     trigger_builds = (
         mirror.mirror_trigger_builds
         if mirror.mirror_trigger_builds is not None
-        else (group_defaults.mirror_trigger_builds if group_defaults and group_defaults.mirror_trigger_builds is not None else pair.mirror_trigger_builds)
+        else pair.mirror_trigger_builds
     )
     only_protected = (
         mirror.only_mirror_protected_branches
         if mirror.only_mirror_protected_branches is not None
-        else (group_defaults.only_mirror_protected_branches if group_defaults and group_defaults.only_mirror_protected_branches is not None else pair.only_mirror_protected_branches)
+        else pair.only_mirror_protected_branches
     )
     branch_regex = (
         mirror.mirror_branch_regex
         if mirror.mirror_branch_regex is not None
-        else (group_defaults.mirror_branch_regex if group_defaults and group_defaults.mirror_branch_regex is not None else pair.mirror_branch_regex)
+        else pair.mirror_branch_regex
     )
-    mirror_user_id = (
+    mirror_user_id_setting = (
         mirror.mirror_user_id
         if mirror.mirror_user_id is not None
-        else (group_defaults.mirror_user_id if group_defaults and group_defaults.mirror_user_id is not None else pair.mirror_user_id)
+        else pair.mirror_user_id
     )
     # If nothing set anywhere, prefer the API token's user for pull mirrors.
-    if mirror_user_id is None and direction == "pull":
-        mirror_user_id = target_instance.api_user_id
+    if mirror_user_id_setting is None and direction == "pull":
+        mirror_user_id_setting = target_instance.api_user_id
+
+    # Determine which project needs the token and create it
+    # Push: token on target (allows pushing to it)
+    # Pull: token on source (allows reading from it)
+    if direction == "push":
+        token_instance = target_instance
+        token_project_id = mirror.target_project_id
+        token_project_path = mirror.target_project_path
+        token_scopes = ["write_repository"]
+    else:
+        token_instance = source_instance
+        token_project_id = mirror.source_project_id
+        token_project_path = mirror.source_project_path
+        token_scopes = ["read_repository"]
+
+    # Calculate token expiration (1 year from now)
+    token_expires_at = datetime.utcnow() + timedelta(days=TOKEN_EXPIRY_DAYS)
+    token_expires_str = token_expires_at.strftime("%Y-%m-%d")
+
+    # Create project access token
+    token_info = None
+    encrypted_token = None
+    gitlab_token_id = None
+    token_name = None
+
+    try:
+        token_client = GitLabClient(token_instance.url, token_instance.encrypted_token)
+        # Use a unique token name that includes a timestamp for uniqueness
+        token_name = f"mirror-maestro-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        token_info = token_client.create_project_access_token(
+            project_id=token_project_id,
+            name=token_name,
+            scopes=token_scopes,
+            expires_at=token_expires_str,
+        )
+        gitlab_token_id = token_info.get("id")
+        plaintext_token = token_info.get("token")
+        if plaintext_token:
+            encrypted_token = encryption.encrypt(plaintext_token)
+        logging.info(f"Created project access token '{token_name}' on project {token_project_id}")
+    except Exception as e:
+        logging.warning(f"Failed to create project access token: {str(e)}. Mirror will be created without token.")
+        # Continue without token - mirror may still work if project is public or using SSH
+
+    # Build authenticated URL using the new token
+    if encrypted_token:
+        token_value = encryption.decrypt(encrypted_token)
+        remote_url = build_authenticated_url(
+            token_instance,
+            token_project_path,
+            token_name=token_name,
+            token_value=token_value,
+        )
+    else:
+        # No token - build unauthenticated URL
+        remote_url = build_authenticated_url(token_instance, token_project_path)
 
     # Create the mirror in GitLab
     gitlab_mirror_id = None
@@ -637,11 +591,9 @@ async def create_mirror(
         if direction == "push":
             # For push mirrors, configure on source to push to target
             client = GitLabClient(source_instance.url, source_instance.encrypted_token)
-            # Build authenticated target URL with group access token
-            target_url = await get_authenticated_url(db, target_instance, mirror.target_project_path)
             result = client.create_push_mirror(
                 mirror.source_project_id,
-                target_url,
+                remote_url,
                 enabled=mirror.enabled,
                 keep_divergent_refs=not overwrite_diverged,
                 only_protected_branches=only_protected,
@@ -655,6 +607,12 @@ async def create_mirror(
             existing = client.get_project_mirrors(mirror.target_project_id)
             existing_pull = [m for m in (existing or []) if str(m.get("mirror_direction") or "").lower() == "pull"]
             if existing_pull:
+                # Cleanup the token we just created
+                if gitlab_token_id:
+                    try:
+                        token_client.delete_project_access_token(token_project_id, gitlab_token_id)
+                    except Exception:
+                        logging.warning(f"Failed to cleanup token {gitlab_token_id} after mirror conflict")
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -667,24 +625,26 @@ async def create_mirror(
                     },
                 )
 
-            # Build authenticated source URL with group access token
-            source_url = await get_authenticated_url(db, source_instance, mirror.source_project_path)
             result = client.create_pull_mirror(
                 mirror.target_project_id,
-                source_url,
+                remote_url,
                 enabled=mirror.enabled,
                 only_protected_branches=only_protected,
                 keep_divergent_refs=not overwrite_diverged,
                 trigger_builds=trigger_builds,
                 mirror_branch_regex=branch_regex,
-                mirror_user_id=mirror_user_id,
+                mirror_user_id=mirror_user_id_setting,
             )
             gitlab_mirror_id = result.get("id")
     except HTTPException:
         raise
     except Exception as e:
-        # Log the full error but return a generic message to avoid exposing sensitive details
-        import logging
+        # Cleanup the token we created
+        if gitlab_token_id:
+            try:
+                token_client.delete_project_access_token(token_project_id, gitlab_token_id)
+            except Exception:
+                logging.warning(f"Failed to cleanup token {gitlab_token_id} after mirror creation failed")
         logging.error(f"Failed to create mirror in GitLab: {str(e)}")
         raise HTTPException(
             status_code=500,
@@ -692,14 +652,14 @@ async def create_mirror(
         )
 
     # Create the mirror record in database
-    # CRITICAL: If DB commit fails, we must clean up the GitLab mirror to prevent orphaned resources
+    # CRITICAL: If DB commit fails, we must clean up the GitLab mirror and token
     db_mirror = Mirror(
         instance_pair_id=mirror.instance_pair_id,
         source_project_id=mirror.source_project_id,
         source_project_path=mirror.source_project_path,
         target_project_id=mirror.target_project_id,
         target_project_path=mirror.target_project_path,
-        # Persist resolved direction to avoid ambiguity if pair/group defaults change later.
+        # Persist resolved direction to avoid ambiguity if pair defaults change later.
         mirror_direction=direction,
         mirror_protected_branches=mirror.mirror_protected_branches,
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
@@ -709,7 +669,13 @@ async def create_mirror(
         mirror_user_id=mirror.mirror_user_id,
         mirror_id=gitlab_mirror_id,
         enabled=mirror.enabled,
-        last_update_status="pending"
+        last_update_status="pending",
+        # Token fields
+        encrypted_mirror_token=encrypted_token,
+        mirror_token_name=token_name,
+        mirror_token_expires_at=token_expires_at if encrypted_token else None,
+        gitlab_token_id=gitlab_token_id,
+        token_project_id=token_project_id,
     )
     db.add(db_mirror)
 
@@ -720,29 +686,31 @@ async def create_mirror(
         # Rollback the failed transaction
         await db.rollback()
 
-        # Cleanup: Delete the GitLab mirror that was just created to prevent orphaned resource
+        logging.warning(f"Database commit failed. Attempting cleanup...")
+
+        # Cleanup: Delete the GitLab mirror that was just created
         if gitlab_mirror_id:
             try:
-                import logging
-                logging.warning(f"Database commit failed after creating GitLab mirror {gitlab_mirror_id}. Attempting cleanup...")
-
-                # Determine which instance has the mirror
                 cleanup_instance = source_instance if direction == "push" else target_instance
                 cleanup_project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
-
                 cleanup_client = GitLabClient(cleanup_instance.url, cleanup_instance.encrypted_token)
                 cleanup_client.delete_mirror(cleanup_project_id, gitlab_mirror_id)
                 logging.info(f"Successfully cleaned up orphaned GitLab mirror {gitlab_mirror_id}")
             except Exception as cleanup_error:
-                # Log but don't fail - the original DB error is more important
-                logging.error(f"Failed to cleanup GitLab mirror {gitlab_mirror_id} after DB error: {str(cleanup_error)}")
+                logging.error(f"Failed to cleanup GitLab mirror {gitlab_mirror_id}: {str(cleanup_error)}")
 
-        # Re-raise the original database error
-        import logging
+        # Cleanup: Delete the project access token
+        if gitlab_token_id:
+            try:
+                token_client.delete_project_access_token(token_project_id, gitlab_token_id)
+                logging.info(f"Successfully cleaned up orphaned token {gitlab_token_id}")
+            except Exception as cleanup_error:
+                logging.error(f"Failed to cleanup token {gitlab_token_id}: {str(cleanup_error)}")
+
         logging.error(f"Failed to save mirror to database: {str(db_error)}")
         raise HTTPException(
             status_code=500,
-            detail="Failed to save mirror to database. GitLab mirror has been cleaned up."
+            detail="Failed to save mirror to database. GitLab resources have been cleaned up."
         )
 
     return MirrorResponse(
@@ -764,11 +732,13 @@ async def create_mirror(
         effective_mirror_trigger_builds=trigger_builds if direction == "pull" else None,
         effective_only_mirror_protected_branches=only_protected,
         effective_mirror_branch_regex=branch_regex if direction == "pull" else None,
-        effective_mirror_user_id=mirror_user_id if direction == "pull" else None,
+        effective_mirror_user_id=mirror_user_id_setting if direction == "pull" else None,
         mirror_id=db_mirror.mirror_id,
         last_successful_update=db_mirror.last_successful_update.isoformat() if db_mirror.last_successful_update else None,
         last_update_status=db_mirror.last_update_status,
         enabled=db_mirror.enabled,
+        mirror_token_expires_at=db_mirror.mirror_token_expires_at.isoformat() if db_mirror.mirror_token_expires_at else None,
+        token_status=_compute_token_status(db_mirror.mirror_token_expires_at),
         created_at=db_mirror.created_at.isoformat(),
         updated_at=db_mirror.updated_at.isoformat()
     )
@@ -798,19 +768,8 @@ async def preflight_mirror(
     if not source_instance or not target_instance:
         raise HTTPException(status_code=404, detail="Source or target instance not found")
 
-    group_defaults = await _get_group_defaults(
-        db,
-        instance_pair_id=pair.id,
-        source_project_path=req.source_project_path,
-        target_project_path=req.target_project_path,
-    )
-
-    direction = (
-        req.mirror_direction
-        or (group_defaults.mirror_direction if group_defaults else None)
-        or pair.mirror_direction
-        or "pull"
-    )
+    # Two-tier resolution: request -> pair
+    direction = req.mirror_direction or pair.mirror_direction or "pull"
     direction = (direction or "pull").lower()
 
     owner_project_id = req.source_project_id if direction == "push" else req.target_project_id
@@ -847,19 +806,8 @@ async def remove_existing_gitlab_mirrors(
     if not source_instance or not target_instance:
         raise HTTPException(status_code=404, detail="Source or target instance not found")
 
-    group_defaults = await _get_group_defaults(
-        db,
-        instance_pair_id=pair.id,
-        source_project_path=req.source_project_path,
-        target_project_path=req.target_project_path,
-    )
-
-    direction = (
-        req.mirror_direction
-        or (group_defaults.mirror_direction if group_defaults else None)
-        or pair.mirror_direction
-        or "pull"
-    )
+    # Two-tier resolution: request -> pair
+    direction = req.mirror_direction or pair.mirror_direction or "pull"
     direction = (direction or "pull").lower()
 
     owner_project_id = req.source_project_id if direction == "push" else req.target_project_id
@@ -942,6 +890,8 @@ async def get_mirror(
         last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
         last_update_status=mirror.last_update_status,
         enabled=mirror.enabled,
+        mirror_token_expires_at=mirror.mirror_token_expires_at.isoformat() if mirror.mirror_token_expires_at else None,
+        token_status=_compute_token_status(mirror.mirror_token_expires_at),
         created_at=mirror.created_at.isoformat(),
         updated_at=mirror.updated_at.isoformat(),
         **eff,
@@ -1001,18 +951,8 @@ async def update_mirror(
             if not pair:
                 raise HTTPException(status_code=404, detail="Instance pair not found")
 
-            group_defaults = await _get_group_defaults(
-                db,
-                instance_pair_id=pair.id,
-                source_project_path=mirror.source_project_path,
-                target_project_path=mirror.target_project_path,
-            )
-
-            direction = (
-                mirror.mirror_direction
-                or (group_defaults.mirror_direction if group_defaults else None)
-                or pair.mirror_direction
-            )
+            # Two-tier resolution: mirror -> pair
+            direction = mirror.mirror_direction or pair.mirror_direction
 
             # Resolve which GitLab project holds the remote mirror entry.
             instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
@@ -1025,31 +965,31 @@ async def update_mirror(
             if not instance:
                 raise HTTPException(status_code=404, detail="GitLab instance not found")
 
-            # Effective settings: mirror overrides -> group overrides -> pair defaults.
+            # Effective settings: mirror overrides -> pair defaults.
             overwrite_diverged = (
                 mirror.mirror_overwrite_diverged
                 if mirror.mirror_overwrite_diverged is not None
-                else (group_defaults.mirror_overwrite_diverged if group_defaults and group_defaults.mirror_overwrite_diverged is not None else pair.mirror_overwrite_diverged)
+                else pair.mirror_overwrite_diverged
             )
             only_protected = (
                 mirror.only_mirror_protected_branches
                 if mirror.only_mirror_protected_branches is not None
-                else (group_defaults.only_mirror_protected_branches if group_defaults and group_defaults.only_mirror_protected_branches is not None else pair.only_mirror_protected_branches)
+                else pair.only_mirror_protected_branches
             )
             trigger_builds = (
                 mirror.mirror_trigger_builds
                 if mirror.mirror_trigger_builds is not None
-                else (group_defaults.mirror_trigger_builds if group_defaults and group_defaults.mirror_trigger_builds is not None else pair.mirror_trigger_builds)
+                else pair.mirror_trigger_builds
             )
             branch_regex = (
                 mirror.mirror_branch_regex
                 if mirror.mirror_branch_regex is not None
-                else (group_defaults.mirror_branch_regex if group_defaults and group_defaults.mirror_branch_regex is not None else pair.mirror_branch_regex)
+                else pair.mirror_branch_regex
             )
             mirror_user_id = (
                 mirror.mirror_user_id
                 if mirror.mirror_user_id is not None
-                else (group_defaults.mirror_user_id if group_defaults and group_defaults.mirror_user_id is not None else pair.mirror_user_id)
+                else pair.mirror_user_id
             )
             if mirror_user_id is None and direction == "pull":
                 mirror_user_id = instance.api_user_id
@@ -1151,17 +1091,8 @@ async def delete_mirror(
             pair = pair_result.scalar_one_or_none()
 
             if pair:
-                group_defaults = await _get_group_defaults(
-                    db,
-                    instance_pair_id=pair.id,
-                    source_project_path=mirror.source_project_path,
-                    target_project_path=mirror.target_project_path,
-                )
-                direction = (
-                    mirror.mirror_direction
-                    or (group_defaults.mirror_direction if group_defaults else None)
-                    or pair.mirror_direction
-                )
+                # Two-tier resolution: mirror → pair
+                direction = mirror.mirror_direction or pair.mirror_direction
                 instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
                 project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
 
@@ -1193,15 +1124,60 @@ async def delete_mirror(
         gitlab_cleanup_failed = True
         gitlab_error_msg = str(e)
 
+    # Try to delete project access token (best effort)
+    token_cleanup_failed = False
+    token_error_msg = None
+
+    if mirror.gitlab_token_id and mirror.token_project_id:
+        try:
+            # Get the instance that has the token
+            pair_result = await db.execute(
+                select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+            )
+            pair = pair_result.scalar_one_or_none()
+
+            if pair:
+                direction = mirror.mirror_direction or pair.mirror_direction
+                # Token is on the "remote" project: target for push, source for pull
+                token_instance_id = pair.target_instance_id if direction == "push" else pair.source_instance_id
+
+                instance_result = await db.execute(
+                    select(GitLabInstance).where(GitLabInstance.id == token_instance_id)
+                )
+                token_instance = instance_result.scalar_one_or_none()
+
+                if token_instance:
+                    import logging
+                    logging.info(f"Deleting project access token {mirror.gitlab_token_id} from project {mirror.token_project_id}")
+                    token_client = GitLabClient(token_instance.url, token_instance.encrypted_token)
+                    token_client.delete_project_access_token(mirror.token_project_id, mirror.gitlab_token_id)
+                    logging.info(f"Successfully deleted project access token {mirror.gitlab_token_id}")
+                else:
+                    import logging
+                    logging.warning(f"Token instance not found for mirror {mirror_id}, token may be orphaned")
+                    token_cleanup_failed = True
+                    token_error_msg = "Token instance not found"
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to delete project access token {mirror.gitlab_token_id}: {str(e)}")
+            token_cleanup_failed = True
+            token_error_msg = str(e)
+
     # Always delete from database
     await db.delete(mirror)
     await db.commit()
 
-    # Return status with warning if GitLab cleanup failed
+    # Return status with warnings if cleanup failed
     response = {"status": "deleted"}
+    warnings = []
     if gitlab_cleanup_failed:
-        response["warning"] = f"Mirror deleted from database, but GitLab cleanup failed: {gitlab_error_msg}. The mirror may still exist in GitLab and should be manually removed."
+        warnings.append(f"GitLab mirror cleanup failed: {gitlab_error_msg}. The mirror may still exist in GitLab.")
         response["gitlab_cleanup_failed"] = True
+    if token_cleanup_failed:
+        warnings.append(f"Token cleanup failed: {token_error_msg}. The token may still exist in GitLab.")
+        response["token_cleanup_failed"] = True
+    if warnings:
+        response["warning"] = " ".join(warnings)
 
     return response
 
@@ -1233,17 +1209,8 @@ async def trigger_mirror_update(
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
 
-    group_defaults = await _get_group_defaults(
-        db,
-        instance_pair_id=pair.id,
-        source_project_path=mirror.source_project_path,
-        target_project_path=mirror.target_project_path,
-    )
-    direction = (
-        mirror.mirror_direction
-        or (group_defaults.mirror_direction if group_defaults else None)
-        or pair.mirror_direction
-    )
+    # Two-tier resolution: mirror → pair
+    direction = mirror.mirror_direction or pair.mirror_direction
     instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
     project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
 
@@ -1271,3 +1238,145 @@ async def trigger_mirror_update(
             status_code=500,
             detail="Failed to trigger mirror update. Check server logs for details."
         )
+
+
+@router.post("/{mirror_id}/rotate-token")
+async def rotate_mirror_token(
+    mirror_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials)
+):
+    """
+    Rotate the project access token for this mirror.
+
+    This creates a new token and updates the mirror configuration in GitLab.
+    The old token is automatically revoked.
+    """
+    import logging
+
+    result = await db.execute(
+        select(Mirror).where(Mirror.id == mirror_id)
+    )
+    mirror = result.scalar_one_or_none()
+
+    if not mirror:
+        raise HTTPException(status_code=404, detail="Mirror not found")
+
+    # Get instance pair
+    pair_result = await db.execute(
+        select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+    )
+    pair = pair_result.scalar_one_or_none()
+
+    if not pair:
+        raise HTTPException(status_code=404, detail="Instance pair not found")
+
+    # Two-tier resolution: mirror → pair
+    direction = mirror.mirror_direction or pair.mirror_direction
+
+    # Get both instances
+    source_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id)
+    )
+    source_instance = source_result.scalar_one_or_none()
+
+    target_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id)
+    )
+    target_instance = target_result.scalar_one_or_none()
+
+    if not source_instance or not target_instance:
+        raise HTTPException(status_code=404, detail="GitLab instance not found")
+
+    # Determine which project gets the token and which instance has the mirror config
+    if direction == "push":
+        # Push: source → target, token on TARGET, mirror config on SOURCE
+        token_instance = target_instance
+        token_project_id = mirror.target_project_id
+        token_project_path = mirror.target_project_path
+        mirror_instance = source_instance
+        mirror_project_id = mirror.source_project_id
+        scopes = ["write_repository"]
+    else:
+        # Pull: target ← source, token on SOURCE, mirror config on TARGET
+        token_instance = source_instance
+        token_project_id = mirror.source_project_id
+        token_project_path = mirror.source_project_path
+        mirror_instance = target_instance
+        mirror_project_id = mirror.target_project_id
+        scopes = ["read_repository"]
+
+    token_client = GitLabClient(token_instance.url, token_instance.encrypted_token)
+    mirror_client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token)
+
+    # Delete old token if it exists
+    if mirror.gitlab_token_id and mirror.token_project_id:
+        try:
+            logging.info(f"Deleting old token {mirror.gitlab_token_id} from project {mirror.token_project_id}")
+            token_client.delete_project_access_token(mirror.token_project_id, mirror.gitlab_token_id)
+        except Exception as e:
+            logging.warning(f"Failed to delete old token (may already be expired/deleted): {str(e)}")
+
+    # Create new token
+    token_name = f"mirror-maestro-{mirror.id}"
+    expires_at = (datetime.utcnow() + timedelta(days=TOKEN_EXPIRY_DAYS)).strftime("%Y-%m-%d")
+
+    try:
+        token_result = token_client.create_project_access_token(
+            project_id=token_project_id,
+            name=token_name,
+            scopes=scopes,
+            expires_at=expires_at,
+            access_level=40,  # Maintainer
+        )
+    except Exception as e:
+        logging.error(f"Failed to create new token: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create new project access token: {str(e)}"
+        )
+
+    # Build new authenticated URL
+    new_token_value = token_result["token"]
+    authenticated_url = build_authenticated_url(
+        token_instance,
+        token_project_path,
+        token_name=token_name,
+        token_value=new_token_value,
+    )
+
+    # Update mirror in GitLab with new URL
+    if mirror.mirror_id:
+        try:
+            # Get current effective settings
+            effective_settings = _resolve_effective_settings(mirror, pair)
+
+            mirror_client.update_mirror(
+                project_id=mirror_project_id,
+                mirror_id=mirror.mirror_id,
+                url=authenticated_url,
+                enabled=True,
+                only_protected_branches=effective_settings.get("only_mirror_protected_branches", False),
+                keep_divergent_refs=not effective_settings.get("mirror_overwrite_diverged", False),
+            )
+            logging.info(f"Updated mirror {mirror.mirror_id} with new token")
+        except Exception as e:
+            logging.error(f"Failed to update mirror with new token: {str(e)}")
+            # Token was created but mirror update failed - still save the token
+            # so user can manually fix if needed
+
+    # Store new token details
+    mirror.encrypted_mirror_token = encryption.encrypt(new_token_value)
+    mirror.mirror_token_name = token_name
+    mirror.mirror_token_expires_at = datetime.strptime(expires_at, "%Y-%m-%d")
+    mirror.gitlab_token_id = token_result["id"]
+    mirror.token_project_id = token_project_id
+
+    await db.commit()
+    await db.refresh(mirror)
+
+    return {
+        "status": "rotated",
+        "token_expires_at": expires_at,
+        "token_status": _compute_token_status(mirror.mirror_token_expires_at),
+    }

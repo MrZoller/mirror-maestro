@@ -3,15 +3,12 @@ const state = {
     instances: [],
     pairs: [],
     mirrors: [],
-    tokens: [],
-    groupDefaults: [],
     selectedPair: null,
     mirrorProjectInstances: { source: null, target: null },
     editing: {
         instanceId: null,
         pairId: null,
         mirrorId: null,
-        tokenId: null,
     },
 };
 
@@ -60,16 +57,6 @@ function initTableEnhancements() {
                 { key: 'actions', label: 'Actions', sortable: false, filter: 'none' },
             ],
         },
-        'group-settings-list': {
-            tableLabel: 'Group Settings',
-            columns: [
-                { key: 'pair', label: 'Instance Pair', sortable: true, filter: 'text' },
-                { key: 'group', label: 'Group Path', sortable: true, filter: 'text' },
-                { key: 'defaults', label: 'Default Settings', sortable: false, filter: 'text' },
-                { key: 'tokens', label: 'Tokens', sortable: false, filter: 'text' },
-                { key: 'actions', label: 'Actions', sortable: false, filter: 'none' },
-            ],
-        },
         'mirrors-list': {
             tableLabel: 'Mirrors',
             columns: [
@@ -79,6 +66,7 @@ function initTableEnhancements() {
                 { key: 'status', label: 'Status', sortable: true, filter: 'select' },
                 { key: 'sync_status', label: 'Sync Status', sortable: true, filter: 'select' },
                 { key: 'last_sync', label: 'Last Sync', sortable: true, filter: 'text' },
+                { key: 'token', label: 'Token', sortable: true, filter: 'select' },
                 { key: 'actions', label: 'Actions', sortable: false, filter: 'none' },
             ],
         },
@@ -469,9 +457,6 @@ function initTabs() {
             // Load data when switching to specific tabs
             if (targetId === 'mirrors-tab') {
                 loadMirrors();
-            } else if (targetId === 'tokens-tab') {
-                loadTokens();
-                loadGroupDefaults();
             } else if (targetId === 'topology-tab') {
                 if (typeof window.initTopologyTab === 'function') {
                     window.initTopologyTab();
@@ -479,6 +464,12 @@ function initTabs() {
             }
         });
     });
+}
+
+// Switch to a tab programmatically (used by Help page links)
+function switchTab(tabId) {
+    const tab = document.querySelector(`[data-tab="${tabId}"]`);
+    if (tab) tab.click();
 }
 
 // Setup event listeners
@@ -577,51 +568,6 @@ function setupEventListeners() {
     });
 
     // Token form
-    document.getElementById('token-form')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        if (state.editing?.tokenId) {
-            await updateToken();
-        } else {
-            await createToken();
-        }
-    });
-    document.getElementById('token-cancel-edit')?.addEventListener('click', () => {
-        cancelTokenEdit();
-    });
-
-    // Group path typeahead (token form)
-    const tokenInstanceSel = document.getElementById('token-instance');
-    const tokenGroupPathEl = document.getElementById('token-group-path');
-    if (tokenInstanceSel) {
-        tokenInstanceSel.addEventListener('change', () => {
-            clearDatalist('token-group-path-options');
-        });
-    }
-    if (tokenGroupPathEl) {
-        tokenGroupPathEl.addEventListener('input', debounce(() => searchGroupsForToken(), 250));
-    }
-
-    // Group defaults form
-    document.getElementById('group-defaults-form')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await upsertGroupDefaults();
-    });
-
-    document.getElementById('group-defaults-pair')?.addEventListener('change', () => {
-        applyGroupDefaultsTokenUserDefaultIfEmpty();
-        applyGroupDefaultsDirectionUI();
-        clearDatalist('group-defaults-group-path-options');
-    });
-    document.getElementById('group-defaults-direction')?.addEventListener('change', () => {
-        applyGroupDefaultsTokenUserDefaultIfEmpty();
-        applyGroupDefaultsDirectionUI();
-    });
-
-    // Group path typeahead (group defaults form)
-    const groupDefaultsPathEl = document.getElementById('group-defaults-group-path');
-    if (groupDefaultsPathEl) {
-        groupDefaultsPathEl.addEventListener('input', debounce(() => searchGroupsForGroupDefaults(), 250));
-    }
 }
 
 function clearDatalist(datalistId) {
@@ -634,83 +580,6 @@ function setDatalistOptions(datalistId, values) {
     const dl = document.getElementById(datalistId);
     if (!dl) return;
     dl.innerHTML = values.map(v => `<option value="${escapeHtml(String(v))}"></option>`).join('');
-}
-
-async function searchGroupsForToken() {
-    const instanceSel = document.getElementById('token-instance');
-    const input = document.getElementById('token-group-path');
-    if (!instanceSel || !input) return;
-
-    const instanceId = parseInt(instanceSel.value || '0');
-    if (!instanceId) {
-        clearDatalist('token-group-path-options');
-        return;
-    }
-
-    const q = (input.value || '').toString().trim();
-    if (q.length < 2) {
-        clearDatalist('token-group-path-options');
-        return;
-    }
-
-    const perPage = 50;
-    try {
-        const res = await apiRequest(
-            `/api/instances/${instanceId}/groups?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`
-        );
-        const groups = res?.groups || [];
-        const values = groups
-            .map(g => (g.full_path || g.path || g.name || '').toString())
-            .filter(v => v);
-        setDatalistOptions('token-group-path-options', values.slice(0, perPage));
-    } catch (e) {
-        // Suggestions are best-effort; ignore errors here.
-        clearDatalist('token-group-path-options');
-    }
-}
-
-async function searchGroupsForGroupDefaults() {
-    const pairSel = document.getElementById('group-defaults-pair');
-    const input = document.getElementById('group-defaults-group-path');
-    if (!pairSel || !input) return;
-
-    const pairId = parseInt(pairSel.value || '0');
-    const pair = state.pairs.find(p => p.id === pairId);
-    if (!pair) {
-        clearDatalist('group-defaults-group-path-options');
-        return;
-    }
-
-    const q = (input.value || '').toString().trim();
-    if (q.length < 2) {
-        clearDatalist('group-defaults-group-path-options');
-        return;
-    }
-
-    const perPage = 50;
-    const urls = [
-        `/api/instances/${pair.source_instance_id}/groups?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`,
-        `/api/instances/${pair.target_instance_id}/groups?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`,
-    ];
-
-    try {
-        const results = await Promise.allSettled(urls.map(u => apiRequest(u)));
-        const seen = new Set();
-        const values = [];
-        results.forEach(r => {
-            if (r.status !== 'fulfilled') return;
-            const groups = r.value?.groups || [];
-            groups.forEach(g => {
-                const v = (g.full_path || g.path || g.name || '').toString();
-                if (!v || seen.has(v)) return;
-                seen.add(v);
-                values.push(v);
-            });
-        });
-        setDatalistOptions('group-defaults-group-path-options', values.slice(0, perPage));
-    } catch (e) {
-        clearDatalist('group-defaults-group-path-options');
-    }
 }
 
 // API Helper with enhanced error handling
@@ -1263,7 +1132,6 @@ function beginInstanceEdit(id) {
     state.editing.instanceId = id;
     state.editing.pairId = null;
     state.editing.mirrorId = null;
-    state.editing.tokenId = null;
     renderInstances(state.instances);
 }
 
@@ -1533,7 +1401,6 @@ function beginPairEdit(id) {
     state.editing.pairId = id;
     state.editing.instanceId = null;
     state.editing.mirrorId = null;
-    state.editing.tokenId = null;
     renderPairs(state.pairs);
     setTimeout(() => applyPairEditDirection(id), 0);
 }
@@ -1702,490 +1569,6 @@ function updatePairSelector() {
         ).join('');
 }
 
-// Group Access Tokens
-async function loadTokens() {
-    try {
-        const tokens = await apiRequest('/api/tokens');
-        state.tokens = tokens;
-        renderGroupSettings();
-        updateTokenInstanceSelector();
-        updateGroupDefaultsPairSelector();
-        resetGroupDefaultsOverrides();
-    } catch (error) {
-        console.error('Failed to load tokens:', error);
-    }
-}
-
-async function createToken() {
-    const form = document.getElementById('token-form');
-    const formData = new FormData(form);
-
-    const data = {
-        gitlab_instance_id: parseInt(formData.get('gitlab_instance_id')),
-        group_path: formData.get('group_path'),
-        token_name: formData.get('token_name'),
-        token: formData.get('token')
-    };
-
-    try {
-        await apiRequest('/api/tokens', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-
-        showMessage('Group access token added successfully', 'success');
-        form.reset();
-        cancelTokenEdit();
-        await loadTokens();
-    } catch (error) {
-        console.error('Failed to create token:', error);
-    }
-}
-
-function _setTokenFormEditMode(isEditing) {
-    const submit = document.getElementById('token-submit');
-    const cancel = document.getElementById('token-cancel-edit');
-    const instanceSel = document.getElementById('token-instance');
-    const groupPathEl = document.getElementById('token-group-path');
-    const tokenEl = document.getElementById('token-value');
-    if (submit) submit.textContent = isEditing ? 'Update Token' : 'Add Group Token';
-    if (cancel) cancel.classList.toggle('hidden', !isEditing);
-
-    // Avoid breaking existing mirror auth by changing the lookup key in-place.
-    if (instanceSel) instanceSel.disabled = !!isEditing;
-    if (groupPathEl) groupPathEl.disabled = !!isEditing;
-
-    if (!isEditing) {
-        if (instanceSel) instanceSel.disabled = false;
-        if (groupPathEl) groupPathEl.disabled = false;
-    }
-
-    // In edit mode, the user must re-enter a fresh token value (we never display the old token).
-    if (tokenEl) {
-        tokenEl.required = true;
-        tokenEl.placeholder = isEditing ? 'Paste new token value' : 'Group access token';
-    }
-}
-
-function beginTokenEdit(tokenId) {
-    const token = (state.tokens || []).find(t => t.id === tokenId);
-    if (!token) return;
-
-    state.editing.tokenId = tokenId;
-    state.editing.instanceId = null;
-    state.editing.pairId = null;
-    state.editing.mirrorId = null;
-
-    const instanceSel = document.getElementById('token-instance');
-    const groupPathEl = document.getElementById('token-group-path');
-    const nameEl = document.getElementById('token-name');
-    const tokenEl = document.getElementById('token-value');
-
-    if (instanceSel) instanceSel.value = String(token.gitlab_instance_id);
-    if (groupPathEl) groupPathEl.value = token.group_path || '';
-    if (nameEl) nameEl.value = token.token_name || '';
-    if (tokenEl) tokenEl.value = '';
-
-    _setTokenFormEditMode(true);
-    document.getElementById('token-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function cancelTokenEdit() {
-    state.editing.tokenId = null;
-    _setTokenFormEditMode(false);
-
-    const instanceSel = document.getElementById('token-instance');
-    const groupPathEl = document.getElementById('token-group-path');
-    const nameEl = document.getElementById('token-name');
-    const tokenEl = document.getElementById('token-value');
-    if (instanceSel) instanceSel.disabled = false;
-    if (groupPathEl) groupPathEl.disabled = false;
-    if (nameEl) nameEl.value = '';
-    if (tokenEl) tokenEl.value = '';
-}
-
-async function updateToken() {
-    const tokenId = state.editing?.tokenId;
-    if (!tokenId) return;
-
-    const nameEl = document.getElementById('token-name');
-    const tokenEl = document.getElementById('token-value');
-    if (!nameEl || !tokenEl) return;
-
-    const tokenValue = (tokenEl.value || '').toString().trim();
-    if (!tokenValue) {
-        showMessage('Please paste a new token value', 'error');
-        return;
-    }
-
-    const payload = {
-        token_name: (nameEl.value || '').toString().trim(),
-        token: tokenValue,
-    };
-
-    try {
-        await apiRequest(`/api/tokens/${tokenId}`, {
-            method: 'PUT',
-            body: JSON.stringify(payload),
-        });
-        showMessage('Group access token updated successfully', 'success');
-        cancelTokenEdit();
-        await loadTokens();
-    } catch (error) {
-        console.error('Failed to update token:', error);
-    }
-}
-
-async function deleteToken(id) {
-    if (!confirm('Are you sure you want to delete this group access token?')) return;
-
-    try {
-        await apiRequest(`/api/tokens/${id}`, { method: 'DELETE' });
-        showMessage('Group access token deleted successfully', 'success');
-        await loadTokens();
-    } catch (error) {
-        console.error('Failed to delete token:', error);
-    }
-}
-
-function updateTokenInstanceSelector() {
-    const select = document.getElementById('token-instance');
-    if (!select) return;
-
-    select.innerHTML = '<option value="">Select instance...</option>' +
-        state.instances.map(inst =>
-            `<option value="${inst.id}">${escapeHtml(inst.name)}</option>`
-        ).join('');
-}
-
-// Group Mirror Defaults
-async function loadGroupDefaults() {
-    try {
-        const rows = await apiRequest('/api/group-defaults');
-        state.groupDefaults = rows;
-        renderGroupSettings();
-        updateGroupDefaultsPairSelector();
-        resetGroupDefaultsOverrides();
-    } catch (error) {
-        console.error('Failed to load group defaults:', error);
-    }
-}
-
-function renderGroupSettings() {
-    const tbody = document.getElementById('group-settings-list');
-    if (!tbody) return;
-
-    const pairs = (state.pairs || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    const tokens = state.tokens || [];
-    const groupDefaults = state.groupDefaults || [];
-
-    const tokenByKey = new Map();
-    tokens.forEach(t => {
-        tokenByKey.set(`${t.gitlab_instance_id}:${t.group_path}`, t);
-    });
-
-    const defaultsByKey = new Map();
-    groupDefaults.forEach(d => {
-        defaultsByKey.set(`${d.instance_pair_id}:${d.group_path}`, d);
-    });
-
-    const rows = [];
-
-    const fmtBool = (v) => (v === null || v === undefined) ? '<span class="text-muted">n/a</span>' : (v ? 'true' : 'false');
-    const fmtStr = (v) => (v === null || v === undefined || String(v).trim() === '')
-        ? '<span class="text-muted">n/a</span>'
-        : `<code>${escapeHtml(String(v))}</code>`;
-
-    pairs.forEach(pair => {
-        const srcInst = state.instances.find(i => i.id === pair.source_instance_id);
-        const tgtInst = state.instances.find(i => i.id === pair.target_instance_id);
-        const srcName = srcInst?.name || 'Source';
-        const tgtName = tgtInst?.name || 'Target';
-
-        const paths = new Set();
-        groupDefaults.forEach(d => {
-            if (d.instance_pair_id === pair.id) paths.add(d.group_path);
-        });
-        tokens.forEach(t => {
-            if (t.gitlab_instance_id === pair.source_instance_id || t.gitlab_instance_id === pair.target_instance_id) {
-                paths.add(t.group_path);
-            }
-        });
-
-        Array.from(paths).sort().forEach(groupPath => {
-            const gd = defaultsByKey.get(`${pair.id}:${groupPath}`);
-
-            const direction = ((gd?.mirror_direction || pair.mirror_direction || '') + '').toLowerCase();
-            const overwrite = (gd && gd.mirror_overwrite_diverged !== null && gd.mirror_overwrite_diverged !== undefined)
-                ? gd.mirror_overwrite_diverged
-                : pair.mirror_overwrite_diverged;
-            const onlyProtected = (gd && gd.only_mirror_protected_branches !== null && gd.only_mirror_protected_branches !== undefined)
-                ? gd.only_mirror_protected_branches
-                : pair.only_mirror_protected_branches;
-
-            let trigger = (gd && gd.mirror_trigger_builds !== null && gd.mirror_trigger_builds !== undefined)
-                ? gd.mirror_trigger_builds
-                : pair.mirror_trigger_builds;
-            let regex = (gd && gd.mirror_branch_regex !== null && gd.mirror_branch_regex !== undefined)
-                ? gd.mirror_branch_regex
-                : pair.mirror_branch_regex;
-            let userId = (gd && gd.mirror_user_id !== null && gd.mirror_user_id !== undefined)
-                ? gd.mirror_user_id
-                : pair.mirror_user_id;
-
-            if (direction === 'push') {
-                trigger = null;
-                regex = null;
-                userId = null;
-            }
-
-            const settingsCell = (() => {
-                const pieces = [];
-                if (direction) pieces.push(`<span class="badge badge-info">${escapeHtml(direction)}</span>`);
-                pieces.push(`<span class="text-muted">overwrite:</span> ${fmtBool(overwrite)}`);
-                pieces.push(`<span class="text-muted">only_protected:</span> ${fmtBool(onlyProtected)}`);
-                if (direction === 'pull') {
-                    pieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(trigger)}`);
-                    pieces.push(`<span class="text-muted">regex:</span> ${fmtStr(regex)}`);
-                    pieces.push(`<span class="text-muted">user:</span> ${userId === null || userId === undefined ? '<span class="text-muted">auto</span>' : escapeHtml(String(userId))}`);
-                } else if (direction === 'push') {
-                    pieces.push(`<span class="text-muted">trigger:</span> <span class="text-muted">n/a</span>`);
-                    pieces.push(`<span class="text-muted">regex:</span> <span class="text-muted">n/a</span>`);
-                    pieces.push(`<span class="text-muted">user:</span> <span class="text-muted">n/a</span>`);
-                } else {
-                    pieces.push(`<span class="text-muted">trigger:</span> <span class="text-muted">n/a</span>`);
-                    pieces.push(`<span class="text-muted">regex:</span> <span class="text-muted">n/a</span>`);
-                    pieces.push(`<span class="text-muted">user:</span> <span class="text-muted">n/a</span>`);
-                }
-                return `<div style="line-height:1.35">${pieces.join('<br>')}</div>`;
-            })();
-
-            const srcTok = tokenByKey.get(`${pair.source_instance_id}:${groupPath}`);
-            const tgtTok = tokenByKey.get(`${pair.target_instance_id}:${groupPath}`);
-            const tokenCell = `
-                <div style="line-height:1.35">
-                    <span class="text-muted">${escapeHtml(srcName)}:</span> ${srcTok ? escapeHtml(srcTok.token_name) : '<span class="text-muted">missing</span>'}<br>
-                    <span class="text-muted">${escapeHtml(tgtName)}:</span> ${tgtTok ? escapeHtml(tgtTok.token_name) : '<span class="text-muted">missing</span>'}
-                </div>
-            `;
-
-            const actions = [];
-            if (gd) actions.push(`<button class="btn btn-secondary btn-small" onclick="editGroupDefaults(${gd.id})">Edit defaults</button>`);
-            if (gd) actions.push(`<button class="btn btn-danger btn-small" onclick="deleteGroupDefaults(${gd.id})">Delete defaults</button>`);
-            if (srcTok) actions.push(`<button class="btn btn-secondary btn-small" onclick="beginTokenEdit(${srcTok.id})" title="Update token on ${escapeHtml(srcName)}">Update token</button>`);
-            if (tgtTok) actions.push(`<button class="btn btn-secondary btn-small" onclick="beginTokenEdit(${tgtTok.id})" title="Update token on ${escapeHtml(tgtName)}">Update token</button>`);
-            const actionsCell = actions.length
-                ? `<div class="flex" style="gap:6px; flex-wrap:wrap">${actions.join('')}</div>`
-                : '<span class="text-muted">N/A</span>';
-
-            rows.push(`
-                <tr>
-                    <td><strong>${escapeHtml(pair.name)}</strong></td>
-                    <td>${escapeHtml(groupPath)}</td>
-                    <td>${settingsCell}</td>
-                    <td>${tokenCell}</td>
-                    <td>${actionsCell}</td>
-                </tr>
-            `);
-        });
-    });
-
-    if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No group settings configured</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = rows.join('');
-}
-
-function updateGroupDefaultsPairSelector() {
-    const select = document.getElementById('group-defaults-pair');
-    if (!select) return;
-
-    select.innerHTML = '<option value="">Select instance pair...</option>' +
-        state.pairs.map(pair =>
-            `<option value="${pair.id}">${escapeHtml(pair.name)}</option>`
-        ).join('');
-}
-
-function resetGroupDefaultsOverrides() {
-    const triStateCheckboxIds = [
-        'group-defaults-overwrite',
-        'group-defaults-trigger',
-        'group-defaults-only-protected',
-    ];
-    triStateCheckboxIds.forEach((id) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.checked = false;
-        el.indeterminate = true;
-        el.title = 'Inherit pair default';
-        el.onchange = () => {
-            el.indeterminate = false;
-            el.title = '';
-        };
-    });
-
-    const dir = document.getElementById('group-defaults-direction');
-    if (dir) dir.value = '';
-
-    const regex = document.getElementById('group-defaults-branch-regex');
-    if (regex) regex.value = '';
-
-    const userId = document.getElementById('group-defaults-mirror-user-id');
-    if (userId) userId.value = '';
-
-    applyGroupDefaultsDirectionUI();
-}
-
-function applyGroupDefaultsDirectionUI() {
-    const pairSel = document.getElementById('group-defaults-pair');
-    const dirSel = document.getElementById('group-defaults-direction');
-    const triggerEl = document.getElementById('group-defaults-trigger');
-    const regexEl = document.getElementById('group-defaults-branch-regex');
-    const userEl = document.getElementById('group-defaults-mirror-user-id');
-    if (!pairSel || !dirSel) return;
-
-    const pair = state.pairs.find(p => p.id === parseInt(pairSel.value || '0'));
-    const effDir = ((dirSel.value || '') || pair?.mirror_direction || '').toString().toLowerCase();
-    const isPush = effDir === 'push';
-
-    if (triggerEl) {
-        triggerEl.disabled = isPush;
-        if (isPush) {
-            triggerEl.checked = false;
-            triggerEl.indeterminate = true;
-            triggerEl.title = 'Not applicable for push mirrors';
-        }
-    }
-    if (regexEl) {
-        regexEl.disabled = isPush;
-        if (isPush) regexEl.value = '';
-    }
-    if (userEl) {
-        userEl.disabled = isPush;
-        if (isPush) userEl.value = '';
-    }
-}
-
-function editGroupDefaults(groupDefaultId) {
-    const row = (state.groupDefaults || []).find(gd => gd.id === groupDefaultId);
-    if (!row) return;
-
-    const pairSel = document.getElementById('group-defaults-pair');
-    const pathEl = document.getElementById('group-defaults-group-path');
-    const dirSel = document.getElementById('group-defaults-direction');
-    const overwriteEl = document.getElementById('group-defaults-overwrite');
-    const triggerEl = document.getElementById('group-defaults-trigger');
-    const onlyProtectedEl = document.getElementById('group-defaults-only-protected');
-    const regexEl = document.getElementById('group-defaults-branch-regex');
-    const userEl = document.getElementById('group-defaults-mirror-user-id');
-
-    if (pairSel) pairSel.value = String(row.instance_pair_id);
-    if (pathEl) pathEl.value = row.group_path || '';
-    if (dirSel) dirSel.value = row.mirror_direction || '';
-
-    const setTri = (el, v) => {
-        if (!el) return;
-        if (v === null || v === undefined) {
-            el.checked = false;
-            el.indeterminate = true;
-            el.title = 'Inherit pair default';
-        } else {
-            el.indeterminate = false;
-            el.checked = !!v;
-            el.title = '';
-        }
-        el.onchange = () => {
-            el.indeterminate = false;
-            el.title = '';
-        };
-    };
-    setTri(overwriteEl, row.mirror_overwrite_diverged);
-    setTri(triggerEl, row.mirror_trigger_builds);
-    setTri(onlyProtectedEl, row.only_mirror_protected_branches);
-
-    if (regexEl) regexEl.value = row.mirror_branch_regex || '';
-    if (userEl) userEl.value = row.mirror_user_id === null || row.mirror_user_id === undefined ? '' : String(row.mirror_user_id);
-
-    applyGroupDefaultsDirectionUI();
-}
-
-async function upsertGroupDefaults() {
-    const form = document.getElementById('group-defaults-form');
-    const formData = new FormData(form);
-
-    const overwriteEl = document.getElementById('group-defaults-overwrite');
-    const triggerEl = document.getElementById('group-defaults-trigger');
-    const onlyProtectedEl = document.getElementById('group-defaults-only-protected');
-
-    const branchRegexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
-    let mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
-    const dirRaw = (formData.get('mirror_direction') || '').toString().trim();
-
-    // Auto-fill mirror_user_id from the owning instance token user if empty
-    const pair = state.pairs.find(p => p.id === parseInt(formData.get('instance_pair_id')));
-    const effDir = (dirRaw || pair?.mirror_direction || '').toString().toLowerCase();
-    if (!mirrorUserIdRaw && pair && effDir !== 'push') {
-        const ownerInstanceId = pair.target_instance_id;
-        const inst = state.instances.find(i => i.id === ownerInstanceId);
-        if (inst && inst.token_user_id) {
-            mirrorUserIdRaw = String(inst.token_user_id);
-        }
-    }
-
-    const payload = {
-        instance_pair_id: parseInt(formData.get('instance_pair_id')),
-        group_path: (formData.get('group_path') || '').toString().trim(),
-        mirror_direction: dirRaw || null,
-        mirror_overwrite_diverged: overwriteEl && overwriteEl.indeterminate ? null : !!overwriteEl?.checked,
-        mirror_trigger_builds: triggerEl && triggerEl.indeterminate ? null : !!triggerEl?.checked,
-        only_mirror_protected_branches: onlyProtectedEl && onlyProtectedEl.indeterminate ? null : !!onlyProtectedEl?.checked,
-        mirror_branch_regex: branchRegexRaw || null,
-        mirror_user_id: mirrorUserIdRaw ? parseInt(mirrorUserIdRaw) : null,
-    };
-
-    try {
-        await apiRequest('/api/group-defaults', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
-        showMessage('Group defaults saved successfully', 'success');
-        form.reset();
-        await loadGroupDefaults();
-    } catch (error) {
-        console.error('Failed to save group defaults:', error);
-    }
-}
-
-function applyGroupDefaultsTokenUserDefaultIfEmpty() {
-    const pairSel = document.getElementById('group-defaults-pair');
-    const dirSel = document.getElementById('group-defaults-direction');
-    const userEl = document.getElementById('group-defaults-mirror-user-id');
-    if (!pairSel || !dirSel || !userEl) return;
-    if ((userEl.value || '').toString().trim()) return;
-
-    const pair = state.pairs.find(p => p.id === parseInt(pairSel.value || '0'));
-    if (!pair) return;
-    const effDir = ((dirSel.value || '') || pair.mirror_direction || '').toString().toLowerCase();
-    if (effDir === 'push') return;
-    const inst = state.instances.find(i => i.id === pair.target_instance_id);
-    if (inst && inst.token_user_id) {
-        userEl.value = String(inst.token_user_id);
-    }
-}
-
-async function deleteGroupDefaults(id) {
-    if (!confirm('Are you sure you want to delete these group defaults?')) return;
-    try {
-        await apiRequest(`/api/group-defaults/${id}`, { method: 'DELETE' });
-        showMessage('Group defaults deleted successfully', 'success');
-        await loadGroupDefaults();
-    } catch (error) {
-        console.error('Failed to delete group defaults:', error);
-    }
-}
-
 // Mirrors
 async function loadMirrors() {
     const container = document.getElementById('mirrors-list');
@@ -2348,6 +1731,24 @@ function renderMirrors(mirrors) {
             `;
         }
 
+        // Token status badge
+        const tokenStatusBadge = (() => {
+            const status = mirror.token_status;
+            if (!status || status === 'none') {
+                return '<span class="badge badge-secondary">No token</span>';
+            } else if (status === 'active') {
+                return '<span class="badge badge-success">Active</span>';
+            } else if (status === 'expiring_soon') {
+                const expiresAt = mirror.mirror_token_expires_at
+                    ? new Date(mirror.mirror_token_expires_at).toLocaleDateString()
+                    : 'soon';
+                return `<span class="badge badge-warning" title="Expires ${expiresAt}">Expiring</span>`;
+            } else if (status === 'expired') {
+                return '<span class="badge badge-danger">Expired</span>';
+            }
+            return '<span class="badge badge-secondary">Unknown</span>';
+        })();
+
         return `
             <tr>
                 <td>${escapeHtml(mirror.source_project_path)}</td>
@@ -2358,10 +1759,12 @@ function renderMirrors(mirrors) {
                 <td data-sort="${escapeHtml(mirror.last_successful_update || '')}">
                     ${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}
                 </td>
+                <td>${tokenStatusBadge}</td>
                 <td>
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
                         <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
+                        <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate</button>
                         <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
                     </div>
                 </td>
@@ -2370,11 +1773,25 @@ function renderMirrors(mirrors) {
     }).join('');
 }
 
+// Rotate mirror token
+async function rotateMirrorToken(mirrorId) {
+    if (!confirm('This will create a new access token for this mirror and revoke the old one. Continue?')) {
+        return;
+    }
+
+    try {
+        await apiRequest(`/api/mirrors/${mirrorId}/rotate-token`, { method: 'POST' });
+        showMessage('Token rotated successfully', 'success');
+        await loadMirrors();
+    } catch (error) {
+        console.error('Failed to rotate token:', error);
+    }
+}
+
 function beginMirrorEdit(id) {
     state.editing.mirrorId = id;
     state.editing.instanceId = null;
     state.editing.pairId = null;
-    state.editing.tokenId = null;
     renderMirrors(state.mirrors);
     setTimeout(() => applyMirrorEditControls(id), 0);
 }
