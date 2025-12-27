@@ -10,7 +10,11 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 
 ### Dashboard
 ![Dashboard](docs/screenshots/01-dashboard.png)
-*Main dashboard with quick stats and getting started guide*
+*Modern dashboard with live statistics, health charts, recent activity timeline, and quick actions*
+
+### Dashboard (Dark Mode)
+![Dashboard Dark Mode](docs/screenshots/07-dashboard-dark.png)
+*Beautiful dark mode with comprehensive theming across all components*
 
 ### GitLab Instances
 ![GitLab Instances](docs/screenshots/02-instances.png)
@@ -30,7 +34,7 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 
 ### Topology
 ![Topology](docs/screenshots/06-topology.png)
-*Visualize instance-to-instance mirror flows as an interactive graph (push vs pull, counts, health/staleness, and click-through drilldown to the underlying mirrors)*
+*Interactive topology visualization with animated data flows, zoom controls, and hover highlighting - click nodes or links to drill down into mirror details*
 
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
 
@@ -53,9 +57,12 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **Import/Export**: Bulk import and export mirror settings for specified groups
 
 ### Modern Web Interface
-- Clean, responsive design with tabbed navigation
-- Real-time status updates
-- Intuitive workflow for managing mirrors
+- **Comprehensive Dashboard**: Live statistics cards, health distribution charts (Chart.js), recent activity timeline, and quick actions
+- **Dark Mode**: Beautiful dark theme with smooth transitions and localStorage persistence - toggle anytime with the sun/moon button
+- **Live Status Polling**: Real-time updates every 30 seconds with pulsing indicators for actively syncing mirrors
+- **Enhanced Topology**: Animated particle system showing data flow, zoom controls (+/−/reset), and smart hover highlighting
+- **Clean, Responsive Design**: Modern card-based layout with smooth animations and tabbed navigation
+- **Intuitive Workflow**: Straightforward mirror management with visual feedback and status indicators
 - Similar look and feel to [issue-bridge](https://github.com/MrZoller/issue-bridge)
 
 ## Architecture
@@ -64,6 +71,7 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **Backend**: Python 3.11+ with FastAPI
 - **Database**: SQLite (async with aiosqlite)
 - **Frontend**: Vanilla JavaScript with modern CSS
+- **Visualization**: Chart.js for charts, D3.js for topology graphs
 - **API Integration**: python-gitlab library
 - **Deployment**: Docker and Docker Compose
 - **Authentication**: HTTP Basic Auth (optional)
@@ -74,17 +82,19 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 mirror-maestro/
 ├── app/
 │   ├── api/              # API route handlers
+│   │   ├── dashboard.py  # Dashboard metrics
 │   │   ├── instances.py  # GitLab instance management
 │   │   ├── pairs.py      # Instance pair management
 │   │   ├── mirrors.py    # Mirror CRUD operations
+│   │   ├── topology.py   # Topology visualization
 │   │   └── export.py     # Import/export functionality
 │   ├── core/             # Core functionality
 │   │   ├── auth.py       # Authentication
 │   │   ├── encryption.py # Token encryption
 │   │   └── gitlab_client.py # GitLab API wrapper
 │   ├── static/           # Frontend assets
-│   │   ├── css/
-│   │   └── js/
+│   │   ├── css/          # Modern CSS with design tokens
+│   │   └── js/           # Vanilla JS with D3.js & Chart.js
 │   ├── templates/        # HTML templates
 │   ├── config.py         # Application configuration
 │   ├── database.py       # Database setup
@@ -354,8 +364,12 @@ The application provides a RESTful API. Once running, visit:
 - `POST /api/export/pair/{id}` - Import mirrors for a pair
 
 #### Topology
-- `GET /api/topology` - Aggregated instance/link graph (supports staleness thresholds and “never succeeded” handling)
+- `GET /api/topology` - Aggregated instance/link graph (supports staleness thresholds and "never succeeded" handling)
 - `GET /api/topology/link-mirrors` - Drill down: list mirrors behind a topology link
+
+#### Dashboard
+- `GET /api/dashboard/metrics` - Dashboard metrics and statistics (total mirrors, health %, recent activity, charts)
+- `GET /api/dashboard/quick-stats` - Quick stats for live polling (syncing count, recent failures)
 
 ## Security
 
@@ -492,8 +506,10 @@ Contributions are welcome! Please:
 
 ## Roadmap
 
+- [x] Mirror status monitoring dashboard (Live dashboard with charts and real-time updates ✨)
+- [x] Dark mode support (Beautiful theme with smooth transitions ✨)
+- [x] Enhanced topology visualization (Animated particles, zoom controls, hover highlighting ✨)
 - [ ] Support for scheduled mirror synchronization
-- [ ] Mirror status monitoring dashboard
 - [ ] Email notifications for mirror failures
 - [ ] Support for SSH-based mirroring
 - [ ] Multi-user support with role-based access
