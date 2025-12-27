@@ -1,7 +1,7 @@
 {
-  "name": "gitlab-mirror-wizard-screenshots",
+  "name": "mirror-maestro-screenshots",
   "version": "1.0.0",
-  "description": "Screenshot generation scripts for GitLab Mirror Wizard",
+  "description": "Screenshot generation scripts for Mirror Maestro",
   "private": true,
   "scripts": {
     "screenshots": "node take-screenshots.js"
