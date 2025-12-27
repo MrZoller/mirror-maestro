@@ -34,13 +34,42 @@ async def _maybe_migrate_sqlite(conn) -> None:
     if conn.dialect.name != "sqlite":
         return
 
+    # SECURITY: Define allowed table names to prevent SQL injection
+    # While values are currently hardcoded, this prevents dangerous copy-paste errors
+    ALLOWED_TABLES = {
+        "gitlab_instances",
+        "instance_pairs",
+        "mirrors",
+        "group_access_tokens",
+        "group_mirror_defaults"
+    }
+
+    def _validate_table_name(table: str) -> str:
+        """Validate that table name is in our allowed set to prevent SQL injection."""
+        if table not in ALLOWED_TABLES:
+            raise ValueError(f"Invalid table name: {table}")
+        return table
+
+    def _validate_identifier(identifier: str) -> str:
+        """
+        Validate SQL identifier (table/column/index name) to prevent SQL injection.
+        Allows alphanumeric characters and underscores only.
+        """
+        if not identifier.replace("_", "").isalnum():
+            raise ValueError(f"Invalid SQL identifier: {identifier}")
+        return identifier
+
     async def _existing_columns(table: str) -> set[str]:
-        res = await conn.execute(text(f"PRAGMA table_info({table})"))
+        # Validate table name before using in SQL
+        safe_table = _validate_table_name(table)
+        res = await conn.execute(text(f"PRAGMA table_info({safe_table})"))
         # PRAGMA table_info: cid, name, type, notnull, dflt_value, pk
         return {row[1] for row in res.fetchall()}
 
     async def _existing_indexes(table: str) -> set[str]:
-        res = await conn.execute(text(f"PRAGMA index_list({table})"))
+        # Validate table name before using in SQL
+        safe_table = _validate_table_name(table)
+        res = await conn.execute(text(f"PRAGMA index_list({safe_table})"))
         # PRAGMA index_list: seq, name, unique, origin, partial
         return {row[1] for row in res.fetchall()}
 
@@ -65,7 +94,13 @@ async def _maybe_migrate_sqlite(conn) -> None:
         for col, ddl in cols.items():
             if col in existing:
                 continue
-            await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+            # Validate table and column names before using in SQL
+            safe_table = _validate_table_name(table)
+            safe_col = _validate_identifier(col)
+            # DDL types are from our hardcoded dictionary, but validate them too
+            if not all(c.isalnum() or c in "()_ " for c in ddl):
+                raise ValueError(f"Invalid DDL type: {ddl}")
+            await conn.execute(text(f"ALTER TABLE {safe_table} ADD COLUMN {safe_col} {ddl}"))
 
     # Add unique constraints via unique indexes for existing databases
     # (New databases will get these from __table_args__ in models)
@@ -105,9 +140,21 @@ async def _maybe_migrate_sqlite(conn) -> None:
                 """))
 
             # Now create the unique index
+            # Validate identifiers before using in SQL
+            safe_table = _validate_table_name(table)
+            safe_index_name = _validate_identifier(constraint['index_name'])
+            # Validate columns format (should be like "(col1, col2)")
+            columns_str = constraint['columns']
+            if not columns_str.startswith("(") or not columns_str.endswith(")"):
+                raise ValueError(f"Invalid columns format: {columns_str}")
+            # Extract and validate column names from the parentheses
+            cols_inner = columns_str[1:-1].replace(" ", "")
+            for col_name in cols_inner.split(","):
+                _validate_identifier(col_name)
+
             await conn.execute(text(
-                f"CREATE UNIQUE INDEX {constraint['index_name']} "
-                f"ON {table} {constraint['columns']}"
+                f"CREATE UNIQUE INDEX {safe_index_name} "
+                f"ON {safe_table} {columns_str}"
             ))
 
 

@@ -249,25 +249,44 @@ async def delete_instance(
     #
     # NOTE: This is intentionally implemented at the application layer since the
     # schema does not currently enforce FK relationships with ON DELETE CASCADE.
-    pair_ids_res = await db.execute(
-        select(InstancePair.id).where(
-            or_(
-                InstancePair.source_instance_id == instance_id,
-                InstancePair.target_instance_id == instance_id,
+    #
+    # CRITICAL: All delete operations must succeed atomically or be rolled back together
+    try:
+        pair_ids_res = await db.execute(
+            select(InstancePair.id).where(
+                or_(
+                    InstancePair.source_instance_id == instance_id,
+                    InstancePair.target_instance_id == instance_id,
+                )
             )
         )
-    )
-    pair_ids = list(pair_ids_res.scalars().all())
+        pair_ids = list(pair_ids_res.scalars().all())
 
-    if pair_ids:
-        await db.execute(delete(Mirror).where(Mirror.instance_pair_id.in_(pair_ids)))
-        await db.execute(delete(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id.in_(pair_ids)))
-        await db.execute(delete(InstancePair).where(InstancePair.id.in_(pair_ids)))
+        if pair_ids:
+            # Delete mirrors first (they reference pairs)
+            await db.execute(delete(Mirror).where(Mirror.instance_pair_id.in_(pair_ids)))
+            # Delete group defaults (they reference pairs)
+            await db.execute(delete(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id.in_(pair_ids)))
+            # Delete pairs (they reference the instance)
+            await db.execute(delete(InstancePair).where(InstancePair.id.in_(pair_ids)))
 
-    await db.execute(delete(GroupAccessToken).where(GroupAccessToken.gitlab_instance_id == instance_id))
+        # Delete group access tokens (they reference the instance)
+        await db.execute(delete(GroupAccessToken).where(GroupAccessToken.gitlab_instance_id == instance_id))
 
-    await db.delete(instance)
-    await db.commit()
+        # Finally delete the instance itself
+        await db.delete(instance)
+
+        # Commit all changes atomically
+        await db.commit()
+    except Exception as e:
+        # Rollback all changes if any operation fails to maintain data integrity
+        await db.rollback()
+        import logging
+        logging.error(f"Failed to delete instance {instance_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete instance. Database changes have been rolled back to maintain data integrity."
+        )
 
     return {"status": "deleted"}
 

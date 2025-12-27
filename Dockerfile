@@ -14,9 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app ./app
-COPY data ./data
 
-# Create data directory if it doesn't exist
+# Create data directory (for database and encryption key)
 RUN mkdir -p /app/data
 
 # Expose port
