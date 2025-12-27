@@ -98,7 +98,7 @@ This document provides comprehensive guidance for AI assistants working on the M
 ## Codebase Structure
 
 ```
-gitlab-mirror-wizard/
+mirror-maestro/
 ├── app/                              # Main application code
 │   ├── api/                          # API route handlers (FastAPI routers)
 │   │   ├── __init__.py
