@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.database import get_db
-from app.models import InstancePair, GitLabInstance, Mirror, GroupMirrorDefaults
+from app.models import InstancePair, GitLabInstance, Mirror
 from app.core.auth import verify_credentials
 
 
@@ -345,15 +345,13 @@ async def delete_pair(
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
 
-    # Cascade-delete dependent entities (mirrors + group defaults) to avoid leaving
+    # Cascade-delete dependent entities (mirrors) to avoid leaving
     # orphaned rows referencing this pair.
     #
     # CRITICAL: All delete operations must succeed atomically or be rolled back together
     try:
         # Delete mirrors first (they reference the pair)
         await db.execute(delete(Mirror).where(Mirror.instance_pair_id == pair_id))
-        # Delete group defaults (they reference the pair)
-        await db.execute(delete(GroupMirrorDefaults).where(GroupMirrorDefaults.instance_pair_id == pair_id))
 
         # Finally delete the pair itself
         await db.delete(pair)

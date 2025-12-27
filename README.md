@@ -13,7 +13,7 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 *Modern dashboard with live statistics, health charts, recent activity timeline, and quick actions*
 
 ### Dashboard (Dark Mode)
-![Dashboard Dark Mode](docs/screenshots/07-dashboard-dark.png)
+![Dashboard Dark Mode](docs/screenshots/06-dashboard-dark.png)
 *Beautiful dark mode with comprehensive theming across all components*
 
 ### GitLab Instances
@@ -24,16 +24,12 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 ![Instance Pairs](docs/screenshots/03-pairs.png)
 *Configure pairs of GitLab instances for mirroring*
 
-### Group Settings
-![Group Tokens](docs/screenshots/04-tokens.png)
-*Manage group access tokens (rotate/update in place) and group-level mirror default overrides*
-
 ### Mirrors Management
-![Mirrors](docs/screenshots/05-mirrors.png)
-*View and manage mirrors with real-time status updates and safe per-mirror edits*
+![Mirrors](docs/screenshots/04-mirrors.png)
+*View and manage mirrors with token status, real-time sync status, and safe per-mirror edits*
 
 ### Topology
-![Topology](docs/screenshots/06-topology.png)
+![Topology](docs/screenshots/05-topology.png)
 *Interactive topology visualization with animated data flows, zoom controls, and hover highlighting - click nodes or links to drill down into mirror details*
 
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
@@ -44,10 +40,10 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **Multiple Instance Pairs**: Define and manage mirrors across multiple pairs of GitLab instances (e.g., A↔B, B↔C)
 - **Easy Mirror Creation**: Create mirrors with minimal user input - project information is fetched automatically via the GitLab API
 - **Push & Pull Mirrors**: Support for both push and pull mirroring configurations
-- **HTTPS Mirroring**: Uses HTTPS URLs with group access tokens for secure authentication
-- **Flexible Configuration**: Define default mirror settings at the instance pair level, override them per group, and optionally override per mirror
+- **Automatic Token Management**: Project access tokens are automatically created and managed for each mirror - no manual token configuration needed
+- **Flexible Configuration**: Define default mirror settings at the instance pair level, optionally override per mirror
 - **Safe Inline Editing**: Edit instances/pairs/mirrors in-table; fields that could break existing mirrors are locked/greyed out
-- **Token Rotation**: Rotate instance access tokens and group access tokens without deleting configuration
+- **Token Rotation**: Rotate instance access tokens or individual mirror tokens without deleting configuration
 
 ### Mirror Management
 - **View Mirrors**: See all configured mirrors and their current status at a glance
@@ -194,19 +190,16 @@ APP_DESCRIPTION=Orchestrate GitLab mirrors across multiple instance pairs with p
 
 ### GitLab Access Tokens
 
-This app uses **two kinds of tokens**:
+The app uses **Instance Access Tokens** to call the GitLab API:
 
-- **Instance Access Token** (used to call the GitLab API)
-  - Recommended scope: `api`
-  - You can **rotate** this token from the **GitLab Instances** table (Edit → paste new token → Save).
+- **Instance Access Token** (stored per GitLab instance)
+  - Required scope: `api` (needed to manage mirrors and create project access tokens)
+  - You can **rotate** this token from the **GitLab Instances** table (Edit → paste new token → Save)
 
-- **Group Access Token** (embedded into HTTPS clone URLs for mirrors)
-  - Recommended scopes:
-    - `read_repository`
-    - `write_repository` (needed for push mirrors)
-  - You can **rotate** these tokens from the **Group Settings** table (Update token → paste new token → Save).
-
-**Recommended**: Use Group Access Tokens for better security and management.
+**Automatic Mirror Tokens**: When you create a mirror, the app automatically creates a project access token on the appropriate project (source for pull mirrors, target for push mirrors). These tokens are managed automatically:
+- Created when you create a mirror
+- Deleted when you delete a mirror
+- Can be manually rotated via the "Rotate Token" button in the mirrors table
 
 ## Usage Guide
 
@@ -232,8 +225,9 @@ You can rotate the stored instance access token without changing the instance UR
 
 #### Deletion behavior (important)
 To prevent broken configurations, the app performs **cascading deletes**:
-- Deleting a **GitLab instance** also deletes any **instance pairs** that reference it and any **mirrors** belonging to those pairs (plus related group defaults/tokens).
-- Deleting an **instance pair** also deletes any **mirrors** belonging to that pair (plus related group defaults).
+- Deleting a **GitLab instance** also deletes any **instance pairs** that reference it and any **mirrors** belonging to those pairs.
+- Deleting an **instance pair** also deletes any **mirrors** belonging to that pair.
+- Deleting a **mirror** also deletes its automatically-created project access token.
 
 The UI shows a warning and requires confirmation before performing these actions.
 
@@ -254,47 +248,7 @@ Define pairs of instances where mirrors will be created:
      - Trigger builds on update
      - Only mirror protected branches
 
-### 3. Configure Group Settings
-
-**Important**: Group access tokens are required for mirrors to authenticate via HTTPS.
-
-1. In GitLab, create a group access token for each group that contains projects you want to mirror:
-   - Go to your GitLab group → Settings → Access Tokens
-   - Create a token with the following scopes:
-     - `read_repository` - Read access to repositories
-     - `write_repository` - Write access to repositories (for push mirrors)
-   - Save the token value (you won't be able to see it again)
-
-2. In Mirror Maestro:
-   - Go to the **Group Settings** tab
-   - Click **Add Group Token**
-   - Provide:
-     - GitLab Instance (select from configured instances)
-     - Group Path (e.g., "platform", "frontend", "infrastructure", or "platform/core" for subgroups)
-     - Token Name (e.g., "mirror-token")
-     - Token Value (the token you created in GitLab)
-
-#### Rotating group access tokens
-Because tokens expire, the UI supports **updating tokens in place**:
-- In **Configured Group Settings**, click **Update token**
-- Paste the new token value
-- Click **Update Token**
-
-**Multi-Level Group Support**: The application supports multi-level group paths. For a project at `platform/core/api-gateway`, you can create a token for either:
-- `platform/core` (subgroup level) - most specific
-- `platform` (top-level group) - will be used for all projects in platform/* if no more specific token exists
-
-The application automatically searches from most specific to least specific, so you can organize tokens at any level of your group hierarchy.
-
-#### Group-level mirror default overrides
-You can optionally define group-level overrides for mirror defaults (direction, overwrite divergent branches, only protected branches, and pull-only options like trigger builds / regex / mirror user).
-
-Resolution order for mirror settings is:
-1. Per-mirror overrides (set during mirror creation)
-2. Group defaults (most specific matching group path)
-3. Instance pair defaults
-
-### 4. Manage Mirrors
+### 3. Manage Mirrors
 
 Create and manage mirrors between projects:
 
@@ -305,11 +259,12 @@ Create and manage mirrors between projects:
    - Select target project (auto-populated from GitLab)
    - Click **Create Mirror**
 4. To manage existing mirrors:
-   - **Edit**: Update safe per-mirror overrides (and optionally clear them back to “inherit”)
+   - **Edit**: Update safe per-mirror overrides (and optionally clear them back to "inherit")
    - **Sync**: Force an immediate mirror synchronization
-   - **Delete**: Remove the mirror configuration
+   - **Rotate Token**: Create a new access token for the mirror (revokes the old one)
+   - **Delete**: Remove the mirror configuration (also deletes the access token)
 
-### 5. Import/Export
+### 4. Import/Export
 
 Bulk manage mirror configurations:
 
@@ -339,18 +294,6 @@ The application provides a RESTful API. Once running, visit:
 - `PUT /api/pairs/{id}` - Update pair
 - `DELETE /api/pairs/{id}` - Delete pair
 
-#### Group Access Tokens
-- `GET /api/tokens` - List all group access tokens
-- `POST /api/tokens` - Create new group access token
-- `GET /api/tokens/{id}` - Get token details
-- `PUT /api/tokens/{id}` - Update token
-- `DELETE /api/tokens/{id}` - Delete token
-
-#### Group mirror defaults
-- `GET /api/group-defaults` - List all group mirror defaults (optionally filter by `instance_pair_id`)
-- `POST /api/group-defaults` - Create/update group mirror defaults (upsert)
-- `DELETE /api/group-defaults/{id}` - Delete group mirror defaults
-
 #### Mirrors
 - `GET /api/mirrors` - List all mirrors
 - `POST /api/mirrors` - Create new mirror
@@ -358,6 +301,7 @@ The application provides a RESTful API. Once running, visit:
 - `PUT /api/mirrors/{id}` - Update mirror
 - `DELETE /api/mirrors/{id}` - Delete mirror
 - `POST /api/mirrors/{id}/update` - Trigger mirror update
+- `POST /api/mirrors/{id}/rotate-token` - Rotate the mirror's access token
 
 #### Import/Export
 - `GET /api/export/pair/{id}` - Export mirrors for a pair
@@ -374,22 +318,30 @@ The application provides a RESTful API. Once running, visit:
 ## Security
 
 ### Token Encryption
-All GitLab access tokens (both instance tokens and group access tokens) are encrypted using Fernet (symmetric encryption) before being stored in the database. The encryption key is automatically generated and stored in `data/encryption.key`.
+All GitLab access tokens (instance tokens and mirror tokens) are encrypted using Fernet (symmetric encryption) before being stored in the database. The encryption key is automatically generated and stored in `data/encryption.key`.
 
 **Important**: Keep the `data/encryption.key` file secure and backed up. Without it, you won't be able to decrypt stored tokens.
 
-### Mirror Authentication
-Mirrors use group access tokens for HTTPS authentication. When creating a mirror, the application automatically:
-1. Extracts the group path from the project path (e.g., "platform/core/api-gateway" → tries "platform/core", then "platform")
-2. Looks up the stored group access token, checking from most specific to least specific group level
-3. Constructs an authenticated URL like: `https://token_name:token@gitlab.example.com/group/project.git`
-4. Passes this URL to GitLab for mirror configuration
+### Automatic Mirror Token Management
+Mirrors use automatically-created project access tokens for HTTPS authentication. When creating a mirror:
 
-**Multi-Level Group Support**: For nested groups like `platform/core/api-gateway`, the application searches for tokens in this order:
-- `platform/core` (subgroup) - if a token exists here, it's used
-- `platform` (parent group) - fallback if no subgroup token exists
+1. The app determines which project needs the token:
+   - **Pull mirrors**: Token is created on the source project (allows reading from it)
+   - **Push mirrors**: Token is created on the target project (allows pushing to it)
 
-This ensures secure, token-based authentication without storing credentials in GitLab mirror configurations, and provides flexibility in token management across complex group hierarchies.
+2. A project access token is created with appropriate scopes:
+   - `read_repository` for pull mirrors
+   - `write_repository` for push mirrors
+
+3. The token is used to construct an authenticated URL: `https://token_name:token@gitlab.example.com/project.git`
+
+4. The token is encrypted and stored with the mirror record
+
+**Token Lifecycle**:
+- Tokens are automatically created when mirrors are created
+- Tokens are automatically deleted when mirrors are deleted
+- Tokens can be manually rotated via the "Rotate Token" button (creates new token, revokes old one)
+- Tokens expire after 1 year by default
 
 ### Authentication
 HTTP Basic Authentication can be enabled to protect the web interface. Configure credentials in the `.env` file:
@@ -402,12 +354,13 @@ AUTH_PASSWORD=your_secure_password
 
 ### Best Practices
 1. Always use HTTPS in production
-2. Use Group Access Tokens instead of Personal Access Tokens
-3. Regularly rotate access tokens
-4. Keep the encryption key secure
-5. Use strong passwords for HTTP Basic Auth
-6. Restrict network access to the application
-7. Regularly backup the database and encryption key
+2. Use instance tokens with appropriate `api` scope for GitLab API access
+3. Monitor token expiration - mirror tokens expire after 1 year
+4. Use the "Rotate Token" feature when tokens are about to expire
+5. Keep the encryption key secure
+6. Use strong passwords for HTTP Basic Auth
+7. Restrict network access to the application
+8. Regularly backup the database and encryption key
 
 ## Troubleshooting
 
@@ -462,7 +415,6 @@ The project includes comprehensive E2E tests that provision temporary projects a
 |--------|-------------|------------|
 | `live_gitlab` | All live GitLab tests | All `test_e2e_*.py` files |
 | `multi_project` | Multiple projects in one group | `test_e2e_multi_project.py` |
-| `multi_group` | Group hierarchy with defaults | `test_e2e_multi_group.py` |
 | `dual_instance` | Cross-instance mirroring | `test_e2e_cross_instance.py` |
 
 #### Environment Variables
@@ -498,9 +450,6 @@ pytest -m "live_gitlab and not dual_instance" -v
 # Run only multi-project tests
 pytest -m multi_project -v
 
-# Run only multi-group hierarchy tests
-pytest -m multi_group -v
-
 # Run cross-instance tests (requires two GitLab instances)
 pytest -m dual_instance -v
 
@@ -515,12 +464,6 @@ pytest -m live_gitlab -v
 - Each project has multiple files, branches (main, develop, feature/*), and tags
 - Tests both push and pull mirroring
 - Verifies content (commits, branches, tags, files) syncs correctly
-
-**Multi-Group Tests** (`test_e2e_multi_group.py`):
-- Creates a group hierarchy: `e2e-root/{frontend,backend,shared}`
-- Sets different group-level defaults for each subgroup
-- Verifies defaults inheritance works correctly
-- Tests token inheritance across group hierarchy
 
 **Cross-Instance Tests** (`test_e2e_cross_instance.py`):
 - Creates source projects on instance 1
@@ -558,7 +501,7 @@ This repo includes a manual workflow: `.github/workflows/e2e-live-gitlab.yml`.
 
 **Trigger the workflow:**
 1. Go to Actions → **Live GitLab E2E (manual)** → Run workflow
-2. Select test scope: `single`, `dual`, `multi-project`, `multi-group`, or `all`
+2. Select test scope: `single`, `dual`, `multi-project`, or `all`
 3. Optionally override URLs and group paths in the dispatch inputs
 
 ### Code Style
