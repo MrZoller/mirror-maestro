@@ -34,7 +34,7 @@ class MirrorExport(BaseModel):
     target_project_path: str
     source_project_id: int
     target_project_id: int
-    mirror_direction: str | None = None
+    # Direction is determined by pair, not stored per-mirror
     mirror_protected_branches: bool | None = None
     mirror_overwrite_diverged: bool | None = None
     mirror_trigger_builds: bool | None = None
@@ -83,7 +83,6 @@ async def export_pair_mirrors(
             target_project_path=m.target_project_path,
             source_project_id=m.source_project_id,
             target_project_id=m.target_project_id,
-            mirror_direction=m.mirror_direction,
             mirror_protected_branches=m.mirror_protected_branches,
             mirror_overwrite_diverged=m.mirror_overwrite_diverged,
             mirror_trigger_builds=m.mirror_trigger_builds,
@@ -151,14 +150,13 @@ async def import_pair_mirrors(
             continue
 
         try:
-            # Create new mirror
+            # Create new mirror (direction is determined by pair, not stored per-mirror)
             db_mirror = Mirror(
                 instance_pair_id=pair_id,
                 source_project_id=mirror_data.source_project_id,
                 source_project_path=mirror_data.source_project_path,
                 target_project_id=mirror_data.target_project_id,
                 target_project_path=mirror_data.target_project_path,
-                mirror_direction=mirror_data.mirror_direction,
                 mirror_protected_branches=mirror_data.mirror_protected_branches,
                 mirror_overwrite_diverged=mirror_data.mirror_overwrite_diverged,
                 mirror_trigger_builds=mirror_data.mirror_trigger_builds,

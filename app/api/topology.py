@@ -233,12 +233,13 @@ async def get_link_mirrors(
     rows = (await db.execute(mirror_q)).scalars().all()
 
     # Filter by effective direction in Python (avoids CASE logic and keeps DB portable).
+    # Direction comes from pair only (not stored per-mirror)
     items: list[TopologyMirrorItem] = []
     for m in rows:
         p = pair_by_id.get(m.instance_pair_id)
         if not p:
             continue
-        eff_dir = _norm_dir(m.mirror_direction or p.mirror_direction)
+        eff_dir = _norm_dir(p.mirror_direction)
         if eff_dir != direction:
             continue
 
@@ -373,7 +374,8 @@ async def get_topology(
 
         src = pair.source_instance_id
         tgt = pair.target_instance_id
-        direction = _norm_dir(m.mirror_direction or pair.mirror_direction)
+        # Direction comes from pair only (not stored per-mirror)
+        direction = _norm_dir(pair.mirror_direction)
 
         key = (src, tgt, direction)
         agg[key]["mirror_count"] += 1
