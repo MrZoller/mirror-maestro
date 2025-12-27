@@ -39,7 +39,7 @@ This document provides comprehensive guidance for AI assistants working on the M
 - Manage multiple GitLab instances and instance pairs
 - Create and configure push/pull mirrors with minimal input
 - Group access token management with rotation support
-- Hierarchical configuration (per-mirror → group → pair defaults)
+- Two-tier configuration (per-mirror overrides → pair defaults; direction is pair-only)
 - Topology visualization with D3.js
 - Import/export mirror configurations
 - Encrypted token storage
@@ -51,7 +51,7 @@ This document provides comprehensive guidance for AI assistants working on the M
 1. **Async/Await**: All I/O operations (database, HTTP) are asynchronous
 2. **Dependency Injection**: FastAPI's DI for database sessions and authentication
 3. **Repository Pattern**: Database access through SQLAlchemy models
-4. **Three-Tier Configuration**: Mirror settings resolved through hierarchy (mirror → group → pair)
+4. **Two-Tier Configuration**: Mirror settings (except direction) resolved through hierarchy (mirror → pair)
 5. **Encryption at Rest**: All GitLab tokens encrypted before database storage
 6. **Single-Page Application**: Frontend is a SPA with tab-based navigation
 
@@ -895,10 +895,15 @@ def resolve_mirror_settings(mirror: Mirror, pair: InstancePair) -> dict:
     Resolve effective mirror settings from two sources:
     1. Per-mirror overrides (highest priority)
     2. Pair defaults (lowest priority)
-    """
-    effective = {}
 
-    for setting in ["mirror_direction", "mirror_protected_branches", "mirror_overwrite_diverged"]:
+    Note: Direction (push/pull) is determined by the pair only, not overridable per-mirror.
+    """
+    effective = {
+        # Direction comes from pair only
+        "mirror_direction": pair.mirror_direction,
+    }
+
+    for setting in ["mirror_protected_branches", "mirror_overwrite_diverged"]:
         # Try mirror-level override
         mirror_value = getattr(mirror, setting)
         if mirror_value is not None:
@@ -1911,7 +1916,7 @@ async def list_mirrors(
 ✅ Use type hints everywhere
 ✅ Write tests for new features
 ✅ Use descriptive error messages
-✅ Follow the three-tier settings hierarchy
+✅ Follow the two-tier settings hierarchy (direction is pair-only)
 ✅ Validate user input with Pydantic
 ✅ Use constant-time comparison for auth
 ✅ Document complex logic with comments
