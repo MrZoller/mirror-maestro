@@ -157,6 +157,10 @@ header p {
     backdrop-filter: blur(6px);
 }
 
+[data-theme="dark"] .tabs {
+    background: rgba(30, 41, 59, 0.8);
+}
+
 .tab {
     padding: 12px 24px;
     background: transparent;
@@ -172,6 +176,10 @@ header p {
 .tab:hover {
     color: var(--text-primary);
     background: rgba(17, 24, 39, 0.04);
+}
+
+[data-theme="dark"] .tab:hover {
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .tab.active {
