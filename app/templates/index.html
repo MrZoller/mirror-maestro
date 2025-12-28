@@ -577,6 +577,14 @@
                     <li><strong>Trigger builds</strong> - Run CI/CD pipelines on the target after sync</li>
                     <li><strong>Overwrite diverged branches</strong> - Force-update branches that have diverged</li>
                 </ul>
+
+                <h3>Bidirectional Mirroring</h3>
+                <p>To sync repositories in both directions between two instances, create two instance pairs:</p>
+                <ul>
+                    <li><strong>Pair 1:</strong> Instance A → Instance B (e.g., "Production to Staging")</li>
+                    <li><strong>Pair 2:</strong> Instance B → Instance A (e.g., "Staging to Production")</li>
+                </ul>
+                <p>Each pair can have independent settings (direction, branch filters, overwrite policies, etc.). The <a href="#" onclick="switchTab('topology-tab'); return false;">Topology</a> view will display both directions as separate links between the instances, making bidirectional relationships easy to visualize.</p>
             </div>
 
             <!-- Authentication & Tokens -->
