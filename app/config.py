@@ -42,5 +42,10 @@ class Settings(BaseSettings):
     app_title: str = "Mirror Maestro"
     app_description: str = "Orchestrate GitLab mirrors across multiple instance pairs with precision"
 
+    # SSL/TLS Configuration
+    ssl_enabled: bool = False
+    ssl_cert_path: str = "/etc/nginx/ssl/cert.pem"
+    ssl_key_path: str = "/etc/nginx/ssl/key.pem"
+
 
 settings = Settings()
