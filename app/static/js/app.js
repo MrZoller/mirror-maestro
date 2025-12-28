@@ -877,6 +877,9 @@ async function loadDashboard() {
     } catch (error) {
         console.error('Failed to load dashboard:', error);
     }
+
+    // Load system health (non-blocking)
+    loadSystemHealth();
 }
 
 function renderDashboard(metrics) {
@@ -896,6 +899,122 @@ function renderDashboard(metrics) {
 
     // Render pairs distribution
     renderPairsDistribution(metrics.mirrors_by_pair);
+}
+
+// ----------------------------
+// System Health
+// ----------------------------
+
+async function loadSystemHealth() {
+    const container = document.getElementById('system-health-content');
+    if (!container) return;
+
+    try {
+        const health = await apiRequest('/api/health');
+        renderSystemHealth(health, container);
+    } catch (error) {
+        console.error('Failed to load system health:', error);
+        container.innerHTML = `
+            <div class="system-health-status unhealthy">
+                <span class="health-status-icon">⚠️</span>
+                <div class="health-status-text">
+                    <div class="health-status-title">Unable to check health</div>
+                    <div class="health-status-timestamp">${error.message || 'Connection failed'}</div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function refreshSystemHealth() {
+    loadSystemHealth();
+}
+
+function renderSystemHealth(health, container) {
+    const statusIcons = {
+        healthy: '✓',
+        degraded: '⚠',
+        unhealthy: '✕'
+    };
+
+    const statusLabels = {
+        healthy: 'All Systems Operational',
+        degraded: 'Some Issues Detected',
+        unhealthy: 'System Issues'
+    };
+
+    const timestamp = health.timestamp
+        ? new Date(health.timestamp).toLocaleString()
+        : 'Just now';
+
+    let html = `
+        <div class="system-health-status ${health.status}">
+            <span class="health-status-icon">${statusIcons[health.status] || '?'}</span>
+            <div class="health-status-text">
+                <div class="health-status-title">${statusLabels[health.status] || health.status}</div>
+                <div class="health-status-timestamp">Last checked: ${timestamp}</div>
+            </div>
+        </div>
+        <div class="health-components">
+    `;
+
+    // Render each component
+    for (const component of health.components || []) {
+        html += `
+            <div class="health-component">
+                <div>
+                    <div class="health-component-name">
+                        ${getComponentIcon(component.name)} ${formatComponentName(component.name)}
+                    </div>
+                    ${component.message ? `<div class="health-component-message">${escapeHtml(component.message)}</div>` : ''}
+                </div>
+                <span class="health-component-status ${component.status}">${component.status}</span>
+            </div>
+        `;
+    }
+
+    html += '</div>';
+
+    // Add token warnings if any
+    if (health.tokens) {
+        if (health.tokens.expired > 0) {
+            html += `
+                <div class="health-token-warning">
+                    <span>⚠️</span>
+                    <span>${health.tokens.expired} mirror token(s) have expired and need rotation</span>
+                </div>
+            `;
+        } else if (health.tokens.expiring_soon > 0) {
+            html += `
+                <div class="health-token-warning">
+                    <span>⏰</span>
+                    <span>${health.tokens.expiring_soon} mirror token(s) expiring within 30 days</span>
+                </div>
+            `;
+        }
+    }
+
+    container.innerHTML = html;
+}
+
+function getComponentIcon(name) {
+    const icons = {
+        database: '🗄️',
+        mirrors: '🔄',
+        tokens: '🔑',
+        gitlab_instances: '🦊'
+    };
+    return icons[name] || '📦';
+}
+
+function formatComponentName(name) {
+    const names = {
+        database: 'Database',
+        mirrors: 'Mirror Sync',
+        tokens: 'Access Tokens',
+        gitlab_instances: 'GitLab Instances'
+    };
+    return names[name] || name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, ' ');
 }
 
 function updateStatCard(elementId, value) {

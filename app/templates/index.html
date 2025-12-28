@@ -151,6 +151,20 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- System Health -->
+                <div class="card dashboard-system-health">
+                    <div class="flex-between">
+                        <h3>System Health</h3>
+                        <button class="btn btn-small btn-secondary" onclick="refreshSystemHealth()" title="Refresh health status">↻</button>
+                    </div>
+                    <div id="system-health-content" class="mt-20">
+                        <div class="skeleton">
+                            <div class="skeleton-text"></div>
+                            <div class="skeleton-text"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -676,7 +690,7 @@
                 <h3>Application Overview</h3>
                 <p>Mirror Maestro is organized into several tabs, each focused on a specific aspect of mirror management:</p>
                 <ul>
-                    <li><strong><a href="#" onclick="switchTab('dashboard-tab'); return false;">Dashboard</a></strong> - Quick overview with statistics and recent activity</li>
+                    <li><strong><a href="#" onclick="switchTab('dashboard-tab'); return false;">Dashboard</a></strong> - Quick overview with statistics, recent activity, and system health</li>
                     <li><strong><a href="#" onclick="switchTab('instances-tab'); return false;">GitLab Instances</a></strong> - Manage connections to your GitLab servers</li>
                     <li><strong><a href="#" onclick="switchTab('pairs-tab'); return false;">Instance Pairs</a></strong> - Configure mirroring relationships between instances</li>
                     <li><strong><a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a></strong> - Create and manage individual repository mirrors</li>
@@ -945,6 +959,87 @@
                     <li>Upload and restore the backup on the new server</li>
                     <li>All instances, pairs, and mirrors will be migrated</li>
                 </ol>
+            </div>
+
+            <!-- System Health -->
+            <div class="card">
+                <h2>System Health</h2>
+                <p class="text-muted">Monitor the health of your Mirror Maestro installation.</p>
+
+                <h3>Health Dashboard</h3>
+                <p>The <a href="#" onclick="switchTab('dashboard-tab'); return false;">Dashboard</a> includes a System Health card that shows the overall status of your Mirror Maestro installation at a glance. Health status is calculated based on:</p>
+                <ul>
+                    <li><strong>Database connectivity</strong> - Ensures the database is accessible</li>
+                    <li><strong>Mirror sync status</strong> - Checks for failed mirrors</li>
+                    <li><strong>Token expiration</strong> - Monitors for expiring or expired tokens</li>
+                </ul>
+
+                <h3>Health Status Levels</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Meaning</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="badge badge-success">Healthy</span></td>
+                            <td>All systems operational. Database connected, mirrors syncing, tokens valid.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-warning">Degraded</span></td>
+                            <td>Some issues detected. May have failed mirrors, expiring tokens, or unreachable instances.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-danger">Unhealthy</span></td>
+                            <td>Critical issues. Database may be down, most mirrors failing, or other severe problems.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Health API Endpoints</h3>
+                <p>Mirror Maestro provides health check endpoints for monitoring tools and load balancers:</p>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Auth</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>GET /api/health/quick</code></td>
+                            <td>No</td>
+                            <td>Fast health check for load balancers. Returns immediately without checking dependencies.</td>
+                        </tr>
+                        <tr>
+                            <td><code>GET /api/health</code></td>
+                            <td>Yes</td>
+                            <td>Detailed health check with component status, mirror statistics, and token expiration info.</td>
+                        </tr>
+                        <tr>
+                            <td><code>GET /api/health?check_instances=true</code></td>
+                            <td>Yes</td>
+                            <td>Extended health check that also tests connectivity to all GitLab instances (slower).</td>
+                        </tr>
+                        <tr>
+                            <td><code>GET /health</code></td>
+                            <td>No</td>
+                            <td>Legacy endpoint for backward compatibility.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Monitoring Best Practices</h3>
+                <ul>
+                    <li>Use <code>/api/health/quick</code> for frequent polling (e.g., every 10 seconds)</li>
+                    <li>Use <code>/api/health</code> for less frequent detailed checks (e.g., every minute)</li>
+                    <li>Set up alerts for "degraded" or "unhealthy" status</li>
+                    <li>Monitor token expiration warnings and rotate tokens before they expire</li>
+                    <li>Check the Dashboard regularly to review mirror sync failures</li>
+                </ul>
             </div>
 
             <!-- Troubleshooting -->

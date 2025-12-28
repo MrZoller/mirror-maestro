@@ -1452,6 +1452,114 @@ table tbody tr:hover {
     }
 }
 
+/* System Health Component */
+.system-health-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+}
+
+.system-health-status.healthy {
+    background: rgba(16, 133, 72, 0.1);
+    border: 1px solid rgba(16, 133, 72, 0.3);
+}
+
+.system-health-status.degraded {
+    background: rgba(222, 126, 0, 0.1);
+    border: 1px solid rgba(222, 126, 0, 0.3);
+}
+
+.system-health-status.unhealthy {
+    background: rgba(221, 43, 14, 0.1);
+    border: 1px solid rgba(221, 43, 14, 0.3);
+}
+
+.health-status-icon {
+    font-size: 1.5rem;
+}
+
+.health-status-text {
+    flex: 1;
+}
+
+.health-status-title {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.health-status-timestamp {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.health-components {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.health-component {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: rgba(17, 24, 40, 0.02);
+    border-radius: var(--radius-sm);
+}
+
+[data-theme="dark"] .health-component {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.health-component-name {
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.health-component-status {
+    font-size: 0.85rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.health-component-status.healthy {
+    background: rgba(16, 133, 72, 0.15);
+    color: var(--success-color);
+}
+
+.health-component-status.degraded {
+    background: rgba(222, 126, 0, 0.15);
+    color: var(--warning-color);
+}
+
+.health-component-status.unhealthy {
+    background: rgba(221, 43, 14, 0.15);
+    color: var(--danger-color);
+}
+
+.health-component-message {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+.health-token-warning {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: rgba(222, 126, 0, 0.1);
+    border: 1px solid rgba(222, 126, 0, 0.3);
+    border-radius: var(--radius-sm);
+    margin-top: 12px;
+    font-size: 0.9rem;
+}
+
 /* Recent Activity List */
 .activity-list {
     max-height: 400px;
