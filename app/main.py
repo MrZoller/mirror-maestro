@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from sqlalchemy import select
 
 from app.config import settings
@@ -110,6 +110,13 @@ async def root(request: Request):
             "multi_user_enabled": settings.multi_user_enabled,
         },
     )
+
+
+@app.get("/favicon.ico")
+@app.get("/favicon.svg")
+async def favicon():
+    """Serve the favicon from the root path where browsers look for it by default."""
+    return FileResponse("app/static/images/favicon.svg", media_type="image/svg+xml")
 
 
 @app.get("/health")
