@@ -90,8 +90,7 @@ async def test_import_pair_mirrors_imports_and_skips_duplicates(client, session_
                 "target_project_path": "c/d",
                 "source_project_id": 1,
                 "target_project_id": 2,
-                "mirror_direction": None,
-                "mirror_protected_branches": None,
+                # Direction is determined by pair, not stored per-mirror
                 "mirror_overwrite_diverged": None,
                 "mirror_trigger_builds": None,
                 "only_mirror_protected_branches": None,
@@ -186,13 +185,11 @@ async def test_import_pair_with_all_mirror_settings(client, session_maker):
                 "target_project_path": "mirror/platform-core",
                 "source_project_id": 100,
                 "target_project_id": 200,
-                "mirror_direction": "pull",
-                "mirror_protected_branches": True,
+                # Direction is determined by pair, not stored per-mirror
                 "mirror_overwrite_diverged": False,
                 "mirror_trigger_builds": True,
                 "only_mirror_protected_branches": True,
                 "mirror_branch_regex": "^release/.*$",
-                "mirror_user_id": 42,
                 "enabled": True,
             }
         ],
@@ -213,13 +210,11 @@ async def test_import_pair_with_all_mirror_settings(client, session_maker):
             )
         )
         mirror = result.scalar_one()
-        assert mirror.mirror_direction == "pull"
-        assert mirror.mirror_protected_branches is True
+        # Direction comes from pair, not stored on mirror
         assert mirror.mirror_overwrite_diverged is False
         assert mirror.mirror_trigger_builds is True
         assert mirror.only_mirror_protected_branches is True
         assert mirror.mirror_branch_regex == "^release/.*$"
-        assert mirror.mirror_user_id == 42
         assert mirror.enabled is True
 
 

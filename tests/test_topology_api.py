@@ -34,10 +34,12 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
     c_id = await seed_instance(session_maker, name="C", url="https://c.example.com")
 
     pair_ab = await seed_pair(session_maker, name="ab", src_id=a_id, tgt_id=b_id, direction="push")
-    pair_bc = await seed_pair(session_maker, name="bc", src_id=b_id, tgt_id=c_id, direction="pull")
+    pair_bc_pull = await seed_pair(session_maker, name="bc-pull", src_id=b_id, tgt_id=c_id, direction="pull")
+    pair_bc_push = await seed_pair(session_maker, name="bc-push", src_id=b_id, tgt_id=c_id, direction="push")
 
     async with session_maker() as s:
         # A -> B (push), 3 mirrors, 1 disabled
+        # Direction comes from pair, not stored on mirror
         s.add_all(
             [
                 Mirror(
@@ -46,7 +48,6 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
                     source_project_path="g/a1",
                     target_project_id=2,
                     target_project_path="g/b1",
-                    mirror_direction=None,  # inherit pair direction
                     enabled=True,
                     last_update_status="failed",
                     last_successful_update=datetime.utcnow() - timedelta(hours=6),
@@ -57,7 +58,6 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
                     source_project_path="g/a2",
                     target_project_id=4,
                     target_project_path="g/b2",
-                    mirror_direction=None,
                     enabled=True,
                     last_update_status="finished",
                     last_successful_update=datetime.utcnow() - timedelta(hours=1),
@@ -68,7 +68,6 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
                     source_project_path="g/a3",
                     target_project_id=6,
                     target_project_path="g/b3",
-                    mirror_direction=None,
                     enabled=False,
                     last_update_status="pending",
                     last_successful_update=None,
@@ -76,27 +75,26 @@ async def test_topology_aggregates_links_and_node_stats(client, session_maker):
             ]
         )
 
-        # B -> C pull + B -> C push override (separate link buckets)
+        # B -> C pull (via pull pair)
         s.add(
             Mirror(
-                instance_pair_id=pair_bc,
+                instance_pair_id=pair_bc_pull,
                 source_project_id=10,
                 source_project_path="g/bx",
                 target_project_id=20,
                 target_project_path="g/cx",
-                mirror_direction=None,  # inherit pull
                 enabled=True,
                 last_update_status="pending",
             )
         )
+        # B -> C push (via push pair - separate link bucket)
         s.add(
             Mirror(
-                instance_pair_id=pair_bc,
+                instance_pair_id=pair_bc_push,
                 source_project_id=11,
                 source_project_path="g/by",
                 target_project_id=21,
                 target_project_path="g/cy",
-                mirror_direction="push",  # override
                 enabled=True,
                 last_update_status="pending",
             )
@@ -166,6 +164,7 @@ async def test_topology_staleness_thresholds_influence_health(client, session_ma
     pair_ab = await seed_pair(session_maker, name="ab2", src_id=a_id, tgt_id=b_id, direction="push")
 
     # A single successful mirror, but very old.
+    # Direction comes from pair, not stored on mirror
     async with session_maker() as s:
         s.add(
             Mirror(
@@ -174,7 +173,6 @@ async def test_topology_staleness_thresholds_influence_health(client, session_ma
                 source_project_path="g/a1",
                 target_project_id=2,
                 target_project_path="g/b1",
-                mirror_direction=None,
                 enabled=True,
                 last_update_status="finished",
                 last_successful_update=datetime.utcnow() - timedelta(hours=10),
@@ -206,6 +204,7 @@ async def test_topology_never_succeeded_level_can_be_error(client, session_maker
     pair_ab = await seed_pair(session_maker, name="ab3", src_id=a_id, tgt_id=b_id, direction="pull")
 
     # Mirror exists but has never recorded a successful update timestamp.
+    # Direction comes from pair, not stored on mirror
     async with session_maker() as s:
         s.add(
             Mirror(
@@ -214,7 +213,6 @@ async def test_topology_never_succeeded_level_can_be_error(client, session_maker
                 source_project_path="g/a1",
                 target_project_id=2,
                 target_project_path="g/b1",
-                mirror_direction=None,
                 enabled=True,
                 last_update_status="pending",
                 last_successful_update=None,
@@ -256,7 +254,6 @@ async def test_topology_link_mirrors_drilldown_filters_and_sorts(client, session
                     source_project_path="g/a1",
                     target_project_id=2,
                     target_project_path="g/b1",
-                    mirror_direction=None,
                     enabled=True,
                     last_update_status="failed",
                     last_successful_update=datetime.utcnow() - timedelta(hours=2),
@@ -267,7 +264,6 @@ async def test_topology_link_mirrors_drilldown_filters_and_sorts(client, session
                     source_project_path="g/a2",
                     target_project_id=4,
                     target_project_path="g/b2",
-                    mirror_direction=None,
                     enabled=True,
                     last_update_status="finished",
                     last_successful_update=datetime.utcnow() - timedelta(hours=1),
@@ -278,7 +274,6 @@ async def test_topology_link_mirrors_drilldown_filters_and_sorts(client, session
                     source_project_path="g/a3",
                     target_project_id=6,
                     target_project_path="g/b3",
-                    mirror_direction=None,
                     enabled=False,
                     last_update_status="pending",
                     last_successful_update=None,

@@ -206,7 +206,6 @@ async def test_mirrors_update_applies_settings_to_gitlab(client, session_maker, 
         pair.only_mirror_protected_branches = True
         pair.mirror_trigger_builds = True
         pair.mirror_branch_regex = "^main$"
-        pair.mirror_user_id = 42
 
         m = Mirror(
             instance_pair_id=pair_id,
@@ -236,7 +235,7 @@ async def test_mirrors_update_applies_settings_to_gitlab(client, session_maker, 
         False,  # keep_divergent_refs (not overwrite_diverged)
         True,   # trigger_builds (pair default; pull only)
         "^main$",
-        42,
+        None,  # mirror_user_id (from target instance, which was None)
         "pull",
     )
 
@@ -292,7 +291,7 @@ async def test_mirrors_update_can_clear_overrides_with_null(client, session_make
             mirror_id=None,  # avoid any GitLab client calls
             enabled=True,
             last_update_status="pending",
-            mirror_direction="pull",
+            # Direction comes from pair, not stored on mirror
             mirror_overwrite_diverged=True,  # explicit override
         )
         s.add(m)
@@ -654,7 +653,6 @@ async def test_mirrors_update_multiple_settings(client, session_maker, monkeypat
         "only_mirror_protected_branches": True,
         "mirror_trigger_builds": True,
         "mirror_branch_regex": "^release/.*$",
-        "mirror_user_id": 99,
     }
     resp = await client.put(f"/api/mirrors/{mirror_id}", json=payload)
     assert resp.status_code == 200
@@ -669,7 +667,6 @@ async def test_mirrors_update_multiple_settings(client, session_maker, monkeypat
         row = (await s.execute(select(Mirror).where(Mirror.id == mirror_id))).scalar_one()
         assert row.enabled is False
         assert row.mirror_overwrite_diverged is True
-        assert row.mirror_user_id == 99
 
 
 @pytest.mark.asyncio
@@ -694,7 +691,6 @@ async def test_mirrors_update_partial_settings(client, session_maker, monkeypatc
             mirror_id=77,
             enabled=True,
             mirror_overwrite_diverged=True,
-            mirror_user_id=42,
             last_update_status="finished",
         )
         s.add(m)
@@ -711,7 +707,6 @@ async def test_mirrors_update_partial_settings(client, session_maker, monkeypatc
         assert row.enabled is False
         # Other settings unchanged
         assert row.mirror_overwrite_diverged is True
-        assert row.mirror_user_id == 42
 
 
 @pytest.mark.asyncio
@@ -896,7 +891,7 @@ async def test_mirrors_trigger_update_for_push_mirror(client, session_maker, mon
             target_project_id=20,
             target_project_path="platform/proj",
             mirror_id=88,
-            mirror_direction="push",
+            # Direction comes from pair (push), not stored on mirror
             enabled=True,
             last_update_status="finished",
         )
@@ -908,7 +903,7 @@ async def test_mirrors_trigger_update_for_push_mirror(client, session_maker, mon
     resp = await client.post(f"/api/mirrors/{mirror_id}/update")
     assert resp.status_code == 200
 
-    # Push mirror should trigger on source project
+    # Push mirror should trigger on source project (direction from pair)
     assert FakeGitLabClient.trigger_calls[-1] == (10, 88)
 
 

@@ -524,17 +524,8 @@ function setupEventListeners() {
         await createMirror();
     });
 
-    // Mirror direction override (or "use pair default") toggles applicable fields
-    document.getElementById('mirror-direction')?.addEventListener('change', (e) => {
-        const selected = (e.target.value || '').toString().toLowerCase();
-        if (selected) {
-            applyMirrorDirectionUI(selected);
-            return;
-        }
-        // Use pair default if present
-        const pair = state.pairs.find(p => p.id === state.selectedPair);
-        applyMirrorDirectionUI(pair?.mirror_direction);
-    });
+    // Direction comes from pair (no per-mirror override)
+    // The UI is updated in handleEditMirror when a pair is selected
 
     // Pair selector for mirrors
     document.getElementById('pair-selector')?.addEventListener('change', (e) => {
@@ -1299,17 +1290,6 @@ function renderPairs(pairs) {
         const target = state.instances.find(i => i.id === pair.target_instance_id);
 
         const direction = (pair.mirror_direction || '').toString().toLowerCase();
-        const ownerInstanceId = direction === 'push' ? pair.source_instance_id : pair.target_instance_id;
-        const ownerInst = state.instances.find(i => i.id === ownerInstanceId);
-
-        const fmtUser = () => {
-            if (direction === 'push') return '<span class="text-muted">n/a</span>';
-            if (pair.mirror_user_id === null || pair.mirror_user_id === undefined) return '<span class="text-muted">auto</span>';
-            if (ownerInst && ownerInst.token_user_id === pair.mirror_user_id && ownerInst.token_username) {
-                return `${escapeHtml(ownerInst.token_username)} <span class="text-muted">(#${escapeHtml(String(pair.mirror_user_id))})</span>`;
-            }
-            return escapeHtml(String(pair.mirror_user_id));
-        };
 
         const settingsCell = (() => {
             const pieces = [];
@@ -1318,11 +1298,9 @@ function renderPairs(pairs) {
             if (direction === 'pull') {
                 pieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(!!pair.mirror_trigger_builds)}`);
                 pieces.push(`<span class="text-muted">regex:</span> ${fmtStr(pair.mirror_branch_regex)}`);
-                pieces.push(`<span class="text-muted">user:</span> ${fmtUser()}`);
             } else {
                 pieces.push(`<span class="text-muted">trigger:</span> <span class="text-muted">n/a</span>`);
                 pieces.push(`<span class="text-muted">regex:</span> <span class="text-muted">n/a</span>`);
-                pieces.push(`<span class="text-muted">user:</span> <span class="text-muted">n/a</span>`);
             }
             return `<div style="line-height:1.35">${pieces.join('<br>')}</div>`;
         })();
@@ -1348,10 +1326,6 @@ function renderPairs(pairs) {
                     <td>
                         <div style="display:grid; gap:10px">
                             <div class="checkbox-group">
-                                <input type="checkbox" id="edit-pair-protected-${pair.id}" ${pair.mirror_protected_branches ? 'checked' : ''}>
-                                <label for="edit-pair-protected-${pair.id}">Mirror protected branches</label>
-                            </div>
-                            <div class="checkbox-group">
                                 <input type="checkbox" id="edit-pair-overwrite-${pair.id}" ${pair.mirror_overwrite_diverged ? 'checked' : ''}>
                                 <label for="edit-pair-overwrite-${pair.id}">Overwrite divergent branches</label>
                             </div>
@@ -1365,7 +1339,6 @@ function renderPairs(pairs) {
                             </div>
                             <div style="display:grid; gap:8px">
                                 <input class="table-input" id="edit-pair-regex-${pair.id}" value="${escapeHtml(pair.mirror_branch_regex || '')}" placeholder="Mirror branch regex (pull only)">
-                                <input class="table-input" id="edit-pair-user-${pair.id}" value="${escapeHtml(pair.mirror_user_id === null || pair.mirror_user_id === undefined ? '' : String(pair.mirror_user_id))}" placeholder="Mirror user id (pull only)">
                             </div>
                         </div>
                     </td>
@@ -1437,13 +1410,12 @@ async function savePairEdit(id) {
     const nameEl = document.getElementById(`edit-pair-name-${id}`);
     const descEl = document.getElementById(`edit-pair-description-${id}`);
     const dirEl = document.getElementById(`edit-pair-direction-${id}`);
-    const protectedEl = document.getElementById(`edit-pair-protected-${id}`);
     const overwriteEl = document.getElementById(`edit-pair-overwrite-${id}`);
     const triggerEl = document.getElementById(`edit-pair-trigger-${id}`);
     const onlyProtectedEl = document.getElementById(`edit-pair-only-protected-${id}`);
     const regexEl = document.getElementById(`edit-pair-regex-${id}`);
     const userEl = document.getElementById(`edit-pair-user-${id}`);
-    if (!nameEl || !dirEl || !protectedEl || !overwriteEl || !onlyProtectedEl) return;
+    if (!nameEl || !dirEl || !overwriteEl || !onlyProtectedEl) return;
 
     const direction = (dirEl.value || '').toString().toLowerCase();
     const isPush = direction === 'push';
@@ -1454,12 +1426,10 @@ async function savePairEdit(id) {
         name: (nameEl.value || '').toString().trim(),
         description: (descEl?.value || '').toString().trim() || null,
         mirror_direction: direction || 'pull',
-        mirror_protected_branches: !!protectedEl.checked,
         mirror_overwrite_diverged: !!overwriteEl.checked,
         only_mirror_protected_branches: !!onlyProtectedEl.checked,
         mirror_trigger_builds: isPush ? false : !!triggerEl?.checked,
         mirror_branch_regex: isPush ? null : (regexRaw || null),
-        mirror_user_id: isPush ? null : (userRaw ? parseInt(userRaw) : null),
     };
 
     try {
@@ -1501,19 +1471,16 @@ async function createPair() {
     const formData = new FormData(form);
 
     const branchRegexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
-    const mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
 
     const data = {
         name: formData.get('name'),
         source_instance_id: parseInt(formData.get('source_instance_id')),
         target_instance_id: parseInt(formData.get('target_instance_id')),
         mirror_direction: formData.get('mirror_direction'),
-        mirror_protected_branches: formData.get('mirror_protected_branches') === 'on',
         mirror_overwrite_diverged: formData.get('mirror_overwrite_diverged') === 'on',
         mirror_trigger_builds: formData.get('mirror_trigger_builds') === 'on',
         only_mirror_protected_branches: formData.get('only_mirror_protected_branches') === 'on',
         mirror_branch_regex: branchRegexRaw || null,
-        mirror_user_id: mirrorUserIdRaw ? parseInt(mirrorUserIdRaw) : null,
         description: formData.get('description') || ''
     };
 
@@ -1629,7 +1596,7 @@ function renderMirrors(mirrors) {
             `<span class="badge badge-info">${mirror.last_update_status}</span>` :
             '<span class="text-muted">N/A</span>';
 
-        const dir = (mirror.effective_mirror_direction || mirror.mirror_direction || '').toString().toLowerCase();
+        const dir = (mirror.effective_mirror_direction || '').toString().toLowerCase();
         const settingsCell = (() => {
             const pieces = [];
             if (dir) pieces.push(`<span class="badge badge-info">${escapeHtml(dir)}</span>`);
@@ -1638,11 +1605,9 @@ function renderMirrors(mirrors) {
             if (dir === 'pull') {
                 pieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(mirror.effective_mirror_trigger_builds)}`);
                 pieces.push(`<span class="text-muted">regex:</span> ${fmtStr(mirror.effective_mirror_branch_regex)}`);
-                pieces.push(`<span class="text-muted">user:</span> ${fmtUser(mirror.effective_mirror_user_id)}`);
             } else if (dir === 'push') {
                 pieces.push(`<span class="text-muted">trigger:</span> <span class="text-muted">n/a</span>`);
                 pieces.push(`<span class="text-muted">regex:</span> <span class="text-muted">n/a</span>`);
-                pieces.push(`<span class="text-muted">user:</span> <span class="text-muted">n/a</span>`);
             }
             return `<div style="line-height:1.35">${pieces.join('<br>')}</div>`;
         })();
@@ -1655,7 +1620,6 @@ function renderMirrors(mirrors) {
             const triggerSel = overrideBoolSelectValue(mirror.mirror_trigger_builds);
 
             const regexMode = (mirror.mirror_branch_regex === null || mirror.mirror_branch_regex === undefined) ? '__inherit__' : '__override__';
-            const userMode = (mirror.mirror_user_id === null || mirror.mirror_user_id === undefined) ? '__inherit__' : '__override__';
 
             return `
                 <tr data-editing="true">
@@ -1697,15 +1661,6 @@ function renderMirrors(mirrors) {
                                         <option value="__override__"${regexMode === '__override__' ? ' selected' : ''}>Override</option>
                                     </select>
                                     <input class="table-input" id="edit-mirror-regex-${mirror.id}" value="${escapeHtml(mirror.mirror_branch_regex || '')}" placeholder="^main$ (optional)" ${isPush ? 'disabled' : ''}>
-                                </div>
-
-                                <label class="text-muted">mirror user id (pull only)</label>
-                                <div style="display:grid; gap:6px">
-                                    <select class="table-select" id="edit-mirror-user-mode-${mirror.id}" onchange="applyMirrorEditControls(${mirror.id})" ${isPush ? 'disabled' : ''}>
-                                        <option value="__inherit__"${userMode === '__inherit__' ? ' selected' : ''}>Inherit</option>
-                                        <option value="__override__"${userMode === '__override__' ? ' selected' : ''}>Override</option>
-                                    </select>
-                                    <input class="table-input" id="edit-mirror-user-${mirror.id}" value="${escapeHtml(mirror.mirror_user_id === null || mirror.mirror_user_id === undefined ? '' : String(mirror.mirror_user_id))}" placeholder="123 (optional)" ${isPush ? 'disabled' : ''}>
                                 </div>
                             </div>
                         </div>
@@ -1826,7 +1781,7 @@ function applyMirrorEditControls(mirrorId) {
 async function saveMirrorEdit(id) {
     const mirror = (state.mirrors || []).find(m => m.id === id);
     if (!mirror) return;
-    const dir = (mirror.effective_mirror_direction || mirror.mirror_direction || '').toString().toLowerCase();
+    const dir = (mirror.effective_mirror_direction || '').toString().toLowerCase();
     const isPush = dir === 'push';
 
     const enabledEl = document.getElementById(`edit-mirror-enabled-${id}`);
@@ -1852,17 +1807,12 @@ async function saveMirrorEdit(id) {
         only_mirror_protected_branches: parseBoolOverride(onlyProtectedEl.value),
         mirror_trigger_builds: isPush ? null : parseBoolOverride(triggerEl?.value || '__inherit__'),
         mirror_branch_regex: null,
-        mirror_user_id: null,
     };
 
     if (!isPush) {
         const regexMode = (regexModeEl?.value || '__inherit__').toString();
         const regexRaw = (regexEl?.value || '').toString().trim();
         payload.mirror_branch_regex = regexMode === '__override__' ? (regexRaw || null) : null;
-
-        const userMode = (userModeEl?.value || '__inherit__').toString();
-        const userRaw = (userEl?.value || '').toString().trim();
-        payload.mirror_user_id = userMode === '__override__' ? (userRaw ? parseInt(userRaw) : null) : null;
     }
 
     try {
@@ -1952,35 +1902,56 @@ async function searchProjectsForMirror(side) {
 }
 
 function resetMirrorOverrides() {
-    // Tri-state checkboxes (indeterminate => "use pair default" / don't send)
-    const triStateCheckboxIds = [
-        'mirror-overwrite',
-        'mirror-trigger',
-        'mirror-only-protected',
-    ];
-    triStateCheckboxIds.forEach((id) => {
+    // Reset all select overrides to "inherit from pair"
+    const selectIds = ['mirror-overwrite', 'mirror-trigger', 'mirror-only-protected'];
+    selectIds.forEach((id) => {
         const el = document.getElementById(id);
-        if (!el) return;
-        el.checked = false;
-        el.indeterminate = true;
-        el.title = 'Use pair default';
-        el.onchange = () => {
-            // Once the user interacts, treat it as an explicit override.
-            el.indeterminate = false;
-            el.title = '';
-        };
+        if (el) el.value = '__inherit__';
     });
 
     const regex = document.getElementById('mirror-branch-regex');
     if (regex) regex.value = '';
-    const userId = document.getElementById('mirror-mirror-user-id');
-    if (userId) userId.value = '';
 
-    const dir = document.getElementById('mirror-direction');
-    if (dir) dir.value = '';
+    // Direction dropdown removed - direction comes from pair only
 
     const enabled = document.getElementById('mirror-enabled');
     if (enabled) enabled.checked = true;
+
+    // Update the inherit option texts to show pair defaults
+    updateMirrorFormPairDefaults();
+}
+
+function updateMirrorFormPairDefaults() {
+    const pair = state.pairs.find(p => p.id === state.selectedPair);
+    if (!pair) return;
+
+    const fmtBool = (v) => v ? 'yes' : 'no';
+
+    // Update each select's "inherit" option to show the pair's default
+    const overwriteEl = document.getElementById('mirror-overwrite');
+    if (overwriteEl) {
+        const inheritOpt = overwriteEl.querySelector('option[value="__inherit__"]');
+        if (inheritOpt) inheritOpt.textContent = `Inherit from pair (${fmtBool(pair.mirror_overwrite_diverged)})`;
+    }
+
+    const onlyProtectedEl = document.getElementById('mirror-only-protected');
+    if (onlyProtectedEl) {
+        const inheritOpt = onlyProtectedEl.querySelector('option[value="__inherit__"]');
+        if (inheritOpt) inheritOpt.textContent = `Inherit from pair (${fmtBool(pair.only_mirror_protected_branches)})`;
+    }
+
+    const triggerEl = document.getElementById('mirror-trigger');
+    if (triggerEl) {
+        const inheritOpt = triggerEl.querySelector('option[value="__inherit__"]');
+        if (inheritOpt) inheritOpt.textContent = `Inherit from pair (${fmtBool(pair.mirror_trigger_builds)})`;
+    }
+
+    // Update placeholders for text inputs to show pair defaults
+    const regexEl = document.getElementById('mirror-branch-regex');
+    if (regexEl) {
+        const pairRegex = pair.mirror_branch_regex;
+        regexEl.placeholder = pairRegex ? `Inherit: ${pairRegex}` : 'Inherit from pair (none)';
+    }
 }
 
 function applyMirrorDirectionUI(direction) {
@@ -2001,12 +1972,6 @@ function applyMirrorDirectionUI(direction) {
     if (regex) {
         regex.disabled = isPush;
         if (isPush) regex.value = '';
-    }
-
-    const userId = document.getElementById('mirror-mirror-user-id');
-    if (userId) {
-        userId.disabled = isPush;
-        if (isPush) userId.value = '';
     }
 }
 
@@ -2034,38 +1999,33 @@ async function createMirror() {
         enabled: formData.get('enabled') === 'on'
     };
 
-    const mirrorDirection = (formData.get('mirror_direction') || '').toString().trim();
+    // Direction comes from pair only (no per-mirror override)
     const pair = state.pairs.find(p => p.id === state.selectedPair);
-    const effectiveDirection = (mirrorDirection || pair?.mirror_direction || '').toString().toLowerCase();
+    const effectiveDirection = (pair?.mirror_direction || '').toString().toLowerCase();
     const isPush = effectiveDirection === 'push';
-    if (mirrorDirection) {
-        data.mirror_direction = mirrorDirection;
-    }
 
+    // Handle tri-state selects: "__inherit__" means omit (use pair default), otherwise convert to boolean
     const overwriteEl = document.getElementById('mirror-overwrite');
-    if (overwriteEl && !overwriteEl.indeterminate) {
-        data.mirror_overwrite_diverged = overwriteEl.checked;
+    if (overwriteEl && overwriteEl.value !== '__inherit__') {
+        data.mirror_overwrite_diverged = overwriteEl.value === 'true';
     }
     const triggerEl = document.getElementById('mirror-trigger');
-    if (triggerEl && !triggerEl.indeterminate && !isPush) {
-        data.mirror_trigger_builds = triggerEl.checked;
+    if (triggerEl && triggerEl.value !== '__inherit__' && !isPush) {
+        data.mirror_trigger_builds = triggerEl.value === 'true';
     }
     const onlyProtectedEl = document.getElementById('mirror-only-protected');
-    if (onlyProtectedEl && !onlyProtectedEl.indeterminate) {
-        data.only_mirror_protected_branches = onlyProtectedEl.checked;
+    if (onlyProtectedEl && onlyProtectedEl.value !== '__inherit__') {
+        data.only_mirror_protected_branches = onlyProtectedEl.value === 'true';
     }
 
     const regexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
     if (regexRaw && !isPush) {
         data.mirror_branch_regex = regexRaw;
     }
-    const mirrorUserIdRaw = (formData.get('mirror_user_id') || '').toString().trim();
-    if (mirrorUserIdRaw && !isPush) {
-        data.mirror_user_id = parseInt(mirrorUserIdRaw);
-    }
 
     // Preflight: check for existing GitLab remote mirrors before attempting to create.
     // This is especially important for pull mirrors, where GitLab effectively supports only one.
+    // Direction comes from pair, so no need to pass it here.
     try {
         const preflightPayload = {
             instance_pair_id: data.instance_pair_id,
@@ -2074,7 +2034,6 @@ async function createMirror() {
             target_project_id: data.target_project_id,
             target_project_path: data.target_project_path,
         };
-        if (mirrorDirection) preflightPayload.mirror_direction = mirrorDirection;
 
         const preflight = await apiRequest('/api/mirrors/preflight', {
             method: 'POST',

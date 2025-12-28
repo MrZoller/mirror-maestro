@@ -50,16 +50,9 @@
 
             <div class="card">
                 <h3>Create New Mirror</h3>
+                <!-- Direction is inherited from the instance pair -->
                 <form id="mirror-form">
                     <div class="form-row">
-                        <div class="form-group">
-                            <label for="mirror-direction">Mirror Direction</label>
-                            <select id="mirror-direction" name="mirror_direction">
-                                <option value="">Use pair default</option>
-                                <option value="pull" selected>Pull (Target pulls from Source)</option>
-                                <option value="push">Push (Source pushes to Target)</option>
-                            </select>
-                        </div>
                         <div class="form-group">
                             <label>Status</label>
                             <div class="checkbox-group">
@@ -96,26 +89,36 @@
                     </div>
                     <div class="form-group">
                         <label>Mirror Settings (optional overrides)</label>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="mirror-overwrite" name="mirror_overwrite_diverged" checked>
-                            <label for="mirror-overwrite">Overwrite divergent branches</label>
-                        </div>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="mirror-trigger" name="mirror_trigger_builds" checked>
-                            <label for="mirror-trigger">Trigger builds on mirror update</label>
-                        </div>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="mirror-only-protected" name="only_mirror_protected_branches">
-                            <label for="mirror-only-protected">Only mirror protected branches</label>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="mirror-overwrite">Overwrite divergent branches</label>
+                                <select id="mirror-overwrite" name="mirror_overwrite_diverged" class="form-select">
+                                    <option value="__inherit__" selected>Inherit from pair (yes)</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="mirror-only-protected">Only mirror protected branches</label>
+                                <select id="mirror-only-protected" name="only_mirror_protected_branches" class="form-select">
+                                    <option value="__inherit__" selected>Inherit from pair (yes)</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="mirror-trigger">Trigger builds (pull only)</label>
+                                <select id="mirror-trigger" name="mirror_trigger_builds" class="form-select">
+                                    <option value="__inherit__" selected>Inherit from pair (no)</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
                         </div>
                         <div class="form-row mt-10">
                             <div class="form-group">
-                                <label for="mirror-branch-regex">Mirror branch regex</label>
-                                <input type="text" id="mirror-branch-regex" name="mirror_branch_regex" value="^main$|^release/.*$" placeholder="Optional (e.g., ^main$|^release/.*$)">
-                            </div>
-                            <div class="form-group">
-                                <label for="mirror-mirror-user-id">Mirror user</label>
-                                <input type="number" id="mirror-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
+                                <label for="mirror-branch-regex">Mirror branch regex (pull only)</label>
+                                <input type="text" id="mirror-branch-regex" name="mirror_branch_regex" placeholder="Inherit from pair">
                             </div>
                         </div>
                     </div>
@@ -173,12 +176,6 @@
                                             <option selected>Override</option>
                                         </select>
                                         <input class="table-input" value="^main$">
-                                        <label class="text-muted">mirror user id (pull only)</label>
-                                        <select class="table-select">
-                                            <option selected>Inherit</option>
-                                            <option>Override</option>
-                                        </select>
-                                        <input class="table-input" value="" disabled>
                                     </div>
                                 </div>
                             </td>
@@ -208,8 +205,7 @@
                                     <span class="text-muted">overwrite:</span> false<br>
                                     <span class="text-muted">only_protected:</span> false<br>
                                     <span class="text-muted">trigger:</span> false<br>
-                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">user:</span> 123
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -234,8 +230,7 @@
                                     <span class="text-muted">overwrite:</span> true<br>
                                     <span class="text-muted">only_protected:</span> false<br>
                                     <span class="text-muted">trigger:</span> true<br>
-                                    <span class="text-muted">regex:</span> <code>^release/.*$</code><br>
-                                    <span class="text-muted">user:</span> 77
+                                    <span class="text-muted">regex:</span> <code>^release/.*$</code>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -260,8 +255,7 @@
                                     <span class="text-muted">overwrite:</span> false<br>
                                     <span class="text-muted">only_protected:</span> true<br>
                                     <span class="text-muted">trigger:</span> true<br>
-                                    <span class="text-muted">regex:</span> <code>^(main|release/.*)$</code><br>
-                                    <span class="text-muted">user:</span> 123
+                                    <span class="text-muted">regex:</span> <code>^(main|release/.*)$</code>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -286,8 +280,7 @@
                                     <span class="text-muted">overwrite:</span> true<br>
                                     <span class="text-muted">only_protected:</span> true<br>
                                     <span class="text-muted">trigger:</span> false<br>
-                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">user:</span> 123
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -312,8 +305,7 @@
                                     <span class="text-muted">overwrite:</span> false<br>
                                     <span class="text-muted">only_protected:</span> false<br>
                                     <span class="text-muted">trigger:</span> true<br>
-                                    <span class="text-muted">regex:</span> <code>^main$</code><br>
-                                    <span class="text-muted">user:</span> 123
+                                    <span class="text-muted">regex:</span> <code>^main$</code>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -338,8 +330,7 @@
                                     <span class="text-muted">overwrite:</span> false<br>
                                     <span class="text-muted">only_protected:</span> false<br>
                                     <span class="text-muted">trigger:</span> false<br>
-                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">user:</span> 123
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -364,8 +355,7 @@
                                     <span class="text-muted">overwrite:</span> <span class="text-muted">n/a</span><br>
                                     <span class="text-muted">only_protected:</span> <span class="text-muted">n/a</span><br>
                                     <span class="text-muted">trigger:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">user:</span> <span class="text-muted">n/a</span>
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span>
                                 </div>
                             </td>
                             <td><span class="badge badge-warning">Disabled</span></td>
