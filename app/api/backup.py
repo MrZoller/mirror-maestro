@@ -3,139 +3,197 @@ Database backup and restore endpoints.
 
 This module provides functionality to backup and restore the entire Mirror Maestro
 database and encryption key as a compressed archive.
+
+Backups are stored as JSON exports of all tables, making them portable and
+database-agnostic.
 """
 from datetime import datetime
 from pathlib import Path
+import json
 import shutil
 import tarfile
 import tempfile
-from typing import Dict
+from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
-from sqlalchemy import text
+from fastapi.responses import Response
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import verify_credentials
 from app.core.encryption import encryption
-from app.database import get_db
+from app.database import get_db, engine
 from app.config import settings
+from app.models import GitLabInstance, InstancePair, Mirror
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
 
 
-def _get_data_paths(db: AsyncSession) -> Dict[str, Path]:
-    """Get paths to database and encryption key files."""
+def _get_encryption_key_path() -> Path:
+    """Get path to encryption key file."""
     import os
-
-    # Get database path from the actual database connection URL
-    # This works with both production and test databases
-    db_url_str = str(db.get_bind().url)
-
-    # Extract the file path from the database URL
-    # Format: sqlite+aiosqlite:///./data/mirrors.db or sqlite+aiosqlite:////tmp/test.db
-    if "sqlite" in db_url_str:
-        # Remove the dialect prefix
-        db_path_str = db_url_str.replace("sqlite+aiosqlite:///", "")
-        db_path = Path(db_path_str).resolve()
-    else:
-        # Fallback to settings for non-SQLite databases
-        db_url_str = settings.database_url.replace("sqlite+aiosqlite:///", "")
-        db_path = Path(db_url_str).resolve()
-
-    # Encryption key path (use same logic as encryption.py)
     key_file = os.getenv("ENCRYPTION_KEY_PATH") or "./data/encryption.key"
-    key_path = Path(key_file).resolve()
-
-    return {
-        "database": db_path,
-        "encryption_key": key_path,
-        "data_dir": db_path.parent
-    }
+    return Path(key_file).resolve()
 
 
-async def _create_safe_db_copy(source_path: Path, dest_path: Path, db: AsyncSession):
-    """
-    Create a consistent copy of the SQLite database.
+def _model_to_dict(obj: Any) -> Dict:
+    """Convert SQLAlchemy model instance to dictionary."""
+    result = {}
+    for column in obj.__table__.columns:
+        value = getattr(obj, column.name)
+        # Handle datetime serialization
+        if hasattr(value, 'isoformat'):
+            value = value.isoformat()
+        result[column.name] = value
+    return result
 
-    Uses VACUUM INTO for a clean, consistent backup without locks.
-    """
+
+async def _export_table_data(db: AsyncSession) -> Dict[str, List[Dict]]:
+    """Export all table data as dictionaries."""
+    data = {}
+
+    # Export GitLab instances
+    result = await db.execute(select(GitLabInstance).order_by(GitLabInstance.id))
+    data['gitlab_instances'] = [_model_to_dict(row) for row in result.scalars().all()]
+
+    # Export instance pairs
+    result = await db.execute(select(InstancePair).order_by(InstancePair.id))
+    data['instance_pairs'] = [_model_to_dict(row) for row in result.scalars().all()]
+
+    # Export mirrors
+    result = await db.execute(select(Mirror).order_by(Mirror.id))
+    data['mirrors'] = [_model_to_dict(row) for row in result.scalars().all()]
+
+    return data
+
+
+async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> Dict[str, int]:
+    """Import data into tables, replacing existing data."""
+    from datetime import datetime as dt
+    counts = {}
+
+    # Clear existing data (in reverse order due to foreign keys)
+    await db.execute(text("DELETE FROM mirrors"))
+    await db.execute(text("DELETE FROM instance_pairs"))
+    await db.execute(text("DELETE FROM gitlab_instances"))
+
+    # Import GitLab instances
+    for row in data.get('gitlab_instances', []):
+        # Parse datetime fields
+        for field in ['created_at', 'updated_at']:
+            if row.get(field) and isinstance(row[field], str):
+                row[field] = dt.fromisoformat(row[field])
+        instance = GitLabInstance(**row)
+        db.add(instance)
+    counts['gitlab_instances'] = len(data.get('gitlab_instances', []))
+
+    # Import instance pairs
+    for row in data.get('instance_pairs', []):
+        for field in ['created_at', 'updated_at']:
+            if row.get(field) and isinstance(row[field], str):
+                row[field] = dt.fromisoformat(row[field])
+        pair = InstancePair(**row)
+        db.add(pair)
+    counts['instance_pairs'] = len(data.get('instance_pairs', []))
+
+    # Import mirrors
+    for row in data.get('mirrors', []):
+        for field in ['created_at', 'updated_at', 'last_successful_sync', 'mirror_token_expires_at']:
+            if row.get(field) and isinstance(row[field], str):
+                row[field] = dt.fromisoformat(row[field])
+        mirror = Mirror(**row)
+        db.add(mirror)
+    counts['mirrors'] = len(data.get('mirrors', []))
+
+    await db.commit()
+
+    # Reset sequences for PostgreSQL
     try:
-        # Use SQLite's VACUUM INTO for a clean backup copy
-        # This creates a new database file with all the data, without WAL files
-        await db.execute(text(f"VACUUM INTO '{dest_path}'"))
+        # Get max IDs and reset sequences
+        for table, model in [
+            ('gitlab_instances', GitLabInstance),
+            ('instance_pairs', InstancePair),
+            ('mirrors', Mirror)
+        ]:
+            max_id_result = await db.execute(
+                select(model.id).order_by(model.id.desc()).limit(1)
+            )
+            max_id = max_id_result.scalar() or 0
+            await db.execute(
+                text(f"SELECT setval('{table}_id_seq', :max_id, true)"),
+                {"max_id": max_id}
+            )
         await db.commit()
-    except Exception as e:
-        # Fallback to simple file copy if VACUUM INTO fails
-        # (e.g., on older SQLite versions)
-        shutil.copy2(source_path, dest_path)
+    except Exception:
+        # Sequence reset is PostgreSQL-specific, ignore errors for other DBs
+        pass
+
+    return counts
 
 
 @router.get("/create")
 async def create_backup(
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
-) -> FileResponse:
+) -> Response:
     """
     Create and download a complete backup of the database and encryption key.
 
     Returns a compressed tar.gz archive containing:
-    - mirrors.db: SQLite database
+    - database.json: All database data as JSON
     - encryption.key: Fernet encryption key
     - backup_metadata.json: Backup information
+
+    The backup format is database-agnostic and can be restored to any
+    supported database (PostgreSQL).
 
     ⚠️  WARNING: The backup file contains sensitive data including the encryption
     key which can decrypt all stored GitLab tokens. Store securely!
     """
-    paths = _get_data_paths(db)
+    key_path = _get_encryption_key_path()
 
-    # Verify database file exists
-    if not paths["database"].exists():
-        raise HTTPException(
-            status_code=500,
-            detail=f"Database file not found: {paths['database']}"
-        )
+    # Export database data
+    db_data = await _export_table_data(db)
 
-    # Encryption key may not exist in test environments
-    # Create a temporary one if it doesn't exist
-    include_encryption_key = True
-    if not paths["encryption_key"].exists():
-        # In test environments, create a temporary placeholder key
+    # Get encryption key content
+    if key_path.exists():
+        key_content = key_path.read_bytes()
+    else:
+        # In test environments, use placeholder
         import os
         if os.getenv("ENCRYPTION_KEY"):
-            # If using environment variable for key, create a temp file with it
-            temp_key_content = os.getenv("ENCRYPTION_KEY").encode()
+            key_content = os.getenv("ENCRYPTION_KEY").encode()
         else:
-            # Create a placeholder for tests
-            temp_key_content = b"test-encryption-key-placeholder"
-            include_encryption_key = False  # Don't include placeholder in production backups
+            key_content = b"test-encryption-key-placeholder"
 
     # Create temporary directory for staging
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
 
-        # Copy database (using safe method to avoid corruption)
-        temp_db = temp_path / "mirrors.db"
-        await _create_safe_db_copy(paths["database"], temp_db, db)
+        # Write database JSON
+        db_file = temp_path / "database.json"
+        db_file.write_text(json.dumps(db_data, indent=2, default=str))
 
-        # Copy or create encryption key
-        temp_key = temp_path / "encryption.key"
-        if paths["encryption_key"].exists():
-            shutil.copy2(paths["encryption_key"], temp_key)
-        else:
-            # Use temporary key content for tests
-            temp_key.write_bytes(temp_key_content)
+        # Write encryption key
+        key_file = temp_path / "encryption.key"
+        key_file.write_bytes(key_content)
 
         # Create metadata file
         metadata = {
             "timestamp": datetime.utcnow().isoformat(),
-            "version": "1.0",
+            "version": "2.0",  # New format version
+            "format": "json",
+            "database_type": "postgresql",
             "app_version": settings.app_title,
-            "files": ["mirrors.db", "encryption.key"]
+            "record_counts": {
+                "gitlab_instances": len(db_data.get('gitlab_instances', [])),
+                "instance_pairs": len(db_data.get('instance_pairs', [])),
+                "mirrors": len(db_data.get('mirrors', []))
+            },
+            "files": ["database.json", "encryption.key"]
         }
 
         metadata_file = temp_path / "backup_metadata.json"
-        import json
         metadata_file.write_text(json.dumps(metadata, indent=2))
 
         # Create tar.gz archive
@@ -144,14 +202,13 @@ async def create_backup(
         archive_path = temp_path / archive_name
 
         with tarfile.open(archive_path, "w:gz") as tar:
-            tar.add(temp_db, arcname="mirrors.db")
-            tar.add(temp_key, arcname="encryption.key")
+            tar.add(db_file, arcname="database.json")
+            tar.add(key_file, arcname="encryption.key")
             tar.add(metadata_file, arcname="backup_metadata.json")
 
         # Read the archive into memory before temp dir is cleaned up
         archive_bytes = archive_path.read_bytes()
 
-        # Return as downloadable file
         return Response(
             content=archive_bytes,
             media_type="application/gzip",
@@ -166,39 +223,48 @@ def _validate_backup_archive(archive_path: Path) -> Dict:
     """
     Validate backup archive and extract metadata.
 
-    Args:
-        archive_path: Path to the backup tar.gz file
-
-    Returns:
-        Dict with validation results and metadata
-
-    Raises:
-        HTTPException: If archive is invalid
+    Supports both v1 (SQLite file) and v2 (JSON) backup formats.
     """
     try:
         with tarfile.open(archive_path, "r:gz") as tar:
             members = tar.getnames()
 
-            # Check required files are present
-            required_files = ["mirrors.db", "encryption.key"]
-            missing_files = [f for f in required_files if f not in members]
+            # Check for required files
+            # v2 format: database.json + encryption.key
+            # v1 format: mirrors.db + encryption.key (legacy, no longer supported for restore)
+            has_v2 = "database.json" in members
+            has_v1 = "mirrors.db" in members
+            has_key = "encryption.key" in members
 
-            if missing_files:
+            if not has_key:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid backup archive. Missing files: {', '.join(missing_files)}"
+                    detail="Invalid backup archive. Missing encryption.key"
+                )
+
+            if not has_v2 and not has_v1:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid backup archive. Missing database file (database.json)"
+                )
+
+            if has_v1 and not has_v2:
+                raise HTTPException(
+                    status_code=400,
+                    detail="This backup is from an older SQLite-based version and cannot be restored. "
+                           "Please create a new backup from the current version."
                 )
 
             # Extract metadata if present
             metadata = {}
             if "backup_metadata.json" in members:
-                import json
                 metadata_file = tar.extractfile("backup_metadata.json")
                 if metadata_file:
                     metadata = json.loads(metadata_file.read().decode())
 
             return {
                 "valid": True,
+                "format": "v2" if has_v2 else "v1",
                 "files": members,
                 "metadata": metadata
             }
@@ -208,6 +274,8 @@ def _validate_backup_archive(archive_path: Path) -> Dict:
             status_code=400,
             detail=f"Invalid or corrupt backup archive: {str(e)}"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -245,7 +313,7 @@ async def restore_backup(
             detail="Invalid file type. Please upload a .tar.gz backup file."
         )
 
-    paths = _get_data_paths(db)
+    key_path = _get_encryption_key_path()
 
     # Create temporary directory for extraction
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -264,14 +332,28 @@ async def restore_backup(
         pre_restore_backup = None
         if create_backup_first:
             try:
-                # Create backup with .pre-restore suffix
+                # Export current data
+                current_data = await _export_table_data(db)
+
+                # Create backup archive
                 timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
                 pre_restore_name = f"pre-restore-{timestamp}.tar.gz"
-                pre_restore_path = paths["data_dir"] / pre_restore_name
+                pre_restore_path = Path("./data") / pre_restore_name
+
+                pre_backup_dir = temp_path / "pre_backup"
+                pre_backup_dir.mkdir()
+
+                # Write current data
+                (pre_backup_dir / "database.json").write_text(
+                    json.dumps(current_data, indent=2, default=str)
+                )
+                if key_path.exists():
+                    shutil.copy2(key_path, pre_backup_dir / "encryption.key")
 
                 with tarfile.open(pre_restore_path, "w:gz") as tar:
-                    tar.add(paths["database"], arcname="mirrors.db")
-                    tar.add(paths["encryption_key"], arcname="encryption.key")
+                    tar.add(pre_backup_dir / "database.json", arcname="database.json")
+                    if (pre_backup_dir / "encryption.key").exists():
+                        tar.add(pre_backup_dir / "encryption.key", arcname="encryption.key")
 
                 pre_restore_backup = str(pre_restore_path)
             except Exception as e:
@@ -285,82 +367,51 @@ async def restore_backup(
         with tarfile.open(upload_path, "r:gz") as tar:
             tar.extractall(extract_path)
 
-        restored_db = extract_path / "mirrors.db"
-        restored_key = extract_path / "encryption.key"
-
-        # Validate extracted database (basic check)
+        # Load and validate database JSON
+        db_json_path = extract_path / "database.json"
         try:
-            import sqlite3
-            conn = sqlite3.connect(restored_db)
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = cursor.fetchall()
-            conn.close()
+            db_data = json.loads(db_json_path.read_text())
 
-            expected_tables = ["gitlab_instances", "instance_pairs", "mirrors"]
-            found_tables = [t[0] for t in tables]
-            missing_tables = [t for t in expected_tables if t not in found_tables]
-
+            # Basic validation
+            required_tables = ['gitlab_instances', 'instance_pairs', 'mirrors']
+            missing_tables = [t for t in required_tables if t not in db_data]
             if missing_tables:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid database backup. Missing tables: {', '.join(missing_tables)}"
+                    detail=f"Invalid backup. Missing tables: {', '.join(missing_tables)}"
                 )
-        except HTTPException:
-            raise
-        except Exception as e:
+        except json.JSONDecodeError as e:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid or corrupt database in backup: {str(e)}"
+                detail=f"Invalid or corrupt database backup: {str(e)}"
             )
 
-        # Close any existing database connections
-        # (FastAPI will handle session cleanup, but we want to be safe)
-        await db.close()
-
-        # Atomic replacement of files
-        # Use rename for atomicity (works on same filesystem)
+        # Import data into database
         try:
-            # Backup current files with .replaced suffix (in case we need to rollback)
-            backup_db = paths["database"].with_suffix(".db.replaced")
-            backup_key = paths["encryption_key"].with_suffix(".key.replaced")
-
-            if paths["database"].exists():
-                shutil.move(str(paths["database"]), str(backup_db))
-            if paths["encryption_key"].exists():
-                shutil.move(str(paths["encryption_key"]), str(backup_key))
-
-            # Move restored files into place
-            shutil.move(str(restored_db), str(paths["database"]))
-            shutil.move(str(restored_key), str(paths["encryption_key"]))
-
-            # Clean up old backups
-            if backup_db.exists():
-                backup_db.unlink()
-            if backup_key.exists():
-                backup_key.unlink()
-
+            counts = await _import_table_data(db, db_data)
         except Exception as e:
-            # Attempt rollback if something went wrong
-            if backup_db.exists():
-                shutil.move(str(backup_db), str(paths["database"]))
-            if backup_key.exists():
-                shutil.move(str(backup_key), str(paths["encryption_key"]))
-
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to restore backup: {str(e)}"
+                detail=f"Failed to restore database: {str(e)}"
             )
 
-        # Reload encryption key
-        encryption._initialize()
+        # Restore encryption key
+        restored_key = extract_path / "encryption.key"
+        if restored_key.exists():
+            # Ensure data directory exists
+            key_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(restored_key, key_path)
+
+            # Reload encryption module
+            encryption._initialize()
 
         return {
             "success": True,
             "message": "Backup restored successfully",
             "metadata": validation.get("metadata", {}),
             "pre_restore_backup": pre_restore_backup,
-            "restored_files": validation.get("files", [])
+            "restored_files": validation.get("files", []),
+            "imported_counts": counts
         }
 
 
@@ -374,17 +425,20 @@ async def get_backup_stats(
 
     Returns counts of instances, pairs, and mirrors.
     """
-    from app.models import GitLabInstance, InstancePair, Mirror
-    from sqlalchemy import select, func
+    from sqlalchemy import func
 
     # Get counts
     instance_count = await db.scalar(select(func.count()).select_from(GitLabInstance))
     pair_count = await db.scalar(select(func.count()).select_from(InstancePair))
     mirror_count = await db.scalar(select(func.count()).select_from(Mirror))
 
-    # Get database file size
-    paths = _get_data_paths(db)
-    db_size = paths["database"].stat().st_size if paths["database"].exists() else 0
+    # Get database size (PostgreSQL specific)
+    try:
+        result = await db.execute(text("SELECT pg_database_size(current_database())"))
+        db_size = result.scalar() or 0
+    except Exception:
+        # Fallback if query fails
+        db_size = 0
 
     return {
         "instances": instance_count or 0,

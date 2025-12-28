@@ -31,6 +31,7 @@
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
             <button class="tab" data-tab="topology-tab">Topology</button>
             <button class="tab" data-tab="backup-tab">Backup</button>
+            <button class="tab" data-tab="settings-tab">Settings</button>
             <button class="tab" data-tab="about-tab">About</button>
             <button class="tab active" data-tab="help-tab">Help</button>
         </div>
@@ -131,6 +132,43 @@
                     <li><strong>Mirror protected branches only</strong> - Only sync branches that are protected</li>
                     <li><strong>Trigger builds</strong> - Run CI/CD pipelines on the target after sync</li>
                     <li><strong>Overwrite diverged branches</strong> - Force-update branches that have diverged</li>
+                </ul>
+            </div>
+
+            <!-- System Health -->
+            <div class="card">
+                <h2>System Health</h2>
+                <p class="text-muted">Monitor the health of your Mirror Maestro installation.</p>
+
+                <h3>Health Status Levels</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Meaning</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="badge badge-success">Healthy</span></td>
+                            <td>All systems operational. Database connected, mirrors syncing, tokens valid.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-warning">Degraded</span></td>
+                            <td>Some issues detected. May have failed mirrors, expiring tokens, or unreachable instances.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-danger">Unhealthy</span></td>
+                            <td>Critical issues. Database may be down, most mirrors failing, or other severe problems.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Health API Endpoints</h3>
+                <p>For monitoring tools and load balancers:</p>
+                <ul>
+                    <li><code>GET /api/health/quick</code> - Fast health check (no auth required)</li>
+                    <li><code>GET /api/health</code> - Detailed health with component status</li>
                 </ul>
             </div>
 
