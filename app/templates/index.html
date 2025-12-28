@@ -667,6 +667,19 @@
                 <h3>What is Mirror Maestro?</h3>
                 <p>Mirror Maestro simplifies the management of GitLab repository mirrors. Whether you need to sync repositories between GitLab instances, create backups, or maintain read-only copies, Mirror Maestro provides a centralized interface to configure and monitor all your mirrors.</p>
 
+                <h3>Application Overview</h3>
+                <p>Mirror Maestro is organized into several tabs, each focused on a specific aspect of mirror management:</p>
+                <ul>
+                    <li><strong><a href="#" onclick="switchTab('dashboard-tab'); return false;">Dashboard</a></strong> - Quick overview with statistics and recent activity</li>
+                    <li><strong><a href="#" onclick="switchTab('instances-tab'); return false;">GitLab Instances</a></strong> - Manage connections to your GitLab servers</li>
+                    <li><strong><a href="#" onclick="switchTab('pairs-tab'); return false;">Instance Pairs</a></strong> - Configure mirroring relationships between instances</li>
+                    <li><strong><a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a></strong> - Create and manage individual repository mirrors</li>
+                    <li><strong><a href="#" onclick="switchTab('topology-tab'); return false;">Topology</a></strong> - Visualize your mirror network with an interactive graph</li>
+                    <li><strong><a href="#" onclick="switchTab('backup-tab'); return false;">Backup</a></strong> - Create and restore complete database backups</li>
+                    <li><strong><a href="#" onclick="switchTab('about-tab'); return false;">About</a></strong> - Project information and version details</li>
+                    <li><strong><a href="#" onclick="switchTab('help-tab'); return false;">Help</a></strong> - This comprehensive guide</li>
+                </ul>
+
                 <h3>Core Concepts</h3>
                 <ul>
                     <li><strong>GitLab Instances</strong> - Your GitLab servers (self-hosted or GitLab.com). Each instance needs an access token with API permissions.</li>
