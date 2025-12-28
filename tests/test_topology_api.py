@@ -303,3 +303,233 @@ async def test_topology_link_mirrors_drilldown_filters_and_sorts(client, session
     assert body2["total"] == 3
     assert len(body2["mirrors"]) == 3
 
+
+@pytest.mark.asyncio
+async def test_topology_bidirectional_shows_two_links(client, session_maker):
+    """
+    Test that bidirectional pairs (A→B and B→A) show as two separate links in topology.
+
+    This validates that:
+    1. Two nodes are created for the two instances
+    2. Two links are created (one for each direction)
+    3. Each link has correct source, target, and direction
+    4. Node stats correctly aggregate mirrors from both directions
+    """
+    a_id = await seed_instance(session_maker, name="Production", url="https://prod.example.com")
+    b_id = await seed_instance(session_maker, name="Staging", url="https://staging.example.com")
+
+    # Create bidirectional pairs: A→B (push) and B→A (push)
+    pair_ab = await seed_pair(session_maker, name="prod-to-staging", src_id=a_id, tgt_id=b_id, direction="push")
+    pair_ba = await seed_pair(session_maker, name="staging-to-prod", src_id=b_id, tgt_id=a_id, direction="push")
+
+    async with session_maker() as s:
+        # A→B mirrors (2 mirrors)
+        s.add_all([
+            Mirror(
+                instance_pair_id=pair_ab,
+                source_project_id=1,
+                source_project_path="prod/service-a",
+                target_project_id=101,
+                target_project_path="staging/service-a",
+                enabled=True,
+                last_update_status="finished",
+                last_successful_update=datetime.utcnow() - timedelta(hours=1),
+            ),
+            Mirror(
+                instance_pair_id=pair_ab,
+                source_project_id=2,
+                source_project_path="prod/service-b",
+                target_project_id=102,
+                target_project_path="staging/service-b",
+                enabled=True,
+                last_update_status="finished",
+                last_successful_update=datetime.utcnow() - timedelta(hours=2),
+            ),
+        ])
+
+        # B→A mirrors (1 mirror)
+        s.add(
+            Mirror(
+                instance_pair_id=pair_ba,
+                source_project_id=103,
+                source_project_path="staging/hotfix",
+                target_project_id=3,
+                target_project_path="prod/hotfix",
+                enabled=True,
+                last_update_status="finished",
+                last_successful_update=datetime.utcnow() - timedelta(minutes=30),
+            )
+        )
+        await s.commit()
+
+    resp = await client.get("/api/topology")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # Should have exactly 2 nodes
+    assert len(body["nodes"]) == 2
+    nodes_by_name = {n["name"]: n for n in body["nodes"]}
+    assert "Production" in nodes_by_name
+    assert "Staging" in nodes_by_name
+
+    # Should have exactly 2 links (one for each direction)
+    assert len(body["links"]) == 2
+
+    def link_key(l):
+        return (l["source"], l["target"], l["mirror_direction"])
+
+    links_by_key = {link_key(l): l for l in body["links"]}
+
+    # A→B link
+    ab_link = links_by_key[(a_id, b_id, "push")]
+    assert ab_link["mirror_count"] == 2
+    assert ab_link["pair_count"] == 1
+
+    # B→A link
+    ba_link = links_by_key[(b_id, a_id, "push")]
+    assert ba_link["mirror_count"] == 1
+    assert ba_link["pair_count"] == 1
+
+    # Verify node stats aggregate correctly
+    prod_node = nodes_by_name["Production"]
+    staging_node = nodes_by_name["Staging"]
+
+    # Production: 2 mirrors out (to staging), 1 mirror in (from staging)
+    assert prod_node["mirrors_out"] == 2
+    assert prod_node["mirrors_in"] == 1
+
+    # Staging: 1 mirror out (to prod), 2 mirrors in (from prod)
+    assert staging_node["mirrors_out"] == 1
+    assert staging_node["mirrors_in"] == 2
+
+
+@pytest.mark.asyncio
+async def test_topology_bidirectional_different_directions(client, session_maker):
+    """
+    Test bidirectional pairs with different mirror directions (push vs pull).
+
+    A→B with push, B→A with pull should create two distinct links.
+    """
+    a_id = await seed_instance(session_maker, name="Primary", url="https://primary.example.com")
+    b_id = await seed_instance(session_maker, name="Secondary", url="https://secondary.example.com")
+
+    # Create pairs with different directions
+    pair_ab_push = await seed_pair(session_maker, name="primary-push-to-secondary", src_id=a_id, tgt_id=b_id, direction="push")
+    pair_ba_pull = await seed_pair(session_maker, name="secondary-pull-to-primary", src_id=b_id, tgt_id=a_id, direction="pull")
+
+    async with session_maker() as s:
+        # A→B push mirror
+        s.add(
+            Mirror(
+                instance_pair_id=pair_ab_push,
+                source_project_id=1,
+                source_project_path="primary/app",
+                target_project_id=101,
+                target_project_path="secondary/app",
+                enabled=True,
+                last_update_status="finished",
+                last_successful_update=datetime.utcnow() - timedelta(minutes=30),
+            )
+        )
+        # B→A pull mirror
+        s.add(
+            Mirror(
+                instance_pair_id=pair_ba_pull,
+                source_project_id=102,
+                source_project_path="secondary/config",
+                target_project_id=2,
+                target_project_path="primary/config",
+                enabled=True,
+                last_update_status="pending",
+            )
+        )
+        await s.commit()
+
+    resp = await client.get("/api/topology")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # Should have 2 nodes and 2 links
+    assert len(body["nodes"]) == 2
+    assert len(body["links"]) == 2
+
+    def link_key(l):
+        return (l["source"], l["target"], l["mirror_direction"])
+
+    links_by_key = {link_key(l): l for l in body["links"]}
+
+    # A→B push link
+    assert (a_id, b_id, "push") in links_by_key
+    ab_push = links_by_key[(a_id, b_id, "push")]
+    assert ab_push["mirror_count"] == 1
+    assert ab_push["health"] == "ok"  # finished status
+
+    # B→A pull link
+    assert (b_id, a_id, "pull") in links_by_key
+    ba_pull = links_by_key[(b_id, a_id, "pull")]
+    assert ba_pull["mirror_count"] == 1
+    assert ba_pull["health"] == "warning"  # pending status
+
+
+@pytest.mark.asyncio
+async def test_topology_link_mirrors_bidirectional_drilldown(client, session_maker):
+    """
+    Test that link-mirrors drilldown works correctly for bidirectional pairs.
+
+    Each direction should only show mirrors belonging to pairs in that direction.
+    """
+    a_id = await seed_instance(session_maker, name="A", url="https://a.example.com")
+    b_id = await seed_instance(session_maker, name="B", url="https://b.example.com")
+
+    pair_ab = await seed_pair(session_maker, name="a-to-b", src_id=a_id, tgt_id=b_id, direction="push")
+    pair_ba = await seed_pair(session_maker, name="b-to-a", src_id=b_id, tgt_id=a_id, direction="push")
+
+    async with session_maker() as s:
+        # 3 mirrors on A→B
+        for i in range(3):
+            s.add(
+                Mirror(
+                    instance_pair_id=pair_ab,
+                    source_project_id=i + 1,
+                    source_project_path=f"a/proj{i}",
+                    target_project_id=i + 101,
+                    target_project_path=f"b/proj{i}",
+                    enabled=True,
+                    last_update_status="finished",
+                )
+            )
+
+        # 2 mirrors on B→A
+        for i in range(2):
+            s.add(
+                Mirror(
+                    instance_pair_id=pair_ba,
+                    source_project_id=i + 201,
+                    source_project_path=f"b/back{i}",
+                    target_project_id=i + 11,
+                    target_project_path=f"a/back{i}",
+                    enabled=True,
+                    last_update_status="finished",
+                )
+            )
+
+        await s.commit()
+
+    # Drilldown on A→B link should show 3 mirrors
+    resp_ab = await client.get(
+        f"/api/topology/link-mirrors?source_instance_id={a_id}&target_instance_id={b_id}&mirror_direction=push"
+    )
+    assert resp_ab.status_code == 200
+    body_ab = resp_ab.json()
+    assert body_ab["total"] == 3
+    assert all(m["instance_pair_name"] == "a-to-b" for m in body_ab["mirrors"])
+
+    # Drilldown on B→A link should show 2 mirrors
+    resp_ba = await client.get(
+        f"/api/topology/link-mirrors?source_instance_id={b_id}&target_instance_id={a_id}&mirror_direction=push"
+    )
+    assert resp_ba.status_code == 200
+    body_ba = resp_ba.json()
+    assert body_ba["total"] == 2
+    assert all(m["instance_pair_name"] == "b-to-a" for m in body_ba["mirrors"])
+
