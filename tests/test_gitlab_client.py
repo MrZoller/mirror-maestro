@@ -343,7 +343,7 @@ def test_gitlab_client_get_project_mirrors_error(monkeypatch):
     monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
 
     client = mod.GitLabClient("https://example.com", "enc:any")
-    with pytest.raises(Exception, match="Failed to fetch project mirrors"):
+    with pytest.raises(Exception, match="Failed to fetch mirrors"):
         client.get_project_mirrors(123)
 
 

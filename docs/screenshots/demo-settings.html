@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mirror Maestro - Settings</title>
+    <link rel="stylesheet" href="../../app/static/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="header-content">
+                <div>
+                    <h1>Mirror Maestro</h1>
+                    <p>Orchestrate GitLab mirrors across multiple instance pairs with precision</p>
+                </div>
+                <div style="display: flex; align-items: center; gap: 16px;">
+                    <div class="user-menu open" id="user-menu">
+                        <button class="user-menu-toggle" id="user-menu-toggle" aria-label="User menu">
+                            <span class="user-avatar">👤</span>
+                            <span class="user-name" id="user-name">admin</span>
+                            <span class="user-menu-arrow">▼</span>
+                        </button>
+                        <div class="user-menu-dropdown" id="user-menu-dropdown" style="opacity: 1; visibility: visible; transform: translateY(0);">
+                            <div class="user-menu-info">
+                                <div class="user-menu-username" id="user-menu-username">admin</div>
+                                <div class="user-menu-role" id="user-menu-role">Administrator</div>
+                            </div>
+                            <hr class="user-menu-divider">
+                            <button class="user-menu-item">Change Password</button>
+                            <button class="user-menu-item user-menu-logout">Logout</button>
+                        </div>
+                    </div>
+                    <button id="dark-mode-toggle" class="dark-mode-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+                        <span class="theme-icon theme-icon-light">☀️</span>
+                        <span class="theme-icon theme-icon-dark">🌙</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab" data-tab="dashboard-tab">Dashboard</button>
+            <button class="tab" data-tab="instances-tab">GitLab Instances</button>
+            <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
+            <button class="tab" data-tab="mirrors-tab">Mirrors</button>
+            <button class="tab" data-tab="topology-tab">Topology</button>
+            <button class="tab" data-tab="backup-tab">Backup</button>
+            <button class="tab active" data-tab="settings-tab">Settings</button>
+            <button class="tab" data-tab="about-tab">About</button>
+            <button class="tab" data-tab="help-tab">Help</button>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings-tab" class="tab-content active">
+            <div class="card">
+                <h2>User Management</h2>
+                <p class="text-muted">Manage users who can access Mirror Maestro.</p>
+
+                <form id="user-form" class="mt-20">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="user-username">Username *</label>
+                            <input type="text" id="user-username" name="username" required placeholder="e.g., johndoe">
+                        </div>
+                        <div class="form-group">
+                            <label for="user-email">Email</label>
+                            <input type="email" id="user-email" name="email" placeholder="user@example.com">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="user-password">Password *</label>
+                            <input type="password" id="user-password" name="password" required placeholder="Minimum 8 characters">
+                        </div>
+                        <div class="form-group">
+                            <label for="user-password-confirm">Confirm Password *</label>
+                            <input type="password" id="user-password-confirm" name="password_confirm" required placeholder="Confirm password">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="user-is-admin" name="is_admin">
+                            <label for="user-is-admin">Administrator (can manage other users)</label>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Create User</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>Users</h3>
+                <table id="users-table" class="enhanced-table">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-list">
+                        <tr data-id="1">
+                            <td>admin <span class="text-muted">(you)</span></td>
+                            <td>admin@example.com</td>
+                            <td><span class="admin-badge">Admin</span></td>
+                            <td><span class="status-active">Active</span></td>
+                            <td>12/15/2024</td>
+                            <td>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-danger btn-small" disabled title="Cannot delete yourself">Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr data-id="2">
+                            <td>johndoe</td>
+                            <td>john.doe@company.com</td>
+                            <td><span class="user-badge">User</span></td>
+                            <td><span class="status-active">Active</span></td>
+                            <td>12/20/2024</td>
+                            <td>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr data-id="3">
+                            <td>janesmith</td>
+                            <td>jane.smith@company.com</td>
+                            <td><span class="admin-badge">Admin</span></td>
+                            <td><span class="status-active">Active</span></td>
+                            <td>12/22/2024</td>
+                            <td>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr data-id="4">
+                            <td>bobwilson</td>
+                            <td><span class="text-muted">-</span></td>
+                            <td><span class="user-badge">User</span></td>
+                            <td><span class="status-inactive">Inactive</span></td>
+                            <td>12/25/2024</td>
+                            <td>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-danger btn-small">Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
