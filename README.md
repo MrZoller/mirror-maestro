@@ -138,13 +138,19 @@ mirror-maestro/
    # Edit .env with your preferred settings
    ```
 
-3. **Start the application**
+3. **Configure nginx**
+   ```bash
+   ./scripts/setup-ssl.sh
+   ```
+   Note: This configures nginx based on your `SSL_ENABLED` setting. For SSL, see [SSL/TLS Configuration](#ssltls-configuration).
+
+4. **Start the application**
    ```bash
    docker-compose up -d
    ```
 
-4. **Access the web interface**
-   Open your browser to `http://localhost:8000`
+5. **Access the web interface**
+   Open your browser to `http://localhost` (or `http://localhost:80` if you customized `HTTP_PORT`)
 
    Default credentials (if auth is enabled):
    - Username: `admin`
