@@ -133,11 +133,41 @@ class InstancePairResponse(BaseModel):
 
 @router.get("", response_model=List[InstancePairResponse])
 async def list_pairs(
+    search: str | None = None,
+    direction: str | None = None,
+    source_instance_id: int | None = None,
+    target_instance_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
-    """List all instance pairs."""
-    result = await db.execute(select(InstancePair))
+    """
+    List all instance pairs with optional filtering.
+
+    Query parameters:
+    - search: Search in pair name and description (case-insensitive)
+    - direction: Filter by mirror direction ('push' or 'pull')
+    - source_instance_id: Filter by source instance ID
+    - target_instance_id: Filter by target instance ID
+    """
+    query = select(InstancePair)
+
+    if search is not None and search.strip():
+        search_term = f"%{search.strip().lower()}%"
+        query = query.where(
+            (InstancePair.name.ilike(search_term)) |
+            (InstancePair.description.ilike(search_term))
+        )
+
+    if direction is not None and direction.strip():
+        query = query.where(InstancePair.mirror_direction == direction.strip().lower())
+
+    if source_instance_id is not None:
+        query = query.where(InstancePair.source_instance_id == source_instance_id)
+
+    if target_instance_id is not None:
+        query = query.where(InstancePair.target_instance_id == target_instance_id)
+
+    result = await db.execute(query)
     pairs = result.scalars().all()
     return [
         InstancePairResponse(

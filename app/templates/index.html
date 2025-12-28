@@ -15,10 +15,16 @@
                     <h1>{{ title }}</h1>
                     <p>Orchestrate GitLab mirrors across multiple instance pairs with precision</p>
                 </div>
-                <button id="dark-mode-toggle" class="dark-mode-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
-                    <span class="theme-icon theme-icon-light">☀️</span>
-                    <span class="theme-icon theme-icon-dark">🌙</span>
-                </button>
+                <div class="header-controls">
+                    <div class="global-search-container">
+                        <input type="search" id="global-search" class="global-search-input" placeholder="Search instances, pairs, mirrors..." aria-label="Global search">
+                        <div id="global-search-results" class="global-search-results"></div>
+                    </div>
+                    <button id="dark-mode-toggle" class="dark-mode-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+                        <span class="theme-icon theme-icon-light">☀️</span>
+                        <span class="theme-icon theme-icon-dark">🌙</span>
+                    </button>
+                </div>
             </div>
         </div>
     </header>

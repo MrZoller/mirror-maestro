@@ -119,11 +119,27 @@ class GitLabInstanceResponse(BaseModel):
 
 @router.get("", response_model=List[GitLabInstanceResponse])
 async def list_instances(
+    search: str | None = None,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
-    """List all GitLab instances."""
-    result = await db.execute(select(GitLabInstance))
+    """
+    List all GitLab instances with optional filtering.
+
+    Query parameters:
+    - search: Search in instance name, URL, and description (case-insensitive)
+    """
+    query = select(GitLabInstance)
+
+    if search is not None and search.strip():
+        search_term = f"%{search.strip().lower()}%"
+        query = query.where(
+            (GitLabInstance.name.ilike(search_term)) |
+            (GitLabInstance.url.ilike(search_term)) |
+            (GitLabInstance.description.ilike(search_term))
+        )
+
+    result = await db.execute(query)
     instances = result.scalars().all()
     return [
         GitLabInstanceResponse(

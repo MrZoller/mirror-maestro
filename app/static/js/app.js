@@ -18,6 +18,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     setupEventListeners();
     initTableEnhancements();
+    initGlobalSearch();
+    initUrlState();
 
     // Demo screenshots open static HTML files via file://; avoid API calls there.
     const isFileDemo = (window?.location?.protocol || '') === 'file:';
@@ -2407,4 +2409,222 @@ function debounce(fn, delayMs) {
         if (t) clearTimeout(t);
         t = setTimeout(() => fn(...args), delayMs);
     };
+}
+
+// ----------------------------
+// Global Search
+// ----------------------------
+let globalSearchController = null;
+
+function initGlobalSearch() {
+    const searchInput = document.getElementById('global-search');
+    const resultsContainer = document.getElementById('global-search-results');
+
+    if (!searchInput || !resultsContainer) return;
+
+    // Debounced search function
+    const doSearch = debounce(async (query) => {
+        if (!query || query.length < 1) {
+            resultsContainer.classList.remove('active');
+            resultsContainer.innerHTML = '';
+            return;
+        }
+
+        // Cancel any pending request
+        if (globalSearchController) {
+            globalSearchController.abort();
+        }
+        globalSearchController = new AbortController();
+
+        // Show loading
+        resultsContainer.classList.add('active');
+        resultsContainer.innerHTML = '<div class="search-loading"><div class="spinner"></div></div>';
+
+        try {
+            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=5`, {
+                signal: globalSearchController.signal
+            });
+            const data = await response.json();
+            renderSearchResults(data, resultsContainer);
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error('Search failed:', error);
+                resultsContainer.innerHTML = '<div class="search-no-results">Search failed</div>';
+            }
+        }
+    }, 200);
+
+    searchInput.addEventListener('input', (e) => {
+        doSearch(e.target.value.trim());
+    });
+
+    // Close results when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.global-search-container')) {
+            resultsContainer.classList.remove('active');
+        }
+    });
+
+    // Show results again when focusing on search input if there's content
+    searchInput.addEventListener('focus', () => {
+        if (searchInput.value.trim() && resultsContainer.innerHTML) {
+            resultsContainer.classList.add('active');
+        }
+    });
+
+    // Handle keyboard navigation
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            resultsContainer.classList.remove('active');
+            searchInput.blur();
+        }
+    });
+}
+
+function renderSearchResults(data, container) {
+    if (data.total_count === 0) {
+        container.innerHTML = '<div class="search-no-results">No results found</div>';
+        return;
+    }
+
+    let html = '';
+
+    if (data.instances.length > 0) {
+        html += '<div class="search-results-group">';
+        html += '<div class="search-results-header">Instances</div>';
+        for (const item of data.instances) {
+            html += `
+                <a class="search-result-item" href="#" data-type="instance" data-id="${item.id}">
+                    <div class="search-result-title">${escapeHtml(item.title)}</div>
+                    <div class="search-result-subtitle">${escapeHtml(item.subtitle || '')}</div>
+                </a>
+            `;
+        }
+        html += '</div>';
+    }
+
+    if (data.pairs.length > 0) {
+        html += '<div class="search-results-group">';
+        html += '<div class="search-results-header">Instance Pairs</div>';
+        for (const item of data.pairs) {
+            html += `
+                <a class="search-result-item" href="#" data-type="pair" data-id="${item.id}">
+                    <div class="search-result-title">${escapeHtml(item.title)}</div>
+                    <div class="search-result-subtitle">${escapeHtml(item.subtitle || '')}</div>
+                </a>
+            `;
+        }
+        html += '</div>';
+    }
+
+    if (data.mirrors.length > 0) {
+        html += '<div class="search-results-group">';
+        html += '<div class="search-results-header">Mirrors</div>';
+        for (const item of data.mirrors) {
+            html += `
+                <a class="search-result-item" href="#" data-type="mirror" data-id="${item.id}">
+                    <div class="search-result-title">${escapeHtml(item.title)}</div>
+                    <div class="search-result-subtitle">${escapeHtml(item.subtitle || '')}</div>
+                </a>
+            `;
+        }
+        html += '</div>';
+    }
+
+    container.innerHTML = html;
+
+    // Add click handlers for navigation
+    container.querySelectorAll('.search-result-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            const type = item.dataset.type;
+            const id = parseInt(item.dataset.id);
+            navigateToSearchResult(type, id);
+            container.classList.remove('active');
+            document.getElementById('global-search').value = '';
+        });
+    });
+}
+
+function navigateToSearchResult(type, id) {
+    // Navigate to the appropriate tab and highlight the item
+    switch (type) {
+        case 'instance':
+            switchTab('instances-tab');
+            setTimeout(() => highlightTableRow('instances-list', id), 100);
+            break;
+        case 'pair':
+            switchTab('pairs-tab');
+            setTimeout(() => highlightTableRow('pairs-list', id), 100);
+            break;
+        case 'mirror':
+            switchTab('mirrors-tab');
+            setTimeout(() => highlightTableRow('mirrors-list', id), 100);
+            break;
+    }
+}
+
+function highlightTableRow(tbodyId, id) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+
+    // Remove any existing highlights
+    tbody.querySelectorAll('tr.search-highlight').forEach(tr => {
+        tr.classList.remove('search-highlight');
+    });
+
+    // Find the row with matching ID
+    const row = tbody.querySelector(`tr[data-id="${id}"], tr[data-instance-id="${id}"], tr[data-pair-id="${id}"], tr[data-mirror-id="${id}"]`);
+    if (row) {
+        row.classList.add('search-highlight');
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Remove highlight after 3 seconds
+        setTimeout(() => {
+            row.classList.remove('search-highlight');
+        }, 3000);
+    }
+}
+
+// ----------------------------
+// URL State Persistence
+// ----------------------------
+function initUrlState() {
+    // Check for tab parameter in URL
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+
+    if (tabParam) {
+        const tabElement = document.querySelector(`[data-tab="${tabParam}"]`);
+        if (tabElement) {
+            // Small delay to ensure tabs are initialized
+            setTimeout(() => tabElement.click(), 50);
+        }
+    }
+
+    // Update URL when tab changes
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabId = tab.dataset.tab;
+            updateUrlState({ tab: tabId });
+        });
+    });
+}
+
+function updateUrlState(updates) {
+    const params = new URLSearchParams(window.location.search);
+
+    for (const [key, value] of Object.entries(updates)) {
+        if (value === null || value === undefined || value === '') {
+            params.delete(key);
+        } else {
+            params.set(key, value);
+        }
+    }
+
+    const newUrl = params.toString()
+        ? `${window.location.pathname}?${params.toString()}`
+        : window.location.pathname;
+
+    window.history.replaceState({}, '', newUrl);
 }
