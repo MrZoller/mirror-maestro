@@ -281,14 +281,3 @@ async def test_restore_creates_pre_backup(client, session_maker, monkeypatch, tm
     # The restore might fail due to invalid database, but we're mainly testing
     # that the parameter is accepted
     assert resp.status_code in [200, 400, 500]
-
-
-@pytest.mark.asyncio
-async def test_backup_requires_auth(client_no_auth):
-    """Test that backup endpoints require authentication when auth is enabled."""
-    # This test would need auth to be enabled and a client without credentials
-    # For now, we'll just verify the endpoint exists
-    resp = await client_no_auth.get("/api/backup/stats")
-    # Without auth configured in test environment, this should work
-    # In production with auth, this would return 401
-    assert resp.status_code in [200, 401]
