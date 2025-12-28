@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db, migrate_mirrors_to_auto_tokens, drop_legacy_group_tables
-from app.api import instances, pairs, mirrors, export, topology, dashboard
+from app.api import instances, pairs, mirrors, export, topology, dashboard, backup
 from app.core.auth import verify_credentials
 
 
@@ -51,6 +51,7 @@ app.include_router(pairs.router)
 app.include_router(mirrors.router)
 app.include_router(topology.router)
 app.include_router(export.router)
+app.include_router(backup.router)
 
 
 @app.get("/", response_class=HTMLResponse)
