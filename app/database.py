@@ -79,11 +79,9 @@ async def _maybe_migrate_sqlite(conn) -> None:
         },
         "instance_pairs": {
             "mirror_branch_regex": "VARCHAR(255)",
-            "mirror_user_id": "INTEGER",
         },
         "mirrors": {
             "mirror_branch_regex": "VARCHAR(255)",
-            "mirror_user_id": "INTEGER",
             # Token fields for automatic mirror authentication
             "encrypted_mirror_token": "TEXT",
             "mirror_token_name": "VARCHAR(100)",

@@ -36,13 +36,11 @@ class InstancePair(Base):
 
     # Default mirror settings for this pair
     mirror_direction: Mapped[str] = mapped_column(String(10), default="pull", nullable=False)  # "pull" or "push"
-    mirror_protected_branches: Mapped[bool] = mapped_column(Boolean, default=True)
     mirror_overwrite_diverged: Mapped[bool] = mapped_column(Boolean, default=False)
     mirror_trigger_builds: Mapped[bool] = mapped_column(Boolean, default=False)
     only_mirror_protected_branches: Mapped[bool] = mapped_column(Boolean, default=False)
     # Additional GitLab UI mirror settings
     mirror_branch_regex: Mapped[Optional[str]] = mapped_column(String(255))
-    mirror_user_id: Mapped[Optional[int]] = mapped_column(Integer)
 
     description: Mapped[Optional[str]] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -66,14 +64,11 @@ class Mirror(Base):
     target_project_id: Mapped[int] = mapped_column(Integer, nullable=False)
     target_project_path: Mapped[str] = mapped_column(String(500), nullable=False)
 
-    # Mirror settings (can override instance pair defaults)
-    mirror_direction: Mapped[Optional[str]] = mapped_column(String(10))
-    mirror_protected_branches: Mapped[Optional[bool]] = mapped_column(Boolean)
+    # Mirror settings (can override instance pair defaults, except direction which is pair-only)
     mirror_overwrite_diverged: Mapped[Optional[bool]] = mapped_column(Boolean)
     mirror_trigger_builds: Mapped[Optional[bool]] = mapped_column(Boolean)
     only_mirror_protected_branches: Mapped[Optional[bool]] = mapped_column(Boolean)
     mirror_branch_regex: Mapped[Optional[str]] = mapped_column(String(255))
-    mirror_user_id: Mapped[Optional[int]] = mapped_column(Integer)
 
     # Status tracking
     mirror_id: Mapped[Optional[int]] = mapped_column(Integer)  # GitLab mirror ID

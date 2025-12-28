@@ -235,10 +235,6 @@
                     <div class="form-group">
                         <label>Default Mirror Settings</label>
                         <div class="checkbox-group">
-                            <input type="checkbox" id="pair-protected" name="mirror_protected_branches" checked>
-                            <label for="pair-protected">Mirror protected branches</label>
-                        </div>
-                        <div class="checkbox-group">
                             <input type="checkbox" id="pair-overwrite" name="mirror_overwrite_diverged">
                             <label for="pair-overwrite">Overwrite divergent branches</label>
                         </div>
@@ -254,10 +250,6 @@
                             <div class="form-group">
                                 <label for="pair-branch-regex">Mirror branch regex</label>
                                 <input type="text" id="pair-branch-regex" name="mirror_branch_regex" placeholder="Optional (e.g., ^main$|^release/.*$)">
-                            </div>
-                            <div class="form-group">
-                                <label for="pair-mirror-user-id">Mirror user</label>
-                                <input type="number" id="pair-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
                             </div>
                         </div>
                     </div>
@@ -313,16 +305,9 @@
 
             <div class="card">
                 <h3>Create New Mirror</h3>
+                <!-- Direction is inherited from the instance pair -->
                 <form id="mirror-form">
                     <div class="form-row">
-                        <div class="form-group">
-                            <label for="mirror-direction">Mirror Direction</label>
-                            <select id="mirror-direction" name="mirror_direction">
-                                <option value="">Use pair default</option>
-                                <option value="pull">Pull (Target pulls from Source)</option>
-                                <option value="push">Push (Source pushes to Target)</option>
-                            </select>
-                        </div>
                         <div class="form-group">
                             <label>Status</label>
                             <div class="checkbox-group">
@@ -351,26 +336,36 @@
                     </div>
                     <div class="form-group">
                         <label>Mirror Settings (optional overrides)</label>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="mirror-overwrite" name="mirror_overwrite_diverged">
-                            <label for="mirror-overwrite">Overwrite divergent branches</label>
-                        </div>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="mirror-trigger" name="mirror_trigger_builds">
-                            <label for="mirror-trigger">Trigger builds on mirror update</label>
-                        </div>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="mirror-only-protected" name="only_mirror_protected_branches">
-                            <label for="mirror-only-protected">Only mirror protected branches</label>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="mirror-overwrite">Overwrite divergent branches</label>
+                                <select id="mirror-overwrite" name="mirror_overwrite_diverged" class="form-select">
+                                    <option value="__inherit__" selected>Inherit from pair</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="mirror-only-protected">Only mirror protected branches</label>
+                                <select id="mirror-only-protected" name="only_mirror_protected_branches" class="form-select">
+                                    <option value="__inherit__" selected>Inherit from pair</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="mirror-trigger">Trigger builds (pull only)</label>
+                                <select id="mirror-trigger" name="mirror_trigger_builds" class="form-select">
+                                    <option value="__inherit__" selected>Inherit from pair</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
                         </div>
                         <div class="form-row mt-10">
                             <div class="form-group">
-                                <label for="mirror-branch-regex">Mirror branch regex</label>
-                                <input type="text" id="mirror-branch-regex" name="mirror_branch_regex" placeholder="Optional (e.g., ^main$|^release/.*$)">
-                            </div>
-                            <div class="form-group">
-                                <label for="mirror-mirror-user-id">Mirror user</label>
-                                <input type="number" id="mirror-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
+                                <label for="mirror-branch-regex">Mirror branch regex (pull only)</label>
+                                <input type="text" id="mirror-branch-regex" name="mirror_branch_regex" placeholder="Inherit from pair">
                             </div>
                         </div>
                     </div>
