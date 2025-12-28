@@ -72,6 +72,19 @@ async def health():
     return {"status": "healthy"}
 
 
+@app.get("/api/about")
+async def about(_: str = Depends(verify_credentials)):
+    """Return application version and project information."""
+    return {
+        "name": "Mirror Maestro",
+        "version": app.version,
+        "description": "Orchestrate GitLab mirrors across multiple instance pairs with precision",
+        "repository": "https://github.com/MrZoller/mirror-maestro",
+        "license": "MIT",
+        "documentation": "https://github.com/MrZoller/mirror-maestro#readme"
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
