@@ -9,31 +9,35 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 ## Screenshots
 
 ### Dashboard
-![Dashboard](docs/screenshots/01-dashboard.png?v=2)
+![Dashboard](docs/screenshots/01-dashboard.png?v=3)
 *Modern dashboard with live statistics, health charts, recent activity timeline, and quick actions*
 
 ### GitLab Instances
-![GitLab Instances](docs/screenshots/02-instances.png?v=2)
+![GitLab Instances](docs/screenshots/02-instances.png?v=3)
 *Manage GitLab instances and rotate their access tokens (tokens are never displayed)*
 
 ### Instance Pairs
-![Instance Pairs](docs/screenshots/03-pairs.png?v=2)
+![Instance Pairs](docs/screenshots/03-pairs.png?v=3)
 *Configure pairs of GitLab instances for mirroring*
 
 ### Mirrors Management
-![Mirrors](docs/screenshots/04-mirrors.png?v=2)
+![Mirrors](docs/screenshots/04-mirrors.png?v=3)
 *View and manage mirrors with token status, real-time sync status, and safe per-mirror edits*
 
 ### Topology
-![Topology](docs/screenshots/05-topology.png?v=2)
+![Topology](docs/screenshots/05-topology.png?v=3)
 *Interactive topology visualization with animated data flows, zoom controls, and hover highlighting - click nodes or links to drill down into mirror details*
 
+### Backup & Restore
+![Backup](docs/screenshots/06-backup.png?v=3)
+*Complete database backups with one-click creation and secure restore functionality*
+
 ### About
-![About](docs/screenshots/06-about.png?v=2)
+![About](docs/screenshots/07-about.png?v=3)
 *Project information with version details, links to documentation, and technology stack*
 
 ### Help
-![Help](docs/screenshots/07-help.png?v=2)
+![Help](docs/screenshots/08-help.png?v=3)
 *Comprehensive help documentation with setup guides, troubleshooting tips, and best practices*
 
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
