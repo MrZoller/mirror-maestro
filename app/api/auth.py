@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,15 +41,14 @@ class LoginResponse(BaseModel):
 
 class UserResponse(BaseModel):
     """User information response."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     email: Optional[str] = None
     is_admin: bool
     is_active: bool
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class AuthModeResponse(BaseModel):
