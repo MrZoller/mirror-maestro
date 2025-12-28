@@ -2890,11 +2890,28 @@ function showLoginModal() {
     const modal = document.getElementById('login-modal');
     if (modal) {
         modal.style.display = 'flex';
+
+        // Hide close button and disable backdrop click when auth is required
+        const closeBtn = modal.querySelector('.modal-close');
+        const backdrop = modal.querySelector('.modal-backdrop');
+        if (authState.isMultiUser && !authState.isAuthenticated) {
+            if (closeBtn) closeBtn.style.display = 'none';
+            if (backdrop) backdrop.style.cursor = 'default';
+        } else {
+            if (closeBtn) closeBtn.style.display = '';
+            if (backdrop) backdrop.style.cursor = 'pointer';
+        }
+
         document.getElementById('login-username')?.focus();
     }
 }
 
 function closeLoginModal() {
+    // Don't allow closing the modal if multi-user mode is enabled and not authenticated
+    if (authState.isMultiUser && !authState.isAuthenticated) {
+        return;
+    }
+
     const modal = document.getElementById('login-modal');
     if (modal) modal.style.display = 'none';
 
