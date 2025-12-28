@@ -9,24 +9,32 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 ## Screenshots
 
 ### Dashboard
-![Dashboard](docs/screenshots/01-dashboard.png)
+![Dashboard](docs/screenshots/01-dashboard.png?v=2)
 *Modern dashboard with live statistics, health charts, recent activity timeline, and quick actions*
 
 ### GitLab Instances
-![GitLab Instances](docs/screenshots/02-instances.png)
+![GitLab Instances](docs/screenshots/02-instances.png?v=2)
 *Manage GitLab instances and rotate their access tokens (tokens are never displayed)*
 
 ### Instance Pairs
-![Instance Pairs](docs/screenshots/03-pairs.png)
+![Instance Pairs](docs/screenshots/03-pairs.png?v=2)
 *Configure pairs of GitLab instances for mirroring*
 
 ### Mirrors Management
-![Mirrors](docs/screenshots/04-mirrors.png)
+![Mirrors](docs/screenshots/04-mirrors.png?v=2)
 *View and manage mirrors with token status, real-time sync status, and safe per-mirror edits*
 
 ### Topology
-![Topology](docs/screenshots/05-topology.png)
+![Topology](docs/screenshots/05-topology.png?v=2)
 *Interactive topology visualization with animated data flows, zoom controls, and hover highlighting - click nodes or links to drill down into mirror details*
+
+### About
+![About](docs/screenshots/06-about.png?v=2)
+*Project information with version details, links to documentation, and technology stack*
+
+### Help
+![Help](docs/screenshots/07-help.png?v=2)
+*Comprehensive help documentation with setup guides, troubleshooting tips, and best practices*
 
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
 

@@ -461,6 +461,8 @@ function initTabs() {
                 if (typeof window.initTopologyTab === 'function') {
                     window.initTopologyTab();
                 }
+            } else if (targetId === 'about-tab') {
+                loadAboutInfo();
             }
         });
     });
@@ -2202,6 +2204,24 @@ function showMessage(message, type = 'info') {
     setTimeout(() => {
         div.remove();
     }, 5000);
+}
+
+// Load About page information
+async function loadAboutInfo() {
+    try {
+        const data = await apiRequest('/api/about');
+        const versionElement = document.getElementById('about-version');
+        if (versionElement) {
+            versionElement.textContent = data.version || '0.1.0';
+        }
+    } catch (error) {
+        console.error('Failed to load about information:', error);
+        // Fallback to default version if API fails
+        const versionElement = document.getElementById('about-version');
+        if (versionElement) {
+            versionElement.textContent = '0.1.0';
+        }
+    }
 }
 
 function escapeHtml(text) {
