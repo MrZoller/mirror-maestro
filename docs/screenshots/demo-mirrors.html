@@ -89,26 +89,40 @@
                     </div>
                     <div class="form-group">
                         <label>Mirror Settings (optional overrides)</label>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="mirror-overwrite" name="mirror_overwrite_diverged" checked>
-                            <label for="mirror-overwrite">Overwrite divergent branches</label>
-                        </div>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="mirror-trigger" name="mirror_trigger_builds" checked>
-                            <label for="mirror-trigger">Trigger builds on mirror update</label>
-                        </div>
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="mirror-only-protected" name="only_mirror_protected_branches">
-                            <label for="mirror-only-protected">Only mirror protected branches</label>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="mirror-overwrite">Overwrite divergent branches</label>
+                                <select id="mirror-overwrite" name="mirror_overwrite_diverged" class="form-select">
+                                    <option value="__inherit__" selected>Inherit from pair (yes)</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="mirror-only-protected">Only mirror protected branches</label>
+                                <select id="mirror-only-protected" name="only_mirror_protected_branches" class="form-select">
+                                    <option value="__inherit__" selected>Inherit from pair (yes)</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="mirror-trigger">Trigger builds (pull only)</label>
+                                <select id="mirror-trigger" name="mirror_trigger_builds" class="form-select">
+                                    <option value="__inherit__" selected>Inherit from pair (no)</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
                         </div>
                         <div class="form-row mt-10">
                             <div class="form-group">
-                                <label for="mirror-branch-regex">Mirror branch regex</label>
-                                <input type="text" id="mirror-branch-regex" name="mirror_branch_regex" value="^main$|^release/.*$" placeholder="Optional (e.g., ^main$|^release/.*$)">
+                                <label for="mirror-branch-regex">Mirror branch regex (pull only)</label>
+                                <input type="text" id="mirror-branch-regex" name="mirror_branch_regex" placeholder="Inherit from pair">
                             </div>
                             <div class="form-group">
-                                <label for="mirror-mirror-user-id">Mirror user</label>
-                                <input type="number" id="mirror-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
+                                <label for="mirror-mirror-user-id">Mirror user (pull only)</label>
+                                <input type="number" id="mirror-mirror-user-id" name="mirror_user_id" placeholder="Inherit from pair">
                             </div>
                         </div>
                     </div>
