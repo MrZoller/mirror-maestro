@@ -1,6 +1,137 @@
 import gitlab
+from gitlab.exceptions import (
+    GitlabAuthenticationError as GitlabAuthError,
+    GitlabGetError,
+    GitlabCreateError,
+    GitlabDeleteError,
+    GitlabUpdateError,
+    GitlabHttpError,
+)
 from typing import List, Dict, Any, Optional
 from app.core.encryption import encryption
+
+
+class GitLabClientError(Exception):
+    """Base exception for GitLab client errors."""
+    pass
+
+
+class GitLabAuthenticationError(GitLabClientError):
+    """Raised when authentication fails (invalid or expired token)."""
+    pass
+
+
+class GitLabConnectionError(GitLabClientError):
+    """Raised when connection to GitLab fails (network issues, server down)."""
+    pass
+
+
+class GitLabNotFoundError(GitLabClientError):
+    """Raised when a resource is not found (project, mirror, etc.)."""
+    pass
+
+
+class GitLabPermissionError(GitLabClientError):
+    """Raised when the token lacks required permissions."""
+    pass
+
+
+class GitLabRateLimitError(GitLabClientError):
+    """Raised when rate limited by GitLab."""
+    pass
+
+
+class GitLabServerError(GitLabClientError):
+    """Raised when GitLab returns a 5xx server error."""
+    pass
+
+
+def _handle_gitlab_error(e: Exception, operation: str) -> None:
+    """
+    Convert gitlab library exceptions to our custom exceptions with better messages.
+
+    Args:
+        e: The original exception
+        operation: A description of what operation was being attempted
+
+    Raises:
+        GitLabClientError: An appropriate subclass based on the error type
+    """
+    error_msg = str(e)
+
+    # Handle requests/urllib3 connection errors
+    if isinstance(e, (ConnectionError, TimeoutError)):
+        raise GitLabConnectionError(f"{operation}: Connection failed - {error_msg}")
+
+    # Handle gitlab-specific exceptions
+    if isinstance(e, GitlabAuthError):
+        raise GitLabAuthenticationError(
+            f"{operation}: Authentication failed - check that your token is valid and not expired"
+        )
+
+    if isinstance(e, GitlabGetError):
+        if "404" in error_msg or "not found" in error_msg.lower():
+            raise GitLabNotFoundError(f"{operation}: Resource not found - {error_msg}")
+        if "401" in error_msg or "unauthorized" in error_msg.lower():
+            raise GitLabAuthenticationError(f"{operation}: Authentication failed - {error_msg}")
+        if "403" in error_msg or "forbidden" in error_msg.lower():
+            raise GitLabPermissionError(f"{operation}: Permission denied - {error_msg}")
+        if "429" in error_msg:
+            raise GitLabRateLimitError(f"{operation}: Rate limited by GitLab - try again later")
+
+    if isinstance(e, GitlabCreateError):
+        if "401" in error_msg or "unauthorized" in error_msg.lower():
+            raise GitLabAuthenticationError(f"{operation}: Authentication failed - {error_msg}")
+        if "403" in error_msg or "forbidden" in error_msg.lower():
+            raise GitLabPermissionError(f"{operation}: Permission denied - {error_msg}")
+        if "409" in error_msg or "conflict" in error_msg.lower():
+            raise GitLabClientError(f"{operation}: Conflict - resource already exists - {error_msg}")
+        if "429" in error_msg:
+            raise GitLabRateLimitError(f"{operation}: Rate limited by GitLab - try again later")
+
+    if isinstance(e, GitlabDeleteError):
+        if "404" in error_msg or "not found" in error_msg.lower():
+            raise GitLabNotFoundError(f"{operation}: Resource not found - {error_msg}")
+        if "403" in error_msg or "forbidden" in error_msg.lower():
+            raise GitLabPermissionError(f"{operation}: Permission denied - {error_msg}")
+
+    if isinstance(e, GitlabUpdateError):
+        if "404" in error_msg or "not found" in error_msg.lower():
+            raise GitLabNotFoundError(f"{operation}: Resource not found - {error_msg}")
+        if "403" in error_msg or "forbidden" in error_msg.lower():
+            raise GitLabPermissionError(f"{operation}: Permission denied - {error_msg}")
+
+    if isinstance(e, GitlabHttpError):
+        response_code = getattr(e, 'response_code', None)
+        if response_code:
+            if response_code == 401:
+                raise GitLabAuthenticationError(f"{operation}: Authentication failed - {error_msg}")
+            if response_code == 403:
+                raise GitLabPermissionError(f"{operation}: Permission denied - {error_msg}")
+            if response_code == 404:
+                raise GitLabNotFoundError(f"{operation}: Resource not found - {error_msg}")
+            if response_code == 429:
+                raise GitLabRateLimitError(f"{operation}: Rate limited by GitLab - try again later")
+            if response_code >= 500:
+                raise GitLabServerError(f"{operation}: GitLab server error ({response_code}) - {error_msg}")
+
+    # Check error message for common patterns if we didn't match above
+    lower_msg = error_msg.lower()
+    if "connection" in lower_msg or "timeout" in lower_msg or "unreachable" in lower_msg:
+        raise GitLabConnectionError(f"{operation}: Connection failed - {error_msg}")
+    if "401" in error_msg or "unauthorized" in lower_msg:
+        raise GitLabAuthenticationError(f"{operation}: Authentication failed - {error_msg}")
+    if "403" in error_msg or "forbidden" in lower_msg:
+        raise GitLabPermissionError(f"{operation}: Permission denied - {error_msg}")
+    if "404" in error_msg or "not found" in lower_msg:
+        raise GitLabNotFoundError(f"{operation}: Resource not found - {error_msg}")
+    if "429" in error_msg or "rate limit" in lower_msg:
+        raise GitLabRateLimitError(f"{operation}: Rate limited by GitLab - try again later")
+    if "500" in error_msg or "502" in error_msg or "503" in error_msg or "504" in error_msg:
+        raise GitLabServerError(f"{operation}: GitLab server error - {error_msg}")
+
+    # Default: wrap in base error
+    raise GitLabClientError(f"{operation}: {error_msg}")
 
 
 class GitLabClient:
@@ -60,7 +191,7 @@ class GitLabClient:
                 for p in projects
             ]
         except Exception as e:
-            raise Exception(f"Failed to fetch projects: {str(e)}")
+            _handle_gitlab_error(e, "Failed to fetch projects")
 
     def get_project(self, project_id: int) -> Dict[str, Any]:
         """Get a specific project by ID."""
@@ -76,7 +207,7 @@ class GitLabClient:
                 "ssh_url_to_repo": p.ssh_url_to_repo,
             }
         except Exception as e:
-            raise Exception(f"Failed to fetch project: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to fetch project {project_id}")
 
     def get_groups(
         self,
@@ -114,21 +245,23 @@ class GitLabClient:
                 for g in groups
             ]
         except Exception as e:
-            raise Exception(f"Failed to fetch groups: {str(e)}")
+            _handle_gitlab_error(e, "Failed to fetch groups")
 
     def get_current_user(self) -> Dict[str, Any]:
         """Get the user associated with the API token."""
         try:
             u = self.gl.http_get("/user")
             if not isinstance(u, dict):
-                raise Exception("Unexpected /user response")
+                raise GitLabClientError("Failed to fetch current user: Unexpected response from GitLab API")
             return {
                 "id": u.get("id"),
                 "username": u.get("username"),
                 "name": u.get("name"),
             }
+        except GitLabClientError:
+            raise
         except Exception as e:
-            raise Exception(f"Failed to fetch current user: {str(e)}")
+            _handle_gitlab_error(e, "Failed to fetch current user")
 
     def create_pull_mirror(
         self,
@@ -154,8 +287,10 @@ class GitLabClient:
                 mirror_user_id=mirror_user_id,
                 mirror_direction="pull",
             )
+        except GitLabClientError:
+            raise
         except Exception as e:
-            raise Exception(f"Failed to create pull mirror: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to create pull mirror on project {project_id}")
 
     def create_push_mirror(
         self,
@@ -179,8 +314,10 @@ class GitLabClient:
                 mirror_user_id=mirror_user_id,
                 mirror_direction="push",
             )
+        except GitLabClientError:
+            raise
         except Exception as e:
-            raise Exception(f"Failed to create push mirror: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to create push mirror on project {project_id}")
 
     def get_project_mirrors(self, project_id: int) -> List[Dict[str, Any]]:
         """Get all mirrors for a project."""
@@ -209,7 +346,7 @@ class GitLabClient:
                 })
             return out
         except Exception as e:
-            raise Exception(f"Failed to fetch project mirrors: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to fetch mirrors for project {project_id}")
 
     def trigger_mirror_update(self, project_id: int, mirror_id: int) -> bool:
         """Trigger an immediate update of a mirror."""
@@ -218,7 +355,7 @@ class GitLabClient:
             self.gl.http_post(f"/projects/{project_id}/remote_mirrors/{mirror_id}/sync")
             return True
         except Exception as e:
-            raise Exception(f"Failed to trigger mirror update: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to trigger mirror update for mirror {mirror_id} on project {project_id}")
 
     def delete_mirror(self, project_id: int, mirror_id: int) -> bool:
         """Delete a mirror."""
@@ -226,7 +363,7 @@ class GitLabClient:
             self.gl.http_delete(f"/projects/{project_id}/remote_mirrors/{mirror_id}")
             return True
         except Exception as e:
-            raise Exception(f"Failed to delete mirror: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to delete mirror {mirror_id} from project {project_id}")
 
     def update_mirror(
         self,
@@ -268,7 +405,7 @@ class GitLabClient:
                 post_data=data,
             )
         except Exception as e:
-            raise Exception(f"Failed to update mirror: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to update mirror {mirror_id} on project {project_id}")
 
     def _create_remote_mirror(
         self,
@@ -365,7 +502,7 @@ class GitLabClient:
                 project.files.create(create_data)
                 return {"file_path": file_path, "branch": branch, "action": "created"}
         except Exception as e:
-            raise Exception(f"Failed to create/update file: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to create/update file {file_path} on project {project_id}")
 
     def get_file(
         self,
@@ -385,7 +522,7 @@ class GitLabClient:
                 "ref": ref,
             }
         except Exception as e:
-            raise Exception(f"Failed to get file: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to get file {file_path} from project {project_id}")
 
     # -------------------------------------------------------------------------
     # Branch Operations (for E2E testing)
@@ -407,7 +544,7 @@ class GitLabClient:
                 "protected": branch.protected,
             }
         except Exception as e:
-            raise Exception(f"Failed to create branch: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to create branch {branch_name} on project {project_id}")
 
     def get_branches(self, project_id: int) -> List[Dict[str, Any]]:
         """List all branches in a project."""
@@ -424,7 +561,7 @@ class GitLabClient:
                 for b in branches
             ]
         except Exception as e:
-            raise Exception(f"Failed to get branches: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to get branches for project {project_id}")
 
     def protect_branch(
         self,
@@ -443,7 +580,7 @@ class GitLabClient:
             })
             return {"name": protection.name, "protected": True}
         except Exception as e:
-            raise Exception(f"Failed to protect branch: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to protect branch {branch_name} on project {project_id}")
 
     # -------------------------------------------------------------------------
     # Tag Operations (for E2E testing)
@@ -469,7 +606,7 @@ class GitLabClient:
                 "message": getattr(tag, "message", None),
             }
         except Exception as e:
-            raise Exception(f"Failed to create tag: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to create tag {tag_name} on project {project_id}")
 
     def get_tags(self, project_id: int) -> List[Dict[str, Any]]:
         """List all tags in a project."""
@@ -485,7 +622,7 @@ class GitLabClient:
                 for t in tags
             ]
         except Exception as e:
-            raise Exception(f"Failed to get tags: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to get tags for project {project_id}")
 
     # -------------------------------------------------------------------------
     # Commit Operations (for E2E testing)
@@ -513,7 +650,7 @@ class GitLabClient:
                 for c in commits
             ]
         except Exception as e:
-            raise Exception(f"Failed to get commits: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to get commits for project {project_id}")
 
     def get_commit(self, project_id: int, commit_sha: str) -> Dict[str, Any]:
         """Get a specific commit."""
@@ -529,7 +666,7 @@ class GitLabClient:
                 "authored_date": commit.authored_date,
             }
         except Exception as e:
-            raise Exception(f"Failed to get commit: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to get commit {commit_sha} from project {project_id}")
 
     def create_commit(
         self,
@@ -561,7 +698,7 @@ class GitLabClient:
                 "title": commit.title,
             }
         except Exception as e:
-            raise Exception(f"Failed to create commit: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to create commit on project {project_id}")
 
     # -------------------------------------------------------------------------
     # Group Operations (for E2E testing)
@@ -596,7 +733,7 @@ class GitLabClient:
                 "visibility": group.visibility,
             }
         except Exception as e:
-            raise Exception(f"Failed to create group: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to create group {name}")
 
     def delete_group(self, group_id: int) -> bool:
         """Delete a group."""
@@ -604,7 +741,7 @@ class GitLabClient:
             self.gl.groups.delete(group_id)
             return True
         except Exception as e:
-            raise Exception(f"Failed to delete group: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to delete group {group_id}")
 
     def get_group(self, group_id_or_path: int | str) -> Dict[str, Any]:
         """Get a group by ID or path."""
@@ -618,7 +755,7 @@ class GitLabClient:
                 "visibility": group.visibility,
             }
         except Exception as e:
-            raise Exception(f"Failed to get group: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to get group {group_id_or_path}")
 
     # -------------------------------------------------------------------------
     # Project Operations (for E2E testing)
@@ -655,7 +792,7 @@ class GitLabClient:
                 "ssh_url_to_repo": getattr(project, "ssh_url_to_repo", None),
             }
         except Exception as e:
-            raise Exception(f"Failed to create project: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to create project {name}")
 
     def delete_project(self, project_id: int) -> bool:
         """Delete a project."""
@@ -663,7 +800,7 @@ class GitLabClient:
             self.gl.projects.delete(project_id)
             return True
         except Exception as e:
-            raise Exception(f"Failed to delete project: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to delete project {project_id}")
 
     # -------------------------------------------------------------------------
     # Project Access Token Operations (for automatic mirror authentication)
@@ -702,7 +839,9 @@ class GitLabClient:
                 post_data=data,
             )
             if not isinstance(result, dict):
-                raise Exception("Unexpected response from GitLab API")
+                raise GitLabClientError(
+                    f"Failed to create project access token on project {project_id}: Unexpected response from GitLab API"
+                )
             return {
                 "id": result.get("id"),
                 "name": result.get("name"),
@@ -712,8 +851,10 @@ class GitLabClient:
                 "access_level": result.get("access_level"),
                 "active": result.get("active"),
             }
+        except GitLabClientError:
+            raise
         except Exception as e:
-            raise Exception(f"Failed to create project access token: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to create project access token on project {project_id}")
 
     def delete_project_access_token(self, project_id: int, token_id: int) -> bool:
         """
@@ -730,7 +871,7 @@ class GitLabClient:
             self.gl.http_delete(f"/projects/{project_id}/access_tokens/{token_id}")
             return True
         except Exception as e:
-            raise Exception(f"Failed to delete project access token: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to delete project access token {token_id} from project {project_id}")
 
     def rotate_project_access_token(
         self,
@@ -768,7 +909,10 @@ class GitLabClient:
                     "access_level": result.get("access_level"),
                     "active": result.get("active"),
                 }
-            raise Exception("Unexpected response from rotation endpoint")
+            raise GitLabClientError(
+                f"Failed to rotate project access token {token_id} on project {project_id}: Unexpected response from rotation endpoint"
+            )
+        except GitLabClientError:
+            raise
         except Exception as e:
-            # If rotation endpoint doesn't exist, the error will propagate
-            raise Exception(f"Failed to rotate project access token: {str(e)}")
+            _handle_gitlab_error(e, f"Failed to rotate project access token {token_id} on project {project_id}")

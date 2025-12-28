@@ -1,12 +1,26 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Boolean, Integer, DateTime, Text, JSON, UniqueConstraint
+from sqlalchemy import String, Boolean, Integer, DateTime, Text, JSON, UniqueConstraint, Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
     """Base class for all database models."""
     pass
+
+
+class User(Base):
+    """Represents an application user."""
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class GitLabInstance(Base):
@@ -28,6 +42,10 @@ class GitLabInstance(Base):
 class InstancePair(Base):
     """Represents a pair of GitLab instances for mirroring."""
     __tablename__ = "instance_pairs"
+    __table_args__ = (
+        Index('idx_pair_source_instance', 'source_instance_id'),
+        Index('idx_pair_target_instance', 'target_instance_id'),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
@@ -53,6 +71,9 @@ class Mirror(Base):
     __table_args__ = (
         UniqueConstraint('instance_pair_id', 'source_project_id', 'target_project_id',
                          name='uq_mirror_pair_projects'),
+        Index('idx_mirror_instance_pair', 'instance_pair_id'),
+        Index('idx_mirror_last_update_status', 'last_update_status'),
+        Index('idx_mirror_updated_at', 'updated_at'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

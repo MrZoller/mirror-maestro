@@ -28,6 +28,7 @@
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
             <button class="tab" data-tab="topology-tab">Topology</button>
             <button class="tab" data-tab="backup-tab">Backup</button>
+            <button class="tab" data-tab="settings-tab">Settings</button>
             <button class="tab" data-tab="about-tab">About</button>
             <button class="tab" data-tab="help-tab">Help</button>
         </div>
@@ -183,6 +184,39 @@
                             <button class="btn btn-primary btn-block">Create New Mirror</button>
                             <button class="btn btn-secondary btn-block">Add Instance</button>
                             <button class="btn btn-secondary btn-block">Import Configuration</button>
+                        </div>
+                    </div>
+
+                    <div class="card dashboard-system-health">
+                        <div class="flex-between">
+                            <h3>System Health</h3>
+                            <button class="btn btn-small btn-secondary" title="Refresh health status">↻</button>
+                        </div>
+                        <div id="system-health-content" class="mt-20">
+                            <div class="system-health-status healthy">
+                                <div class="status-icon">✓</div>
+                                <div class="status-details">
+                                    <strong>All Systems Healthy</strong>
+                                    <span class="text-muted">v0.1.0</span>
+                                </div>
+                            </div>
+                            <div class="health-components">
+                                <div class="health-component">
+                                    <span class="health-status-dot healthy"></span>
+                                    <span>Database</span>
+                                    <span class="text-muted">Connected (2.3ms)</span>
+                                </div>
+                                <div class="health-component">
+                                    <span class="health-status-dot healthy"></span>
+                                    <span>Mirrors</span>
+                                    <span class="text-muted">233/247 synced</span>
+                                </div>
+                                <div class="health-component">
+                                    <span class="health-status-dot healthy"></span>
+                                    <span>Tokens</span>
+                                    <span class="text-muted">All valid</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

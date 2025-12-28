@@ -306,46 +306,84 @@ async def _resolve_effective_settings(
 @router.get("", response_model=List[MirrorResponse])
 async def list_mirrors(
     instance_pair_id: int | None = None,
+    status: str | None = None,
+    enabled: bool | None = None,
+    search: str | None = None,
+    token_status: str | None = None,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
-    """List all mirrors, optionally filtered by instance pair."""
+    """
+    List all mirrors with optional filtering.
+
+    Query parameters:
+    - instance_pair_id: Filter by instance pair ID
+    - status: Filter by last_update_status (e.g., 'success', 'failed', 'pending')
+    - enabled: Filter by enabled status (true/false)
+    - search: Search in source and target project paths (case-insensitive)
+    - token_status: Filter by token status ('active', 'expiring_soon', 'expired', 'none')
+    """
     query = select(Mirror)
+
+    # Apply filters
     if instance_pair_id is not None:
         query = query.where(Mirror.instance_pair_id == instance_pair_id)
+
+    if status is not None:
+        query = query.where(Mirror.last_update_status == status)
+
+    if enabled is not None:
+        query = query.where(Mirror.enabled == enabled)
+
+    if search is not None and search.strip():
+        search_term = f"%{search.strip().lower()}%"
+        query = query.where(
+            (Mirror.source_project_path.ilike(search_term)) |
+            (Mirror.target_project_path.ilike(search_term))
+        )
 
     result = await db.execute(query)
     mirrors = result.scalars().all()
 
-    # Best-effort caches to avoid N+1 on common paths (e.g., filtered by pair)
-    pair_cache: dict[int, InstancePair] = {}
-    instance_cache: dict[int, GitLabInstance] = {}
+    # Token status filter is applied post-query since it's computed
+    if token_status is not None:
+        mirrors = [m for m in mirrors if _compute_token_status(m.mirror_token_expires_at) == token_status]
 
-    async def _get_pair(pid: int) -> InstancePair | None:
-        if pid in pair_cache:
-            return pair_cache[pid]
-        r = await db.execute(select(InstancePair).where(InstancePair.id == pid))
-        p = r.scalar_one_or_none()
-        if p:
-            pair_cache[pid] = p
-        return p
+    if not mirrors:
+        return []
 
-    async def _get_instance(iid: int) -> GitLabInstance | None:
-        if iid in instance_cache:
-            return instance_cache[iid]
-        r = await db.execute(select(GitLabInstance).where(GitLabInstance.id == iid))
-        inst = r.scalar_one_or_none()
-        if inst:
-            instance_cache[iid] = inst
-        return inst
+    # Bulk-load all pairs and instances to avoid N+1 queries
+    # Get unique pair IDs from mirrors
+    pair_ids = {m.instance_pair_id for m in mirrors}
+
+    # Fetch all pairs in one query
+    pairs_result = await db.execute(
+        select(InstancePair).where(InstancePair.id.in_(pair_ids))
+    )
+    pair_cache: dict[int, InstancePair] = {p.id: p for p in pairs_result.scalars().all()}
+
+    # Collect all instance IDs from pairs
+    instance_ids: set[int] = set()
+    for pair in pair_cache.values():
+        instance_ids.add(pair.source_instance_id)
+        instance_ids.add(pair.target_instance_id)
+
+    # Fetch all instances in one query
+    if instance_ids:
+        instances_result = await db.execute(
+            select(GitLabInstance).where(GitLabInstance.id.in_(instance_ids))
+        )
+        instance_cache: dict[int, GitLabInstance] = {i.id: i for i in instances_result.scalars().all()}
+    else:
+        instance_cache = {}
 
     out: list[MirrorResponse] = []
     for mirror in mirrors:
-        pair = await _get_pair(mirror.instance_pair_id)
+        pair = pair_cache.get(mirror.instance_pair_id)
         eff: dict[str, object] = {}
         if pair:
-            src = await _get_instance(pair.source_instance_id)
-            tgt = await _get_instance(pair.target_instance_id)
+            src = instance_cache.get(pair.source_instance_id)
+            tgt = instance_cache.get(pair.target_instance_id)
             eff = await _resolve_effective_settings(db, mirror=mirror, pair=pair, source_instance=src, target_instance=tgt)
 
         out.append(

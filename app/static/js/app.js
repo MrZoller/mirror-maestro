@@ -13,15 +13,23 @@ const state = {
 };
 
 // Initialize the application
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     initDarkMode();
     initTabs();
     setupEventListeners();
     initTableEnhancements();
+    initGlobalSearch();
+    initUrlState();
+    initUserMenu();
 
     // Demo screenshots open static HTML files via file://; avoid API calls there.
     const isFileDemo = (window?.location?.protocol || '') === 'file:';
     if (!isFileDemo) {
+        // Initialize auth first and wait for it to complete
+        // This ensures the JWT token is available for subsequent API calls
+        await initAuth();
+
+        // Now load data (token is ready)
         loadDashboard();
         loadInstances();
         loadPairs();
@@ -463,6 +471,8 @@ function initTabs() {
                 }
             } else if (targetId === 'backup-tab') {
                 loadBackupStats();
+            } else if (targetId === 'settings-tab') {
+                loadUsers();
             } else if (targetId === 'about-tab') {
                 loadAboutInfo();
             }
@@ -615,12 +625,20 @@ class APIError extends Error {
 
 async function apiRequest(url, options = {}) {
     try {
+        // Build headers with optional auth token
+        const headers = {
+            'Content-Type': 'application/json',
+            ...options.headers
+        };
+
+        // Include JWT token if available (for multi-user mode)
+        if (typeof authState !== 'undefined' && authState.token) {
+            headers['Authorization'] = `Bearer ${authState.token}`;
+        }
+
         const response = await fetch(url, {
             ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            }
+            headers
         });
 
         if (!response.ok) {
@@ -875,6 +893,9 @@ async function loadDashboard() {
     } catch (error) {
         console.error('Failed to load dashboard:', error);
     }
+
+    // Load system health (non-blocking)
+    loadSystemHealth();
 }
 
 function renderDashboard(metrics) {
@@ -894,6 +915,122 @@ function renderDashboard(metrics) {
 
     // Render pairs distribution
     renderPairsDistribution(metrics.mirrors_by_pair);
+}
+
+// ----------------------------
+// System Health
+// ----------------------------
+
+async function loadSystemHealth() {
+    const container = document.getElementById('system-health-content');
+    if (!container) return;
+
+    try {
+        const health = await apiRequest('/api/health');
+        renderSystemHealth(health, container);
+    } catch (error) {
+        console.error('Failed to load system health:', error);
+        container.innerHTML = `
+            <div class="system-health-status unhealthy">
+                <span class="health-status-icon">⚠️</span>
+                <div class="health-status-text">
+                    <div class="health-status-title">Unable to check health</div>
+                    <div class="health-status-timestamp">${error.message || 'Connection failed'}</div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function refreshSystemHealth() {
+    loadSystemHealth();
+}
+
+function renderSystemHealth(health, container) {
+    const statusIcons = {
+        healthy: '✓',
+        degraded: '⚠',
+        unhealthy: '✕'
+    };
+
+    const statusLabels = {
+        healthy: 'All Systems Operational',
+        degraded: 'Some Issues Detected',
+        unhealthy: 'System Issues'
+    };
+
+    const timestamp = health.timestamp
+        ? new Date(health.timestamp).toLocaleString()
+        : 'Just now';
+
+    let html = `
+        <div class="system-health-status ${health.status}">
+            <span class="health-status-icon">${statusIcons[health.status] || '?'}</span>
+            <div class="health-status-text">
+                <div class="health-status-title">${statusLabels[health.status] || health.status}</div>
+                <div class="health-status-timestamp">Last checked: ${timestamp}</div>
+            </div>
+        </div>
+        <div class="health-components">
+    `;
+
+    // Render each component
+    for (const component of health.components || []) {
+        html += `
+            <div class="health-component">
+                <div>
+                    <div class="health-component-name">
+                        ${getComponentIcon(component.name)} ${formatComponentName(component.name)}
+                    </div>
+                    ${component.message ? `<div class="health-component-message">${escapeHtml(component.message)}</div>` : ''}
+                </div>
+                <span class="health-component-status ${component.status}">${component.status}</span>
+            </div>
+        `;
+    }
+
+    html += '</div>';
+
+    // Add token warnings if any
+    if (health.tokens) {
+        if (health.tokens.expired > 0) {
+            html += `
+                <div class="health-token-warning">
+                    <span>⚠️</span>
+                    <span>${health.tokens.expired} mirror token(s) have expired and need rotation</span>
+                </div>
+            `;
+        } else if (health.tokens.expiring_soon > 0) {
+            html += `
+                <div class="health-token-warning">
+                    <span>⏰</span>
+                    <span>${health.tokens.expiring_soon} mirror token(s) expiring within 30 days</span>
+                </div>
+            `;
+        }
+    }
+
+    container.innerHTML = html;
+}
+
+function getComponentIcon(name) {
+    const icons = {
+        database: '🗄️',
+        mirrors: '🔄',
+        tokens: '🔑',
+        gitlab_instances: '🦊'
+    };
+    return icons[name] || '📦';
+}
+
+function formatComponentName(name) {
+    const names = {
+        database: 'Database',
+        mirrors: 'Mirror Sync',
+        tokens: 'Access Tokens',
+        gitlab_instances: 'GitLab Instances'
+    };
+    return names[name] || name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, ' ');
 }
 
 function updateStatCard(elementId, value) {
@@ -2170,7 +2307,11 @@ async function exportMirrors() {
     }
 
     try {
-        const response = await fetch(`/api/export/pair/${state.selectedPair}`);
+        const exportHeaders = {};
+        if (typeof authState !== 'undefined' && authState.token) {
+            exportHeaders['Authorization'] = `Bearer ${authState.token}`;
+        }
+        const response = await fetch(`/api/export/pair/${state.selectedPair}`, { headers: exportHeaders });
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -2263,7 +2404,11 @@ async function createBackup() {
         btnText.style.display = 'none';
         btnSpinner.style.display = 'inline-block';
 
-        const response = await fetch('/api/backup/create');
+        const headers = {};
+        if (typeof authState !== 'undefined' && authState.token) {
+            headers['Authorization'] = `Bearer ${authState.token}`;
+        }
+        const response = await fetch('/api/backup/create', { headers });
 
         if (!response.ok) {
             const error = await response.json();
@@ -2342,8 +2487,13 @@ async function restoreBackup() {
         formData.append('file', file);
         formData.append('create_backup_first', createBackupFirst.toString());
 
+        const restoreHeaders = {};
+        if (typeof authState !== 'undefined' && authState.token) {
+            restoreHeaders['Authorization'] = `Bearer ${authState.token}`;
+        }
         const response = await fetch('/api/backup/restore', {
             method: 'POST',
+            headers: restoreHeaders,
             body: formData
         });
 
@@ -2408,3 +2558,779 @@ function debounce(fn, delayMs) {
         t = setTimeout(() => fn(...args), delayMs);
     };
 }
+
+// ----------------------------
+// Global Search
+// ----------------------------
+let globalSearchController = null;
+
+function initGlobalSearch() {
+    const searchInput = document.getElementById('global-search');
+    const resultsContainer = document.getElementById('global-search-results');
+
+    if (!searchInput || !resultsContainer) return;
+
+    // Debounced search function
+    const doSearch = debounce(async (query) => {
+        if (!query || query.length < 1) {
+            resultsContainer.classList.remove('active');
+            resultsContainer.innerHTML = '';
+            return;
+        }
+
+        // Cancel any pending request
+        if (globalSearchController) {
+            globalSearchController.abort();
+        }
+        globalSearchController = new AbortController();
+
+        // Show loading
+        resultsContainer.classList.add('active');
+        resultsContainer.innerHTML = '<div class="search-loading"><div class="spinner"></div></div>';
+
+        try {
+            const searchHeaders = {};
+            if (typeof authState !== 'undefined' && authState.token) {
+                searchHeaders['Authorization'] = `Bearer ${authState.token}`;
+            }
+            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=5`, {
+                headers: searchHeaders,
+                signal: globalSearchController.signal
+            });
+            const data = await response.json();
+            renderSearchResults(data, resultsContainer);
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error('Search failed:', error);
+                resultsContainer.innerHTML = '<div class="search-no-results">Search failed</div>';
+            }
+        }
+    }, 200);
+
+    searchInput.addEventListener('input', (e) => {
+        doSearch(e.target.value.trim());
+    });
+
+    // Close results when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.global-search-container')) {
+            resultsContainer.classList.remove('active');
+        }
+    });
+
+    // Show results again when focusing on search input if there's content
+    searchInput.addEventListener('focus', () => {
+        if (searchInput.value.trim() && resultsContainer.innerHTML) {
+            resultsContainer.classList.add('active');
+        }
+    });
+
+    // Handle keyboard navigation
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            resultsContainer.classList.remove('active');
+            searchInput.blur();
+        }
+    });
+}
+
+function renderSearchResults(data, container) {
+    if (data.total_count === 0) {
+        container.innerHTML = '<div class="search-no-results">No results found</div>';
+        return;
+    }
+
+    let html = '';
+
+    if (data.instances.length > 0) {
+        html += '<div class="search-results-group">';
+        html += '<div class="search-results-header">Instances</div>';
+        for (const item of data.instances) {
+            html += `
+                <a class="search-result-item" href="#" data-type="instance" data-id="${item.id}">
+                    <div class="search-result-title">${escapeHtml(item.title)}</div>
+                    <div class="search-result-subtitle">${escapeHtml(item.subtitle || '')}</div>
+                </a>
+            `;
+        }
+        html += '</div>';
+    }
+
+    if (data.pairs.length > 0) {
+        html += '<div class="search-results-group">';
+        html += '<div class="search-results-header">Instance Pairs</div>';
+        for (const item of data.pairs) {
+            html += `
+                <a class="search-result-item" href="#" data-type="pair" data-id="${item.id}">
+                    <div class="search-result-title">${escapeHtml(item.title)}</div>
+                    <div class="search-result-subtitle">${escapeHtml(item.subtitle || '')}</div>
+                </a>
+            `;
+        }
+        html += '</div>';
+    }
+
+    if (data.mirrors.length > 0) {
+        html += '<div class="search-results-group">';
+        html += '<div class="search-results-header">Mirrors</div>';
+        for (const item of data.mirrors) {
+            html += `
+                <a class="search-result-item" href="#" data-type="mirror" data-id="${item.id}">
+                    <div class="search-result-title">${escapeHtml(item.title)}</div>
+                    <div class="search-result-subtitle">${escapeHtml(item.subtitle || '')}</div>
+                </a>
+            `;
+        }
+        html += '</div>';
+    }
+
+    container.innerHTML = html;
+
+    // Add click handlers for navigation
+    container.querySelectorAll('.search-result-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            const type = item.dataset.type;
+            const id = parseInt(item.dataset.id);
+            navigateToSearchResult(type, id);
+            container.classList.remove('active');
+            document.getElementById('global-search').value = '';
+        });
+    });
+}
+
+function navigateToSearchResult(type, id) {
+    // Navigate to the appropriate tab and highlight the item
+    switch (type) {
+        case 'instance':
+            switchTab('instances-tab');
+            setTimeout(() => highlightTableRow('instances-list', id), 100);
+            break;
+        case 'pair':
+            switchTab('pairs-tab');
+            setTimeout(() => highlightTableRow('pairs-list', id), 100);
+            break;
+        case 'mirror':
+            switchTab('mirrors-tab');
+            setTimeout(() => highlightTableRow('mirrors-list', id), 100);
+            break;
+    }
+}
+
+function highlightTableRow(tbodyId, id) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+
+    // Remove any existing highlights
+    tbody.querySelectorAll('tr.search-highlight').forEach(tr => {
+        tr.classList.remove('search-highlight');
+    });
+
+    // Find the row with matching ID
+    const row = tbody.querySelector(`tr[data-id="${id}"], tr[data-instance-id="${id}"], tr[data-pair-id="${id}"], tr[data-mirror-id="${id}"]`);
+    if (row) {
+        row.classList.add('search-highlight');
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Remove highlight after 3 seconds
+        setTimeout(() => {
+            row.classList.remove('search-highlight');
+        }, 3000);
+    }
+}
+
+// ----------------------------
+// URL State Persistence
+// ----------------------------
+function initUrlState() {
+    // Check for tab parameter in URL
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+
+    if (tabParam) {
+        const tabElement = document.querySelector(`[data-tab="${tabParam}"]`);
+        if (tabElement) {
+            // Small delay to ensure tabs are initialized
+            setTimeout(() => tabElement.click(), 50);
+        }
+    }
+
+    // Update URL when tab changes
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabId = tab.dataset.tab;
+            updateUrlState({ tab: tabId });
+        });
+    });
+}
+
+function updateUrlState(updates) {
+    const params = new URLSearchParams(window.location.search);
+
+    for (const [key, value] of Object.entries(updates)) {
+        if (value === null || value === undefined || value === '') {
+            params.delete(key);
+        } else {
+            params.set(key, value);
+        }
+    }
+
+    const newUrl = params.toString()
+        ? `${window.location.pathname}?${params.toString()}`
+        : window.location.pathname;
+
+    window.history.replaceState({}, '', newUrl);
+}
+
+// ----------------------------
+// Authentication
+// ----------------------------
+
+const authState = {
+    isAuthenticated: false,
+    isMultiUser: false,
+    user: null,
+    token: null
+};
+
+// Promise that resolves when user is authenticated (for multi-user mode)
+let authReadyResolve = null;
+const authReady = new Promise(resolve => { authReadyResolve = resolve; });
+
+async function initAuth() {
+    // Check auth mode from server
+    try {
+        const mode = await apiRequest('/api/auth/mode');
+        authState.isMultiUser = mode.multi_user_enabled;
+
+        if (authState.isMultiUser) {
+            // Hide main content until authenticated
+            document.body.classList.add('auth-required');
+
+            // Check for stored token
+            const storedToken = localStorage.getItem('auth_token');
+            if (storedToken) {
+                authState.token = storedToken;
+                try {
+                    await loadCurrentUser();
+                    document.body.classList.remove('auth-required');
+                    authReadyResolve();
+                } catch (error) {
+                    // Token is invalid, clear it
+                    logout(false);
+                    showLoginModal();
+                    // Wait for login to complete
+                    await authReady;
+                }
+            } else {
+                showLoginModal();
+                // Wait for login to complete
+                await authReady;
+            }
+        } else {
+            // Legacy mode - hide user menu, auth is ready immediately
+            hideUserMenu();
+            authReadyResolve();
+        }
+    } catch (error) {
+        console.error('Failed to check auth mode:', error);
+        hideUserMenu();
+        authReadyResolve(); // Resolve anyway to not block the app
+    }
+}
+
+async function loadCurrentUser() {
+    const user = await authApiRequest('/api/auth/me');
+    authState.user = user;
+    authState.isAuthenticated = true;
+    updateUserMenu();
+
+    // Show Settings tab if admin
+    if (user.is_admin) {
+        const settingsTab = document.getElementById('settings-tab-btn');
+        if (settingsTab) settingsTab.style.display = '';
+    }
+}
+
+function updateUserMenu() {
+    const userMenu = document.getElementById('user-menu');
+    const userName = document.getElementById('user-name');
+    const userMenuUsername = document.getElementById('user-menu-username');
+    const userMenuRole = document.getElementById('user-menu-role');
+
+    if (authState.isAuthenticated && authState.user) {
+        if (userMenu) userMenu.style.display = '';
+        if (userName) userName.textContent = authState.user.username;
+        if (userMenuUsername) userMenuUsername.textContent = authState.user.username;
+        if (userMenuRole) userMenuRole.textContent = authState.user.is_admin ? 'Administrator' : 'User';
+    } else {
+        hideUserMenu();
+    }
+}
+
+function hideUserMenu() {
+    const userMenu = document.getElementById('user-menu');
+    if (userMenu) userMenu.style.display = 'none';
+}
+
+// Toggle user menu dropdown
+function initUserMenu() {
+    const toggle = document.getElementById('user-menu-toggle');
+    const menu = document.getElementById('user-menu');
+
+    if (toggle && menu) {
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menu.classList.toggle('open');
+        });
+
+        // Close when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.user-menu')) {
+                menu.classList.remove('open');
+            }
+        });
+    }
+}
+
+// API request with JWT token
+async function authApiRequest(url, options = {}) {
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers
+    };
+
+    if (authState.token) {
+        headers['Authorization'] = `Bearer ${authState.token}`;
+    }
+
+    const response = await fetch(url, {
+        ...options,
+        headers
+    });
+
+    if (!response.ok) {
+        let errorData;
+        let errorMessage = 'Request failed';
+
+        try {
+            errorData = await response.json();
+            errorMessage = errorData.detail || errorMessage;
+        } catch (e) {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+
+        // Handle auth errors
+        if (response.status === 401) {
+            logout(false);
+            showLoginModal();
+        }
+
+        throw new APIError(errorMessage, 'server', response.status, errorData);
+    }
+
+    return await response.json();
+}
+
+// Login Modal
+function showLoginModal() {
+    const modal = document.getElementById('login-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+
+        // Hide close button and disable backdrop click when auth is required
+        const closeBtn = modal.querySelector('.modal-close');
+        const backdrop = modal.querySelector('.modal-backdrop');
+        if (authState.isMultiUser && !authState.isAuthenticated) {
+            if (closeBtn) closeBtn.style.display = 'none';
+            if (backdrop) backdrop.style.cursor = 'default';
+        } else {
+            if (closeBtn) closeBtn.style.display = '';
+            if (backdrop) backdrop.style.cursor = 'pointer';
+        }
+
+        document.getElementById('login-username')?.focus();
+    }
+}
+
+function closeLoginModal() {
+    // Don't allow closing the modal if multi-user mode is enabled and not authenticated
+    if (authState.isMultiUser && !authState.isAuthenticated) {
+        return;
+    }
+
+    const modal = document.getElementById('login-modal');
+    if (modal) modal.style.display = 'none';
+
+    // Clear form
+    document.getElementById('login-form')?.reset();
+    const errorEl = document.getElementById('login-error');
+    if (errorEl) errorEl.style.display = 'none';
+}
+
+async function handleLogin(event) {
+    event.preventDefault();
+
+    const username = document.getElementById('login-username')?.value;
+    const password = document.getElementById('login-password')?.value;
+    const submitBtn = document.getElementById('login-submit-btn');
+    const errorEl = document.getElementById('login-error');
+
+    if (!username || !password) {
+        if (errorEl) {
+            errorEl.textContent = 'Please enter username and password';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Signing in...';
+
+        const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Login failed');
+        }
+
+        const data = await response.json();
+
+        // Store token
+        authState.token = data.access_token;
+        localStorage.setItem('auth_token', data.access_token);
+
+        // Load user info
+        await loadCurrentUser();
+
+        // Show main content and signal auth is complete
+        document.body.classList.remove('auth-required');
+        if (authReadyResolve) authReadyResolve();
+
+        closeLoginModal();
+        showMessage('Logged in successfully', 'success');
+
+    } catch (error) {
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.style.display = 'block';
+        }
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Sign In';
+    }
+}
+
+function logout(showMsg = true) {
+    authState.token = null;
+    authState.user = null;
+    authState.isAuthenticated = false;
+    localStorage.removeItem('auth_token');
+
+    hideUserMenu();
+
+    // Hide settings tab
+    const settingsTab = document.getElementById('settings-tab-btn');
+    if (settingsTab) settingsTab.style.display = 'none';
+
+    if (showMsg) {
+        showMessage('Logged out successfully', 'success');
+    }
+
+    if (authState.isMultiUser) {
+        showLoginModal();
+    }
+}
+
+// Change Password Modal
+function showChangePasswordModal() {
+    const modal = document.getElementById('change-password-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        document.getElementById('current-password')?.focus();
+    }
+
+    // Close user menu
+    document.getElementById('user-menu')?.classList.remove('open');
+}
+
+function closeChangePasswordModal() {
+    const modal = document.getElementById('change-password-modal');
+    if (modal) modal.style.display = 'none';
+
+    // Clear form
+    document.getElementById('change-password-form')?.reset();
+    const errorEl = document.getElementById('change-password-error');
+    if (errorEl) errorEl.style.display = 'none';
+}
+
+async function handleChangePassword(event) {
+    event.preventDefault();
+
+    const currentPassword = document.getElementById('current-password')?.value;
+    const newPassword = document.getElementById('new-password')?.value;
+    const confirmPassword = document.getElementById('confirm-new-password')?.value;
+    const submitBtn = document.getElementById('change-password-submit-btn');
+    const errorEl = document.getElementById('change-password-error');
+
+    // Validation
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        if (errorEl) {
+            errorEl.textContent = 'Please fill in all fields';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        if (errorEl) {
+            errorEl.textContent = 'New passwords do not match';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    if (newPassword.length < 8) {
+        if (errorEl) {
+            errorEl.textContent = 'Password must be at least 8 characters';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Changing...';
+
+        await authApiRequest('/api/auth/change-password', {
+            method: 'POST',
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            })
+        });
+
+        closeChangePasswordModal();
+        showMessage('Password changed successfully', 'success');
+
+    } catch (error) {
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.style.display = 'block';
+        }
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Change Password';
+    }
+}
+
+// ----------------------------
+// User Management (Admin only)
+// ----------------------------
+
+let usersData = [];
+
+async function loadUsers() {
+    const tbody = document.getElementById('users-list');
+    if (!tbody) return;
+
+    try {
+        showSkeletonLoader(tbody, 3);
+        usersData = await authApiRequest('/api/users');
+        renderUsers(usersData);
+    } catch (error) {
+        console.error('Failed to load users:', error);
+        showErrorState(tbody, error, loadUsers);
+    }
+}
+
+function renderUsers(users) {
+    const tbody = document.getElementById('users-list');
+    if (!tbody) return;
+
+    if (users.length === 0) {
+        showEmptyState(tbody, 'No Users', 'No users have been created yet.', null);
+        return;
+    }
+
+    tbody.innerHTML = users.map(user => {
+        const roleBadge = user.is_admin
+            ? '<span class="admin-badge">Admin</span>'
+            : '<span class="user-badge">User</span>';
+
+        const statusClass = user.is_active ? 'status-active' : 'status-inactive';
+        const statusText = user.is_active ? 'Active' : 'Inactive';
+
+        const isSelf = authState.user && authState.user.id === user.id;
+        const deleteDisabled = isSelf ? 'disabled title="Cannot delete yourself"' : '';
+
+        return `
+            <tr data-id="${user.id}">
+                <td>${escapeHtml(user.username)}${isSelf ? ' <span class="text-muted">(you)</span>' : ''}</td>
+                <td>${user.email ? escapeHtml(user.email) : '<span class="text-muted">-</span>'}</td>
+                <td>${roleBadge}</td>
+                <td><span class="${statusClass}">${statusText}</span></td>
+                <td>${new Date(user.created_at).toLocaleDateString()}</td>
+                <td>
+                    <div class="table-actions">
+                        <button class="btn btn-secondary btn-small" onclick="openEditUserModal(${user.id})">Edit</button>
+                        <button class="btn btn-danger btn-small" onclick="deleteUser(${user.id})" ${deleteDisabled}>Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function createUser() {
+    const username = document.getElementById('user-username')?.value;
+    const email = document.getElementById('user-email')?.value || null;
+    const password = document.getElementById('user-password')?.value;
+    const passwordConfirm = document.getElementById('user-password-confirm')?.value;
+    const isAdmin = document.getElementById('user-is-admin')?.checked || false;
+
+    if (!username || !password) {
+        showMessage('Username and password are required', 'error');
+        return;
+    }
+
+    if (password !== passwordConfirm) {
+        showMessage('Passwords do not match', 'error');
+        return;
+    }
+
+    if (password.length < 8) {
+        showMessage('Password must be at least 8 characters', 'error');
+        return;
+    }
+
+    try {
+        await authApiRequest('/api/users', {
+            method: 'POST',
+            body: JSON.stringify({ username, email, password, is_admin: isAdmin })
+        });
+
+        showMessage('User created successfully', 'success');
+        document.getElementById('user-form')?.reset();
+        await loadUsers();
+
+    } catch (error) {
+        showMessage(error.message, 'error');
+    }
+}
+
+function openEditUserModal(userId) {
+    const user = usersData.find(u => u.id === userId);
+    if (!user) return;
+
+    document.getElementById('edit-user-id').value = user.id;
+    document.getElementById('edit-user-username').value = user.username;
+    document.getElementById('edit-user-email').value = user.email || '';
+    document.getElementById('edit-user-password').value = '';
+    document.getElementById('edit-user-is-admin').checked = user.is_admin;
+    document.getElementById('edit-user-is-active').checked = user.is_active;
+
+    const modal = document.getElementById('edit-user-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeEditUserModal() {
+    const modal = document.getElementById('edit-user-modal');
+    if (modal) modal.style.display = 'none';
+
+    document.getElementById('edit-user-form')?.reset();
+    const errorEl = document.getElementById('edit-user-error');
+    if (errorEl) errorEl.style.display = 'none';
+}
+
+async function handleEditUser(event) {
+    event.preventDefault();
+
+    const userId = document.getElementById('edit-user-id')?.value;
+    const username = document.getElementById('edit-user-username')?.value;
+    const email = document.getElementById('edit-user-email')?.value || null;
+    const password = document.getElementById('edit-user-password')?.value || null;
+    const isAdmin = document.getElementById('edit-user-is-admin')?.checked;
+    const isActive = document.getElementById('edit-user-is-active')?.checked;
+    const submitBtn = document.getElementById('edit-user-submit-btn');
+    const errorEl = document.getElementById('edit-user-error');
+
+    if (!username) {
+        if (errorEl) {
+            errorEl.textContent = 'Username is required';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    if (password && password.length < 8) {
+        if (errorEl) {
+            errorEl.textContent = 'Password must be at least 8 characters';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    const payload = { username, email, is_admin: isAdmin, is_active: isActive };
+    if (password) payload.password = password;
+
+    try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+
+        await authApiRequest(`/api/users/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+
+        closeEditUserModal();
+        showMessage('User updated successfully', 'success');
+        await loadUsers();
+
+        // Reload current user in case they edited themselves
+        if (authState.user && authState.user.id === parseInt(userId)) {
+            await loadCurrentUser();
+        }
+
+    } catch (error) {
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.style.display = 'block';
+        }
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save Changes';
+    }
+}
+
+async function deleteUser(userId) {
+    if (authState.user && authState.user.id === userId) {
+        showMessage('Cannot delete your own account', 'error');
+        return;
+    }
+
+    if (!confirm('Are you sure you want to delete this user?')) {
+        return;
+    }
+
+    try {
+        await authApiRequest(`/api/users/${userId}`, { method: 'DELETE' });
+        showMessage('User deleted successfully', 'success');
+        await loadUsers();
+    } catch (error) {
+        showMessage(error.message, 'error');
+    }
+}
+
+// User form submission handler (for Settings tab)
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('user-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await createUser();
+    });
+});

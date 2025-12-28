@@ -32,15 +32,19 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 *Interactive topology visualization with animated data flows, zoom controls, and hover highlighting - click nodes or links to drill down into mirror details*
 
 ### Backup & Restore
-![Backup](docs/screenshots/06-backup.png?v=3)
+![Backup](docs/screenshots/06-backup.png?v=4)
 *Complete database backups with one-click creation and secure restore functionality*
 
+### Settings (Multi-User Mode)
+![Settings](docs/screenshots/07-settings.png?v=4)
+*User management with admin and regular user roles, active/inactive status, and secure password management*
+
 ### About
-![About](docs/screenshots/07-about.png?v=3)
+![About](docs/screenshots/08-about.png?v=4)
 *Project information with version details, links to documentation, and technology stack*
 
 ### Help
-![Help](docs/screenshots/08-help.png?v=3)
+![Help](docs/screenshots/09-help.png?v=4)
 *Comprehensive help documentation with setup guides, troubleshooting tips, and best practices*
 
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
@@ -80,12 +84,12 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 
 ### Technology Stack
 - **Backend**: Python 3.11+ with FastAPI
-- **Database**: SQLite (async with aiosqlite)
+- **Database**: PostgreSQL (async with asyncpg)
 - **Frontend**: Vanilla JavaScript with modern CSS
 - **Visualization**: Chart.js for charts, D3.js for topology graphs
 - **API Integration**: python-gitlab library
 - **Deployment**: Docker and Docker Compose
-- **Authentication**: HTTP Basic Auth (optional)
+- **Authentication**: HTTP Basic Auth (single-user) or JWT tokens (multi-user)
 - **Security**: Encrypted storage of GitLab tokens using Fernet encryption
 
 ### Project Structure
@@ -187,13 +191,30 @@ Create a `.env` file with the following variables:
 HOST=0.0.0.0
 PORT=8000
 
-# Database Configuration
-DATABASE_URL=sqlite+aiosqlite:///./data/mirrors.db
+# Database Configuration (PostgreSQL)
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/mirror_maestro
+
+# PostgreSQL credentials (used by docker-compose)
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=mirror_maestro
 
 # Authentication (optional but recommended)
 AUTH_ENABLED=true
 AUTH_USERNAME=admin
 AUTH_PASSWORD=changeme
+
+# Multi-User Mode (optional)
+# Set to true to enable JWT-based authentication with multiple users
+MULTI_USER_ENABLED=false
+# Initial admin user (only used when multi-user mode is first enabled)
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=changeme
+INITIAL_ADMIN_EMAIL=
+# JWT Settings (auto-generated secret if not provided)
+JWT_SECRET_KEY=your-secret-key-here
+JWT_ALGORITHM=HS256
+JWT_EXPIRATION_HOURS=24
 
 # Logging
 LOG_LEVEL=INFO
@@ -215,6 +236,45 @@ The app uses **Instance Access Tokens** to call the GitLab API:
 - Created when you create a mirror
 - Deleted when you delete a mirror
 - Can be manually rotated via the "Rotate Token" button in the mirrors table
+
+### Multi-User Mode
+
+Mirror Maestro supports two authentication modes:
+
+#### Single-User Mode (Default)
+- Uses HTTP Basic Auth with a single username/password
+- Configured via `AUTH_ENABLED`, `AUTH_USERNAME`, `AUTH_PASSWORD`
+- Good for personal use or small teams
+
+#### Multi-User Mode
+- JWT-based authentication with individual user accounts
+- Admin users can create and manage other users
+- Each user has their own login credentials
+- Enabled by setting `MULTI_USER_ENABLED=true`
+
+**Enabling Multi-User Mode:**
+
+1. Set the following environment variables:
+   ```bash
+   MULTI_USER_ENABLED=true
+   INITIAL_ADMIN_USERNAME=admin
+   INITIAL_ADMIN_PASSWORD=your-secure-password
+   JWT_SECRET_KEY=your-jwt-secret-key
+   ```
+
+2. Restart the application. An initial admin user will be created automatically.
+
+3. Log in with the admin credentials and go to the **Settings** tab to manage users.
+
+**User Management (Admin only):**
+- Create new users with username, email (optional), and password
+- Assign admin privileges to users
+- Deactivate users without deleting them
+- Delete users (except yourself and the last admin)
+
+**User Features:**
+- Change your own password via the user menu
+- View your username and role in the top-right user menu
 
 ## Usage Guide
 
@@ -304,7 +364,7 @@ Protect your Mirror Maestro configuration with complete database backups:
 #### Backup Contents
 
 Each backup archive includes:
-- **SQLite database** - All GitLab instances, instance pairs, and mirrors
+- **Database export** - All GitLab instances, instance pairs, and mirrors (JSON format)
 - **Encryption key** - Required to decrypt stored GitLab tokens
 - **Metadata** - Backup timestamp, version, and file manifest
 
@@ -381,6 +441,15 @@ The application provides a RESTful API. Once running, visit:
 - `GET /api/backup/stats` - Get backup statistics (instance/pair/mirror counts, database size)
 - `GET /api/backup/create` - Create and download a complete backup archive
 - `POST /api/backup/restore` - Restore from a backup archive (multipart form upload)
+
+#### Health Check
+- `GET /api/health/quick` - Quick health check for load balancers (no auth required)
+- `GET /api/health` - Detailed health check with component status, mirror stats, and token expiration
+- `GET /api/health?check_instances=true` - Extended health check with GitLab instance connectivity tests
+- `GET /health` - Legacy health endpoint for backward compatibility
+
+#### Search
+- `GET /api/search?q={query}` - Global search across instances, pairs, and mirrors
 
 ## Security
 
@@ -593,9 +662,9 @@ Contributions are welcome! Please:
 - [ ] Email notifications for mirror failures
 - [ ] Support for SSH-based mirroring
 - [ ] Multi-user support with role-based access
-- [ ] Advanced filtering and search
-- [ ] Mirror health checks and diagnostics
-- [ ] PostgreSQL database support
+- [x] Advanced filtering and search
+- [x] Mirror health checks and diagnostics
+- [x] PostgreSQL database support
 
 ## Related Projects
 
