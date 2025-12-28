@@ -1,67 +1,98 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" width="120" height="80">
-  <!-- Geometric GitLab Tanuki Maestro -->
-  <g id="tanuki-maestro">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 90" width="160" height="90">
+  <defs>
+    <linearGradient id="foxOrange" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fc6d26"/>
+      <stop offset="100%" style="stop-color:#e24329"/>
+    </linearGradient>
+    <linearGradient id="mirrorGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#1f75cb;stop-opacity:0.3"/>
+      <stop offset="50%" style="stop-color:#1f75cb;stop-opacity:0.6"/>
+      <stop offset="100%" style="stop-color:#1f75cb;stop-opacity:0.3"/>
+    </linearGradient>
+  </defs>
 
-    <!-- GitLab Tanuki Head (geometric triangles) -->
-    <g id="tanuki-head">
-      <!-- Left ear triangle (darker orange, pointing up) -->
-      <path d="M 35 25 L 28 8 L 42 25 Z" fill="#e24329"/>
+  <!-- Fox Maestro with Mirror Reflection -->
+  <g id="logo">
 
-      <!-- Right ear triangle (darker orange, pointing up) -->
-      <path d="M 65 25 L 72 8 L 58 25 Z" fill="#e24329"/>
+    <!-- Mirror/Frame (futuristic) -->
+    <g id="mirror">
+      <!-- Frame -->
+      <rect x="85" y="15" width="65" height="65" rx="8" fill="none" stroke="#1f75cb" stroke-width="3"/>
+      <rect x="88" y="18" width="59" height="59" rx="6" fill="#e8f4ff" opacity="0.3"/>
 
-      <!-- Left cheek triangle (light orange, pointing down) -->
-      <path d="M 28 25 L 35 42 L 42 25 Z" fill="#fc6d26"/>
-
-      <!-- Right cheek triangle (light orange, pointing down) -->
-      <path d="M 58 25 L 65 42 L 72 25 Z" fill="#fc6d26"/>
-
-      <!-- Center/nose triangle (medium orange, pointing down) -->
-      <path d="M 42 25 L 50 40 L 58 25 Z" fill="#fca326"/>
-
-      <!-- Bottom jaw triangle (darker, pointing down) -->
-      <path d="M 35 42 L 50 52 L 65 42 Z" fill="#e24329"/>
-
-      <!-- Eyes (simple dots) -->
-      <circle cx="38" cy="30" r="2.5" fill="#2d2d2d"/>
-      <circle cx="62" cy="30" r="2.5" fill="#2d2d2d"/>
-      <circle cx="39" cy="29" r="1" fill="white"/>
-      <circle cx="63" cy="29" r="1" fill="white"/>
+      <!-- Mirror glow effect -->
+      <rect x="85" y="15" width="65" height="2" fill="url(#mirrorGlow)"/>
+      <rect x="85" y="78" width="65" height="2" fill="url(#mirrorGlow)"/>
     </g>
 
-    <!-- Bow tie (below head) -->
-    <g id="bowtie">
-      <path d="M 42 54 L 46 58 L 42 62 Z" fill="#1f75cb"/>
-      <path d="M 58 54 L 54 58 L 58 62 Z" fill="#1f75cb"/>
-      <rect x="48" y="56.5" width="4" height="3" rx="0.5" fill="#1f75cb"/>
+    <!-- Fox Maestro (back view, holding baton) -->
+    <g id="fox-back">
+      <!-- Body (tuxedo) -->
+      <ellipse cx="45" cy="55" rx="18" ry="22" fill="#1a1a2e"/>
+
+      <!-- Tail -->
+      <path d="M 35 70 Q 25 75 22 85 Q 20 88 25 87 Q 30 85 32 80 Q 35 75 37 72" fill="url(#foxOrange)"/>
+      <path d="M 32 80 Q 35 82 37 85" stroke="white" stroke-width="2" fill="none" opacity="0.5"/>
+
+      <!-- Head (back) -->
+      <ellipse cx="45" cy="35" rx="15" ry="14" fill="url(#foxOrange)"/>
+
+      <!-- Ears -->
+      <path d="M 35 30 L 32 20 L 38 28 Z" fill="#e24329"/>
+      <path d="M 55 30 L 58 20 L 52 28 Z" fill="#e24329"/>
+
+      <!-- Right arm raised with baton -->
+      <ellipse cx="58" cy="48" rx="4" ry="14" fill="url(#foxOrange)" transform="rotate(-50 58 48)"/>
+      <circle cx="68" cy="32" r="4" fill="#fc6d26"/>
+
+      <!-- Conductor's baton -->
+      <line x1="69" y1="31" x2="80" y2="22" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="80" cy="22" r="2" fill="white"/>
+
+      <!-- Left arm -->
+      <ellipse cx="32" cy="50" rx="4" ry="12" fill="url(#foxOrange)" transform="rotate(20 32 50)"/>
+      <circle cx="26" cy="58" r="4" fill="#fc6d26"/>
     </g>
 
-    <!-- Body (simple geometric) -->
-    <rect x="40" y="62" width="20" height="16" rx="2" fill="#1a1a2e"/>
-    <rect x="47" y="62" width="6" height="16" fill="white"/>
+    <!-- Reflection in Mirror (front view) -->
+    <g id="fox-reflection">
+      <!-- Head -->
+      <ellipse cx="117" cy="40" rx="13" ry="12" fill="url(#foxOrange)" opacity="0.95"/>
 
-    <!-- Conductor's baton (right side) -->
-    <g id="baton">
-      <!-- Arm suggestion (angular) -->
-      <path d="M 60 66 L 78 48" stroke="#fc6d26" stroke-width="3.5" stroke-linecap="round"/>
-      <!-- Hand -->
-      <circle cx="78" cy="48" r="4" fill="#fc6d26"/>
-      <!-- Baton -->
-      <line x1="80" y1="46" x2="95" y2="35" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-      <circle cx="95" cy="35" r="2.5" fill="white"/>
-      <circle cx="95" cy="35" r="1.2" fill="#e0e0e0"/>
+      <!-- Ears (triangular) -->
+      <path d="M 108 35 L 105 26 L 111 33 Z" fill="#e24329" opacity="0.95"/>
+      <path d="M 126 35 L 129 26 L 123 33 Z" fill="#e24329" opacity="0.95"/>
+
+      <!-- White facial markings -->
+      <ellipse cx="111" cy="41" rx="5" ry="4" fill="white" opacity="0.9"/>
+      <ellipse cx="123" cy="41" rx="5" ry="4" fill="white" opacity="0.9"/>
+
+      <!-- Eyes -->
+      <circle cx="111" cy="40" r="2.5" fill="#2d2d2d"/>
+      <circle cx="111.5" cy="39.5" r="1" fill="white"/>
+      <circle cx="123" cy="40" r="2.5" fill="#2d2d2d"/>
+      <circle cx="123.5" cy="39.5" r="1" fill="white"/>
+
+      <!-- Nose -->
+      <path d="M 117 44 L 115 46 L 119 46 Z" fill="#2d2d2d" opacity="0.95"/>
+
+      <!-- Smile -->
+      <path d="M 112 47 Q 117 49 122 47" stroke="#2d2d2d" stroke-width="1" fill="none" opacity="0.9" stroke-linecap="round"/>
+
+      <!-- Body/Tuxedo -->
+      <rect x="107" y="52" width="20" height="20" rx="2" fill="#1a1a2e" opacity="0.95"/>
+      <rect x="114" y="52" width="6" height="20" fill="white" opacity="0.9"/>
+
+      <!-- Bow tie -->
+      <path d="M 111 51 L 114 53 L 111 55 Z" fill="#1f75cb" opacity="0.95"/>
+      <path d="M 123 51 L 120 53 L 123 55 Z" fill="#1f75cb" opacity="0.95"/>
+      <rect x="115" y="52" width="4" height="2" fill="#1f75cb" opacity="0.95"/>
     </g>
 
-    <!-- Left arm (angular) -->
-    <path d="M 40 66 L 26 72" stroke="#fc6d26" stroke-width="3.5" stroke-linecap="round"/>
-    <circle cx="26" cy="72" r="4" fill="#fc6d26"/>
-
-    <!-- Music notes -->
-    <g opacity="0.7">
-      <circle cx="90" cy="42" r="2" fill="#1f75cb"/>
-      <rect x="91.5" y="33" width="1.5" height="9" fill="#1f75cb"/>
-      <circle cx="86" cy="38" r="1.5" fill="#1f75cb"/>
-      <rect x="87.2" y="31" width="1.2" height="7" fill="#1f75cb"/>
+    <!-- Music notes floating -->
+    <g opacity="0.6">
+      <circle cx="73" cy="28" r="1.5" fill="#1f75cb"/>
+      <rect x="74.2" y="22" width="1.2" height="6" fill="#1f75cb"/>
     </g>
 
   </g>
