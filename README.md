@@ -222,6 +222,15 @@ LOG_LEVEL=INFO
 # Application Settings
 APP_TITLE=Mirror Maestro
 APP_DESCRIPTION=Orchestrate GitLab mirrors across multiple instance pairs with precision
+
+# SSL/TLS Configuration
+SSL_ENABLED=false
+SSL_CERT_PATH=/etc/nginx/ssl/cert.pem
+SSL_KEY_PATH=/etc/nginx/ssl/key.pem
+
+# Optional: Customize ports
+HTTP_PORT=80
+HTTPS_PORT=443
 ```
 
 ### GitLab Access Tokens
@@ -275,6 +284,109 @@ Mirror Maestro supports two authentication modes:
 **User Features:**
 - Change your own password via the user menu
 - View your username and role in the top-right user menu
+
+### SSL/TLS Configuration
+
+Mirror Maestro supports optional SSL/TLS encryption for secure HTTPS connections. This is handled by an nginx reverse proxy that sits in front of the FastAPI application.
+
+#### Quick Start with Self-Signed Certificate (Development)
+
+For testing and development environments, you can quickly generate a self-signed certificate:
+
+```bash
+# 1. Generate self-signed certificate
+./scripts/generate-self-signed-cert.sh
+
+# 2. Enable SSL in your .env file
+echo "SSL_ENABLED=true" >> .env
+
+# 3. Configure nginx
+./scripts/setup-ssl.sh
+
+# 4. Start the application
+docker-compose up -d
+
+# 5. Access via HTTPS
+# Open https://localhost (your browser will warn about the self-signed cert)
+```
+
+**Note:** Self-signed certificates will trigger browser security warnings. They are suitable for development only.
+
+#### Production Setup with Valid Certificates
+
+For production deployments, use certificates from a trusted Certificate Authority (CA) like Let's Encrypt:
+
+1. **Obtain SSL certificates** from your CA (e.g., using certbot for Let's Encrypt)
+
+2. **Copy certificates to the ssl directory:**
+   ```bash
+   mkdir -p ssl
+   cp /path/to/your/fullchain.pem ssl/cert.pem
+   cp /path/to/your/privkey.pem ssl/key.pem
+   ```
+
+3. **Enable SSL in your .env file:**
+   ```bash
+   SSL_ENABLED=true
+   SSL_CERT_PATH=/etc/nginx/ssl/cert.pem
+   SSL_KEY_PATH=/etc/nginx/ssl/key.pem
+   ```
+
+4. **Configure nginx:**
+   ```bash
+   ./scripts/setup-ssl.sh
+   ```
+
+5. **Optional: Customize ports** in your .env file:
+   ```bash
+   HTTP_PORT=80      # HTTP port (redirects to HTTPS when SSL is enabled)
+   HTTPS_PORT=443    # HTTPS port
+   ```
+
+6. **Start the application:**
+   ```bash
+   docker-compose up -d
+   ```
+
+#### SSL Configuration Details
+
+When SSL is enabled (`SSL_ENABLED=true`):
+- HTTP requests on port 80 are automatically redirected to HTTPS on port 443
+- The nginx reverse proxy handles SSL termination
+- Modern TLS protocols (TLSv1.2, TLSv1.3) and secure cipher suites are used
+- Security headers are automatically added (HSTS, X-Frame-Options, etc.)
+
+When SSL is disabled (`SSL_ENABLED=false`):
+- The application is served over HTTP only
+- No SSL certificates are required
+- Suitable for development or when SSL is handled by external infrastructure (load balancer, reverse proxy, etc.)
+
+#### Certificate Renewal
+
+For production certificates that expire (e.g., Let's Encrypt certificates expire every 90 days):
+
+1. Renew your certificates using your CA's renewal process
+2. Copy the new certificates to the `ssl/` directory (same filenames)
+3. Reload nginx: `docker-compose restart nginx`
+
+No need to restart the entire application stack.
+
+#### Troubleshooting SSL
+
+**"SSL certificates not found" error:**
+- Ensure `ssl/cert.pem` and `ssl/key.pem` exist
+- Check file permissions (cert should be readable, key should be 600)
+- Run `./scripts/generate-self-signed-cert.sh` for development
+
+**Browser shows "connection not secure":**
+- Normal for self-signed certificates
+- Click "Advanced" → "Proceed anyway" for testing
+- For production, use certificates from a trusted CA
+
+**nginx fails to start:**
+- Check nginx logs: `docker-compose logs nginx`
+- Verify certificate files are valid: `openssl x509 -in ssl/cert.pem -text -noout`
+- Ensure ports 80 and 443 are not already in use
 
 ## Usage Guide
 
