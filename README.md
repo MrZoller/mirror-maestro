@@ -40,6 +40,7 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **Multiple Instance Pairs**: Define and manage mirrors across multiple pairs of GitLab instances (e.g., A↔B, B↔C)
 - **Easy Mirror Creation**: Create mirrors with minimal user input - project information is fetched automatically via the GitLab API
 - **Push & Pull Mirrors**: Support for both push and pull mirroring configurations
+- **Bidirectional Mirroring**: Create pairs in both directions (A→B and B→A) for two-way sync with independent settings per direction
 - **Automatic Token Management**: Project access tokens are automatically created and managed for each mirror - no manual token configuration needed
 - **Flexible Configuration**: Define default mirror settings at the instance pair level, optionally override per mirror
 - **Safe Inline Editing**: Edit instances/pairs/mirrors in-table; fields that could break existing mirrors are locked/greyed out
