@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     try:
         await _create_initial_admin()
     except Exception as e:
-        logging.error(f"Failed to create initial admin user: {e}")
+        logging.error(f"Failed to create initial admin user: {e}", exc_info=True)
 
     # Migrate existing mirrors to use automatic project access tokens
     try:
@@ -93,8 +93,14 @@ app.include_router(health.router)
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request, _=Depends(verify_credentials)):
-    """Serve the main web interface."""
+async def root(request: Request):
+    """
+    Serve the main web interface.
+
+    The HTML page is served without authentication - the frontend handles
+    showing the login modal when multi-user mode is enabled. This allows
+    users to see the login form instead of getting a 401 error.
+    """
     return templates.TemplateResponse(
         request,
         "index.html",
