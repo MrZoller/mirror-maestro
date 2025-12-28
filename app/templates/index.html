@@ -33,6 +33,7 @@
             <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
             <button class="tab" data-tab="topology-tab">Topology</button>
+            <button class="tab" data-tab="backup-tab">Backup</button>
             <button class="tab" data-tab="about-tab">About</button>
             <button class="tab" data-tab="help-tab">Help</button>
         </div>
@@ -481,6 +482,123 @@
             </div>
         </div>
 
+        <!-- Backup Tab -->
+        <div id="backup-tab" class="tab-content">
+            <div class="card">
+                <h2>Backup & Restore</h2>
+                <p class="text-muted">Create and restore complete backups of your Mirror Maestro database and encryption key.</p>
+            </div>
+
+            <!-- Create Backup -->
+            <div class="card">
+                <h3>📦 Create Backup</h3>
+                <p>Download a complete backup of your Mirror Maestro configuration.</p>
+
+                <div class="backup-info">
+                    <div class="backup-stat-grid">
+                        <div class="backup-stat">
+                            <div class="backup-stat-label">GitLab Instances</div>
+                            <div class="backup-stat-value" id="backup-stat-instances">-</div>
+                        </div>
+                        <div class="backup-stat">
+                            <div class="backup-stat-label">Instance Pairs</div>
+                            <div class="backup-stat-value" id="backup-stat-pairs">-</div>
+                        </div>
+                        <div class="backup-stat">
+                            <div class="backup-stat-label">Mirrors</div>
+                            <div class="backup-stat-value" id="backup-stat-mirrors">-</div>
+                        </div>
+                        <div class="backup-stat">
+                            <div class="backup-stat-label">Database Size</div>
+                            <div class="backup-stat-value" id="backup-stat-size">-</div>
+                        </div>
+                    </div>
+
+                    <div class="backup-includes">
+                        <p><strong>Backup includes:</strong></p>
+                        <ul>
+                            <li>All GitLab instances (with encrypted tokens)</li>
+                            <li>All instance pairs (with default settings)</li>
+                            <li>All mirrors (with configurations and status)</li>
+                            <li>Encryption key (required to decrypt tokens)</li>
+                        </ul>
+                    </div>
+
+                    <div class="alert alert-warning">
+                        <strong>⚠️ Security Warning:</strong> Backup files contain your encryption key and can decrypt all stored GitLab tokens. Store backups securely and never share them publicly!
+                    </div>
+                </div>
+
+                <button id="create-backup-btn" class="btn btn-primary">
+                    <span id="create-backup-text">Create & Download Backup</span>
+                    <span id="create-backup-spinner" class="btn-spinner" style="display:none;">
+                        <div class="spinner"></div>
+                    </span>
+                </button>
+            </div>
+
+            <!-- Restore from Backup -->
+            <div class="card">
+                <h3>📤 Restore from Backup</h3>
+                <p>Restore your configuration from a backup file.</p>
+
+                <div class="alert alert-danger">
+                    <strong>⚠️ Warning:</strong> Restoring will REPLACE all current data including:
+                    <ul>
+                        <li>All GitLab instances</li>
+                        <li>All instance pairs</li>
+                        <li>All mirrors</li>
+                        <li>The encryption key</li>
+                    </ul>
+                    This action cannot be undone. Make sure you have a current backup before proceeding.
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="backup-before-restore" checked>
+                        Create backup before restore (recommended)
+                    </label>
+                    <p class="text-muted" style="margin-top: 8px;">
+                        Automatically creates a backup of your current data before restoring.
+                    </p>
+                </div>
+
+                <div class="backup-upload">
+                    <input type="file" id="restore-file-input" accept=".tar.gz" style="display:none;">
+                    <button id="select-backup-btn" class="btn btn-secondary">Select Backup File</button>
+                    <span id="restore-filename" class="text-muted">No file selected</span>
+                </div>
+
+                <button id="restore-backup-btn" class="btn btn-danger" disabled>
+                    <span id="restore-backup-text">Restore Backup</span>
+                    <span id="restore-backup-spinner" class="btn-spinner" style="display:none;">
+                        <div class="spinner"></div>
+                    </span>
+                </button>
+            </div>
+
+            <!-- Backup Information -->
+            <div class="card">
+                <h3>ℹ️ Backup Information</h3>
+                <ul>
+                    <li><strong>Format:</strong> Backups are compressed archives (.tar.gz)</li>
+                    <li><strong>Portability:</strong> Compatible across Mirror Maestro versions and servers</li>
+                    <li><strong>Migration:</strong> Can be used to migrate between different servers</li>
+                    <li><strong>Security:</strong> Encryption key is included - keep backups safe!</li>
+                    <li><strong>Automatic naming:</strong> Files are named <code>mirror-maestro-backup-YYYYMMDD-HHMMSS.tar.gz</code></li>
+                </ul>
+
+                <h4>Best Practices</h4>
+                <ul>
+                    <li>Create regular backups (daily or weekly depending on your change frequency)</li>
+                    <li>Store backups in a secure location separate from your Mirror Maestro server</li>
+                    <li>Test your backups periodically to ensure they can be restored</li>
+                    <li>Keep multiple backup versions in case of corruption</li>
+                    <li>Use encryption or access controls on your backup storage</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- About Tab -->
         <div id="about-tab" class="tab-content">
             <div class="card about-card">
@@ -548,6 +666,19 @@
 
                 <h3>What is Mirror Maestro?</h3>
                 <p>Mirror Maestro simplifies the management of GitLab repository mirrors. Whether you need to sync repositories between GitLab instances, create backups, or maintain read-only copies, Mirror Maestro provides a centralized interface to configure and monitor all your mirrors.</p>
+
+                <h3>Application Overview</h3>
+                <p>Mirror Maestro is organized into several tabs, each focused on a specific aspect of mirror management:</p>
+                <ul>
+                    <li><strong><a href="#" onclick="switchTab('dashboard-tab'); return false;">Dashboard</a></strong> - Quick overview with statistics and recent activity</li>
+                    <li><strong><a href="#" onclick="switchTab('instances-tab'); return false;">GitLab Instances</a></strong> - Manage connections to your GitLab servers</li>
+                    <li><strong><a href="#" onclick="switchTab('pairs-tab'); return false;">Instance Pairs</a></strong> - Configure mirroring relationships between instances</li>
+                    <li><strong><a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a></strong> - Create and manage individual repository mirrors</li>
+                    <li><strong><a href="#" onclick="switchTab('topology-tab'); return false;">Topology</a></strong> - Visualize your mirror network with an interactive graph</li>
+                    <li><strong><a href="#" onclick="switchTab('backup-tab'); return false;">Backup</a></strong> - Create and restore complete database backups</li>
+                    <li><strong><a href="#" onclick="switchTab('about-tab'); return false;">About</a></strong> - Project information and version details</li>
+                    <li><strong><a href="#" onclick="switchTab('help-tab'); return false;">Help</a></strong> - This comprehensive guide</li>
+                </ul>
 
                 <h3>Core Concepts</h3>
                 <ul>
@@ -757,6 +888,57 @@
                     <li><strong>Yellow</strong> - Some mirrors have warnings or are stale</li>
                     <li><strong>Red</strong> - Mirrors have errors that need attention</li>
                 </ul>
+            </div>
+
+            <!-- Backup & Restore -->
+            <div class="card">
+                <h2>Backup & Restore</h2>
+                <p class="text-muted">Protect your Mirror Maestro configuration with backups.</p>
+
+                <h3>Creating Backups</h3>
+                <p>Regular backups protect against data loss from database corruption, accidental deletion, or server failures.</p>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('backup-tab'); return false;">Backup</a> tab</li>
+                    <li>Review the current database statistics (instances, pairs, mirrors, size)</li>
+                    <li>Click "Create & Download Backup" to download a complete backup</li>
+                    <li>Save the backup file (.tar.gz) to a secure location</li>
+                </ol>
+
+                <h3>What's Included in Backups</h3>
+                <p>Each backup archive contains:</p>
+                <ul>
+                    <li><strong>Database</strong> - All instances, pairs, mirrors, and configurations</li>
+                    <li><strong>Encryption key</strong> - Required to decrypt stored GitLab tokens</li>
+                    <li><strong>Metadata</strong> - Timestamp and version information</li>
+                </ul>
+
+                <h3>Restoring from Backup</h3>
+                <p><strong>⚠️ Warning:</strong> Restoring replaces ALL current data. Always create a backup first!</p>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('backup-tab'); return false;">Backup</a> tab</li>
+                    <li>Ensure "Create backup before restore" is checked (recommended)</li>
+                    <li>Click "Select Backup File" and choose your backup (.tar.gz)</li>
+                    <li>Click "Restore Backup" and confirm the action</li>
+                    <li>The application will reload with the restored data</li>
+                </ol>
+
+                <h3>Backup Best Practices</h3>
+                <ul>
+                    <li>Create backups regularly (daily or weekly recommended)</li>
+                    <li>Store backups in a secure location separate from your server</li>
+                    <li>Keep multiple backup versions (e.g., last 7 days)</li>
+                    <li>Test restores periodically to verify backup integrity</li>
+                    <li>Protect backup files - they contain encryption keys for all tokens</li>
+                </ul>
+
+                <h3>Migration Between Servers</h3>
+                <p>Backups can be used to migrate Mirror Maestro to a new server:</p>
+                <ol>
+                    <li>Create a backup on the old server</li>
+                    <li>Install Mirror Maestro on the new server</li>
+                    <li>Upload and restore the backup on the new server</li>
+                    <li>All instances, pairs, and mirrors will be migrated</li>
+                </ol>
             </div>
 
             <!-- Troubleshooting -->
