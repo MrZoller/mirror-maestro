@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" width="120" height="80">
+  <defs>
+    <linearGradient id="batonGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fc6d26;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e85515;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="reflectionGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fc6d26;stop-opacity:0.4" />
+      <stop offset="100%" style="stop-color:#fc6d26;stop-opacity:0.1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Left side of M - top baton -->
+  <path d="M 20 15 L 35 35 L 32 37 L 17 17 Z" fill="url(#batonGradient)"/>
+  <circle cx="20" cy="15" r="4" fill="#fc6d26"/>
+
+  <!-- Left side of M - reflected baton -->
+  <path d="M 17 63 L 32 43 L 35 45 L 20 65 Z" fill="url(#reflectionGradient)"/>
+  <circle cx="20" cy="65" r="4" fill="#fc6d26" opacity="0.3"/>
+
+  <!-- Right side of M - top baton -->
+  <path d="M 100 15 L 85 35 L 88 37 L 103 17 Z" fill="url(#batonGradient)"/>
+  <circle cx="100" cy="15" r="4" fill="#fc6d26"/>
+
+  <!-- Right side of M - reflected baton -->
+  <path d="M 103 63 L 88 43 L 85 45 L 100 65 Z" fill="url(#reflectionGradient)"/>
+  <circle cx="100" cy="65" r="4" fill="#fc6d26" opacity="0.3"/>
+
+  <!-- Center connecting batons -->
+  <path d="M 55 25 L 60 40 L 57 41 L 52 26 Z" fill="url(#batonGradient)"/>
+  <path d="M 65 25 L 60 40 L 63 41 L 68 26 Z" fill="url(#batonGradient)"/>
+
+  <!-- Center reflection -->
+  <path d="M 52 54 L 57 39 L 60 40 L 55 55 Z" fill="url(#reflectionGradient)"/>
+  <path d="M 68 54 L 63 39 L 60 40 L 65 55 Z" fill="url(#reflectionGradient)"/>
+
+  <!-- Reflection line (subtle) -->
+  <line x1="10" y1="40" x2="110" y2="40" stroke="#1f75cb" stroke-width="0.5" opacity="0.3" stroke-dasharray="2,2"/>
+</svg>
