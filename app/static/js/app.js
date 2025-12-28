@@ -1936,23 +1936,11 @@ async function searchProjectsForMirror(side) {
 }
 
 function resetMirrorOverrides() {
-    // Tri-state checkboxes (indeterminate => "use pair default" / don't send)
-    const triStateCheckboxIds = [
-        'mirror-overwrite',
-        'mirror-trigger',
-        'mirror-only-protected',
-    ];
-    triStateCheckboxIds.forEach((id) => {
+    // Reset all select overrides to "inherit from pair"
+    const selectIds = ['mirror-overwrite', 'mirror-trigger', 'mirror-only-protected'];
+    selectIds.forEach((id) => {
         const el = document.getElementById(id);
-        if (!el) return;
-        el.checked = false;
-        el.indeterminate = true;
-        el.title = 'Use pair default';
-        el.onchange = () => {
-            // Once the user interacts, treat it as an explicit override.
-            el.indeterminate = false;
-            el.title = '';
-        };
+        if (el) el.value = '__inherit__';
     });
 
     const regex = document.getElementById('mirror-branch-regex');
@@ -1964,6 +1952,48 @@ function resetMirrorOverrides() {
 
     const enabled = document.getElementById('mirror-enabled');
     if (enabled) enabled.checked = true;
+
+    // Update the inherit option texts to show pair defaults
+    updateMirrorFormPairDefaults();
+}
+
+function updateMirrorFormPairDefaults() {
+    const pair = state.pairs.find(p => p.id === state.selectedPair);
+    if (!pair) return;
+
+    const fmtBool = (v) => v ? 'yes' : 'no';
+
+    // Update each select's "inherit" option to show the pair's default
+    const overwriteEl = document.getElementById('mirror-overwrite');
+    if (overwriteEl) {
+        const inheritOpt = overwriteEl.querySelector('option[value="__inherit__"]');
+        if (inheritOpt) inheritOpt.textContent = `Inherit from pair (${fmtBool(pair.mirror_overwrite_diverged)})`;
+    }
+
+    const onlyProtectedEl = document.getElementById('mirror-only-protected');
+    if (onlyProtectedEl) {
+        const inheritOpt = onlyProtectedEl.querySelector('option[value="__inherit__"]');
+        if (inheritOpt) inheritOpt.textContent = `Inherit from pair (${fmtBool(pair.only_mirror_protected_branches)})`;
+    }
+
+    const triggerEl = document.getElementById('mirror-trigger');
+    if (triggerEl) {
+        const inheritOpt = triggerEl.querySelector('option[value="__inherit__"]');
+        if (inheritOpt) inheritOpt.textContent = `Inherit from pair (${fmtBool(pair.mirror_trigger_builds)})`;
+    }
+
+    // Update placeholders for text inputs to show pair defaults
+    const regexEl = document.getElementById('mirror-branch-regex');
+    if (regexEl) {
+        const pairRegex = pair.mirror_branch_regex;
+        regexEl.placeholder = pairRegex ? `Inherit: ${pairRegex}` : 'Inherit from pair (none)';
+    }
+
+    const userEl = document.getElementById('mirror-mirror-user-id');
+    if (userEl) {
+        const pairUser = pair.mirror_user_id;
+        userEl.placeholder = pairUser ? `Inherit: ${pairUser}` : 'Inherit from pair (auto)';
+    }
 }
 
 function applyMirrorDirectionUI(direction) {
@@ -2022,17 +2052,18 @@ async function createMirror() {
     const effectiveDirection = (pair?.mirror_direction || '').toString().toLowerCase();
     const isPush = effectiveDirection === 'push';
 
+    // Handle tri-state selects: "__inherit__" means omit (use pair default), otherwise convert to boolean
     const overwriteEl = document.getElementById('mirror-overwrite');
-    if (overwriteEl && !overwriteEl.indeterminate) {
-        data.mirror_overwrite_diverged = overwriteEl.checked;
+    if (overwriteEl && overwriteEl.value !== '__inherit__') {
+        data.mirror_overwrite_diverged = overwriteEl.value === 'true';
     }
     const triggerEl = document.getElementById('mirror-trigger');
-    if (triggerEl && !triggerEl.indeterminate && !isPush) {
-        data.mirror_trigger_builds = triggerEl.checked;
+    if (triggerEl && triggerEl.value !== '__inherit__' && !isPush) {
+        data.mirror_trigger_builds = triggerEl.value === 'true';
     }
     const onlyProtectedEl = document.getElementById('mirror-only-protected');
-    if (onlyProtectedEl && !onlyProtectedEl.indeterminate) {
-        data.only_mirror_protected_branches = onlyProtectedEl.checked;
+    if (onlyProtectedEl && onlyProtectedEl.value !== '__inherit__') {
+        data.only_mirror_protected_branches = onlyProtectedEl.value === 'true';
     }
 
     const regexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();
