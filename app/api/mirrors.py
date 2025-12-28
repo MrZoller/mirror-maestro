@@ -306,16 +306,48 @@ async def _resolve_effective_settings(
 @router.get("", response_model=List[MirrorResponse])
 async def list_mirrors(
     instance_pair_id: int | None = None,
+    status: str | None = None,
+    enabled: bool | None = None,
+    search: str | None = None,
+    token_status: str | None = None,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
-    """List all mirrors, optionally filtered by instance pair."""
+    """
+    List all mirrors with optional filtering.
+
+    Query parameters:
+    - instance_pair_id: Filter by instance pair ID
+    - status: Filter by last_update_status (e.g., 'success', 'failed', 'pending')
+    - enabled: Filter by enabled status (true/false)
+    - search: Search in source and target project paths (case-insensitive)
+    - token_status: Filter by token status ('active', 'expiring_soon', 'expired', 'none')
+    """
     query = select(Mirror)
+
+    # Apply filters
     if instance_pair_id is not None:
         query = query.where(Mirror.instance_pair_id == instance_pair_id)
 
+    if status is not None:
+        query = query.where(Mirror.last_update_status == status)
+
+    if enabled is not None:
+        query = query.where(Mirror.enabled == enabled)
+
+    if search is not None and search.strip():
+        search_term = f"%{search.strip().lower()}%"
+        query = query.where(
+            (Mirror.source_project_path.ilike(search_term)) |
+            (Mirror.target_project_path.ilike(search_term))
+        )
+
     result = await db.execute(query)
     mirrors = result.scalars().all()
+
+    # Token status filter is applied post-query since it's computed
+    if token_status is not None:
+        mirrors = [m for m in mirrors if _compute_token_status(m.mirror_token_expires_at) == token_status]
 
     if not mirrors:
         return []
