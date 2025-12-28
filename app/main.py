@@ -113,16 +113,34 @@ async def root(request: Request):
 
 
 @app.get("/favicon.ico")
+@app.get("/favicon-128x128.png")
+async def favicon_128():
+    """Serve the 128x128 favicon for Retina displays."""
+    return FileResponse("app/static/images/favicon-128x128.png", media_type="image/png")
+
+
+@app.get("/favicon-64x64.png")
+async def favicon_64():
+    """Serve the 64x64 favicon for Retina displays."""
+    return FileResponse("app/static/images/favicon-64x64.png", media_type="image/png")
+
+
 @app.get("/favicon-32x32.png")
 async def favicon_32():
-    """Serve the 32x32 favicon from the root path."""
+    """Serve the 32x32 favicon."""
     return FileResponse("app/static/images/favicon-32x32.png", media_type="image/png")
 
 
 @app.get("/favicon-16x16.png")
 async def favicon_16():
-    """Serve the 16x16 favicon from the root path."""
+    """Serve the 16x16 favicon."""
     return FileResponse("app/static/images/favicon-16x16.png", media_type="image/png")
+
+
+@app.get("/apple-touch-icon.png")
+async def apple_touch_icon():
+    """Serve the Apple touch icon for iOS/Safari."""
+    return FileResponse("app/static/images/apple-touch-icon.png", media_type="image/png")
 
 
 @app.get("/health")
