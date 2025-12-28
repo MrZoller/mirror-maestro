@@ -25,7 +25,7 @@ This document provides comprehensive guidance for AI assistants working on the M
 ### Technology Stack
 
 - **Backend**: Python 3.11+ with FastAPI
-- **Database**: SQLite with async support (aiosqlite)
+- **Database**: PostgreSQL with async support (asyncpg)
 - **ORM**: SQLAlchemy 2.0+ (async)
 - **Frontend**: Vanilla JavaScript (no frameworks), modern CSS with design tokens
 - **Templates**: Jinja2
@@ -88,7 +88,7 @@ This document provides comprehensive guidance for AI assistants working on the M
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
-│   SQLite Database (async)           │
+│   PostgreSQL Database (async)       │
 │   - Encrypted tokens                │
 │   - Configuration data              │
 └─────────────────────────────────────┘
@@ -144,7 +144,6 @@ mirror-maestro/
 │   └── take-screenshots.js           # Playwright screenshot automation
 │
 ├── data/                             # Runtime data (gitignored)
-│   ├── mirrors.db                    # SQLite database
 │   └── encryption.key                # Fernet encryption key
 │
 ├── .github/                          # GitHub configuration
@@ -544,27 +543,27 @@ pytest -m live_gitlab -v
 
 ### Database Migrations
 
-**Simple Migration Pattern** (SQLite only):
-```python
-# In app/database.py
-async def _maybe_migrate_sqlite():
-    """Add new columns to existing tables."""
-    async with async_engine.begin() as conn:
-        # Check if column exists
-        result = await conn.execute(text("PRAGMA table_info(mirrors)"))
-        columns = {row[1] for row in result}
+**PostgreSQL Schema Management**:
 
-        # Add column if missing
-        if "enabled" not in columns:
-            await conn.execute(text("ALTER TABLE mirrors ADD COLUMN enabled BOOLEAN DEFAULT 1"))
-```
-
-**Called During Startup**:
+With PostgreSQL, schema changes are handled via SQLAlchemy's metadata:
 ```python
 async def init_db():
-    async with async_engine.begin() as conn:
+    """Initialize the database, creating all tables."""
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    await _maybe_migrate_sqlite()
+```
+
+For production deployments with existing data, consider using Alembic for migrations.
+For simple column additions, PostgreSQL supports `ALTER TABLE` directly:
+```python
+async def add_column_if_not_exists(conn, table: str, column: str, col_type: str):
+    """Add a column to an existing table if it doesn't exist."""
+    result = await conn.execute(text(f"""
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = :table AND column_name = :column
+    """), {"table": table, "column": column})
+    if not result.fetchone():
+        await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
 ```
 
 ## Code Conventions
@@ -931,11 +930,7 @@ updated_at: Mapped[datetime] = mapped_column(
 )
 ```
 
-**Note**: SQLite doesn't automatically update `updated_at`, so explicit updates may be needed:
-```python
-instance.updated_at = datetime.utcnow()
-await db.commit()
-```
+**Note**: PostgreSQL with SQLAlchemy's `onupdate` properly updates `updated_at` automatically when using ORM operations.
 
 ## API Patterns
 
@@ -1576,18 +1571,7 @@ from app.api import my_resource
 app.include_router(my_resource.router)
 ```
 
-5. **Add Migration** (if adding to existing database - in `app/database.py`):
-```python
-async def _maybe_migrate_sqlite():
-    async with async_engine.begin() as conn:
-        # Check if table exists
-        result = await conn.execute(text(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='my_resources'"
-        ))
-        if not result.scalar_one_or_none():
-            # Table will be created by Base.metadata.create_all
-            pass
-```
+5. **Database Schema**: New tables are automatically created by `Base.metadata.create_all` during app startup. For production with existing data, use Alembic migrations.
 
 6. **Write Tests** (in `tests/test_api_my_resource.py`):
 ```python
@@ -1617,18 +1601,19 @@ class Mirror(Base):
     new_field: Mapped[Optional[str]] = mapped_column(String(100))
 ```
 
-2. **Add Migration** (in `app/database.py`):
+2. **Add Migration** (for production with existing data):
 ```python
-async def _maybe_migrate_sqlite():
-    async with async_engine.begin() as conn:
-        # Check if column exists
-        result = await conn.execute(text("PRAGMA table_info(mirrors)"))
-        columns = {row[1] for row in result}
-
-        if "new_field" not in columns:
-            await conn.execute(text(
-                "ALTER TABLE mirrors ADD COLUMN new_field VARCHAR(100)"
-            ))
+# Use Alembic for production migrations, or manually:
+async def add_column_migration(conn):
+    """Add column if it doesn't exist (PostgreSQL)."""
+    result = await conn.execute(text("""
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'mirrors' AND column_name = 'new_field'
+    """))
+    if not result.fetchone():
+        await conn.execute(text(
+            "ALTER TABLE mirrors ADD COLUMN new_field VARCHAR(100)"
+        ))
 ```
 
 3. **Update Pydantic Models**:
@@ -1737,17 +1722,20 @@ class Mirror(Base):
     new_setting: Mapped[Optional[bool]] = mapped_column(Boolean)
 ```
 
-2. **Add Migration**:
+2. **Add Migration** (for production with existing data):
 ```python
-async def _maybe_migrate_sqlite():
-    async with async_engine.begin() as conn:
-        for table in ["instance_pairs", "mirrors"]:
-            result = await conn.execute(text(f"PRAGMA table_info({table})"))
-            columns = {row[1] for row in result}
-            if "new_setting" not in columns:
-                await conn.execute(text(
-                    f"ALTER TABLE {table} ADD COLUMN new_setting BOOLEAN DEFAULT 0"
-                ))
+# Use Alembic for production migrations, or manually:
+async def add_setting_migration(conn):
+    """Add new_setting column to tables (PostgreSQL)."""
+    for table in ["instance_pairs", "mirrors"]:
+        result = await conn.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = :table AND column_name = 'new_setting'
+        """), {"table": table})
+        if not result.fetchone():
+            await conn.execute(text(
+                f"ALTER TABLE {table} ADD COLUMN new_setting BOOLEAN DEFAULT FALSE"
+            ))
 ```
 
 3. **Update Settings Resolution** (in `app/api/mirrors.py`):
@@ -1776,16 +1764,18 @@ MIRROR_SETTING_FIELDS = [
 
 **Problem**: Column already exists error
 ```
-sqlite3.OperationalError: duplicate column name: new_field
+psycopg2.errors.DuplicateColumn: column "new_field" of relation "table" already exists
 ```
 
 **Solution**: Migration already ran. Either:
 1. Remove the migration code
-2. Add proper existence check:
+2. Add proper existence check using `information_schema`:
 ```python
-result = await conn.execute(text("PRAGMA table_info(table_name)"))
-columns = {row[1] for row in result}
-if "new_field" not in columns:
+result = await conn.execute(text("""
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'table_name' AND column_name = 'new_field'
+"""))
+if not result.fetchone():
     # Add column
 ```
 
@@ -1824,14 +1814,15 @@ app.add_middleware(
 2. Verify token has required scopes (`api` for instance tokens)
 3. Test token manually: `curl -H "PRIVATE-TOKEN: xxx" https://gitlab.example.com/api/v4/user`
 
-#### Database Lock Errors
+#### Database Connection Errors
 
-**Problem**: `sqlite3.OperationalError: database is locked`
+**Problem**: `asyncpg.exceptions.TooManyConnectionsError` or connection timeouts
 
 **Solution**:
-1. SQLite doesn't handle high concurrency well
-2. Ensure async operations complete before starting new ones
-3. Consider PostgreSQL for production if needed
+1. Check PostgreSQL `max_connections` setting
+2. Ensure connection pool is properly configured
+3. Make sure async operations complete before starting new ones
+4. Check that PostgreSQL service is healthy: `docker-compose ps`
 
 ### Debugging Tips
 
@@ -1843,20 +1834,20 @@ LOG_LEVEL=DEBUG
 
 **Database Inspection**:
 ```bash
-# Connect to SQLite database
-sqlite3 data/mirrors.db
+# Connect to PostgreSQL database (Docker)
+docker-compose exec db psql -U postgres -d mirror_maestro
 
 # List tables
-.tables
+\dt
 
 # View schema
-.schema mirrors
+\d mirrors
 
 # Query data
 SELECT * FROM mirrors;
 
 # Exit
-.quit
+\q
 ```
 
 **API Testing**:
@@ -1972,8 +1963,8 @@ black app/ tests/
 # Type checking (if using mypy)
 mypy app/
 
-# Database shell
-sqlite3 data/mirrors.db
+# Database shell (Docker)
+docker-compose exec db psql -U postgres -d mirror_maestro
 ```
 
 ### File Locations

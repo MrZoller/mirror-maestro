@@ -2,10 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (including PostgreSQL client for pg_dump)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     gcc \
+    libpq-dev \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -15,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app ./app
 
-# Create data directory (for database and encryption key)
+# Create data directory (for encryption key)
 RUN mkdir -p /app/data
 
 # Expose port

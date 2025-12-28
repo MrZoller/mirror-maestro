@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
-    # Database Configuration
-    database_url: str = "sqlite+aiosqlite:///./data/mirrors.db"
+    # Database Configuration (PostgreSQL)
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/mirror_maestro"
 
     # Authentication
     auth_enabled: bool = True
