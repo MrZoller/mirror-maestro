@@ -20,8 +20,9 @@ const DEMO_FILES = [
   { file: 'demo-mirrors.html', output: '04-mirrors.png', name: 'Mirrors' },
   { file: 'demo-topology.html', output: '05-topology.png', name: 'Topology' },
   { file: 'demo-backup.html', output: '06-backup.png', name: 'Backup' },
-  { file: 'demo-about.html', output: '07-about.png', name: 'About' },
-  { file: 'demo-help.html', output: '08-help.png', name: 'Help' }
+  { file: 'demo-settings.html', output: '07-settings.png', name: 'Settings' },
+  { file: 'demo-about.html', output: '08-about.png', name: 'About' },
+  { file: 'demo-help.html', output: '09-help.png', name: 'Help' }
 ];
 
 async function takeScreenshots() {
