@@ -1,3 +1,4 @@
+import secrets
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,10 +18,22 @@ class Settings(BaseSettings):
     # Database Configuration (PostgreSQL)
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/mirror_maestro"
 
-    # Authentication
+    # Authentication (legacy single-user mode, still supported for backward compatibility)
     auth_enabled: bool = True
     auth_username: str = "admin"
     auth_password: str = "changeme"
+
+    # Multi-user authentication (JWT)
+    # If True, use database users instead of single auth_username/auth_password
+    multi_user_enabled: bool = False
+    jwt_secret_key: str = secrets.token_urlsafe(32)  # Auto-generate if not set
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_hours: int = 24
+
+    # Initial admin user (created on first startup if multi_user_enabled)
+    initial_admin_username: str = "admin"
+    initial_admin_password: str = "changeme"
+    initial_admin_email: str = ""
 
     # Logging
     log_level: str = "INFO"

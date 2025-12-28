@@ -4,11 +4,39 @@ from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
+from sqlalchemy import select
 
 from app.config import settings
-from app.database import init_db, migrate_mirrors_to_auto_tokens, drop_legacy_group_tables
-from app.api import instances, pairs, mirrors, export, topology, dashboard, backup, search, health
-from app.core.auth import verify_credentials
+from app.database import init_db, migrate_mirrors_to_auto_tokens, drop_legacy_group_tables, AsyncSessionLocal
+from app.api import instances, pairs, mirrors, export, topology, dashboard, backup, search, health, auth, users
+from app.core.auth import verify_credentials, get_password_hash
+
+
+async def _create_initial_admin():
+    """Create initial admin user if multi-user mode is enabled and no users exist."""
+    if not settings.multi_user_enabled:
+        return
+
+    from app.models import User
+
+    async with AsyncSessionLocal() as db:
+        # Check if any users exist
+        result = await db.execute(select(User).limit(1))
+        if result.scalar_one_or_none() is not None:
+            logging.info("Users already exist, skipping initial admin creation")
+            return
+
+        # Create initial admin user
+        admin = User(
+            username=settings.initial_admin_username,
+            email=settings.initial_admin_email or None,
+            hashed_password=get_password_hash(settings.initial_admin_password),
+            is_admin=True,
+            is_active=True
+        )
+        db.add(admin)
+        await db.commit()
+        logging.info(f"Created initial admin user: {settings.initial_admin_username}")
 
 
 @asynccontextmanager
@@ -16,6 +44,12 @@ async def lifespan(app: FastAPI):
     """Lifecycle events for the application."""
     # Startup
     await init_db()
+
+    # Create initial admin user if in multi-user mode
+    try:
+        await _create_initial_admin()
+    except Exception as e:
+        logging.error(f"Failed to create initial admin user: {e}")
 
     # Migrate existing mirrors to use automatic project access tokens
     try:
@@ -45,6 +79,8 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 # Include API routers
+app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(dashboard.router)
 app.include_router(instances.router)
 app.include_router(pairs.router)
@@ -57,7 +93,7 @@ app.include_router(health.router)
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request, _: str = Depends(verify_credentials)):
+async def root(request: Request, _=Depends(verify_credentials)):
     """Serve the main web interface."""
     return templates.TemplateResponse(
         request,
@@ -65,6 +101,7 @@ async def root(request: Request, _: str = Depends(verify_credentials)):
         {
             "title": settings.app_title,
             "auth_enabled": settings.auth_enabled,
+            "multi_user_enabled": settings.multi_user_enabled,
         },
     )
 
