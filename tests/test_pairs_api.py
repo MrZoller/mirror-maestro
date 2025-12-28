@@ -328,3 +328,148 @@ async def test_pairs_list_returns_all_pairs(client, session_maker):
     assert any(p["name"] == "pair1" for p in pairs)
     assert any(p["name"] == "pair2" for p in pairs)
 
+
+@pytest.mark.asyncio
+async def test_pairs_bidirectional_mirroring(client, session_maker):
+    """
+    Test bidirectional mirroring by creating pairs in both directions.
+
+    This validates that:
+    1. Two pairs can be created between the same instances (A→B and B→A)
+    2. Each pair can have different settings
+    3. Both pairs can be retrieved and have correct source/target
+    """
+    instance_a = await seed_instance(session_maker, name="Instance A", url="https://gitlab-a.example.com")
+    instance_b = await seed_instance(session_maker, name="Instance B", url="https://gitlab-b.example.com")
+
+    # Create A → B pair (push to backup)
+    resp_ab = await client.post(
+        "/api/pairs",
+        json={
+            "name": "A to B (outbound)",
+            "source_instance_id": instance_a,
+            "target_instance_id": instance_b,
+            "mirror_direction": "push",
+            "mirror_overwrite_diverged": True,
+            "description": "Push changes from A to B",
+        },
+    )
+    assert resp_ab.status_code == 200
+    pair_ab = resp_ab.json()
+    assert pair_ab["source_instance_id"] == instance_a
+    assert pair_ab["target_instance_id"] == instance_b
+    assert pair_ab["mirror_direction"] == "push"
+    assert pair_ab["mirror_overwrite_diverged"] is True
+
+    # Create B → A pair (pull from backup)
+    resp_ba = await client.post(
+        "/api/pairs",
+        json={
+            "name": "B to A (inbound)",
+            "source_instance_id": instance_b,
+            "target_instance_id": instance_a,
+            "mirror_direction": "pull",
+            "mirror_overwrite_diverged": False,
+            "description": "Pull changes from B to A",
+        },
+    )
+    assert resp_ba.status_code == 200
+    pair_ba = resp_ba.json()
+    assert pair_ba["source_instance_id"] == instance_b
+    assert pair_ba["target_instance_id"] == instance_a
+    assert pair_ba["mirror_direction"] == "pull"
+    assert pair_ba["mirror_overwrite_diverged"] is False
+
+    # Verify both pairs exist and are distinct
+    resp = await client.get("/api/pairs")
+    assert resp.status_code == 200
+    pairs = resp.json()
+    assert len(pairs) == 2
+
+    # Verify we can get each pair individually
+    resp_get_ab = await client.get(f"/api/pairs/{pair_ab['id']}")
+    assert resp_get_ab.status_code == 200
+    assert resp_get_ab.json()["name"] == "A to B (outbound)"
+
+    resp_get_ba = await client.get(f"/api/pairs/{pair_ba['id']}")
+    assert resp_get_ba.status_code == 200
+    assert resp_get_ba.json()["name"] == "B to A (inbound)"
+
+
+@pytest.mark.asyncio
+async def test_pairs_bidirectional_with_mirrors(client, session_maker):
+    """
+    Test bidirectional mirroring with actual mirrors in each direction.
+
+    This validates that mirrors can be created on pairs going both directions
+    between the same two instances.
+    """
+    instance_a = await seed_instance(session_maker, name="Instance A")
+    instance_b = await seed_instance(session_maker, name="Instance B")
+
+    # Create bidirectional pairs
+    resp_ab = await client.post(
+        "/api/pairs",
+        json={
+            "name": "A to B",
+            "source_instance_id": instance_a,
+            "target_instance_id": instance_b,
+            "mirror_direction": "push",
+        },
+    )
+    assert resp_ab.status_code == 200
+    pair_ab_id = resp_ab.json()["id"]
+
+    resp_ba = await client.post(
+        "/api/pairs",
+        json={
+            "name": "B to A",
+            "source_instance_id": instance_b,
+            "target_instance_id": instance_a,
+            "mirror_direction": "push",
+        },
+    )
+    assert resp_ba.status_code == 200
+    pair_ba_id = resp_ba.json()["id"]
+
+    # Add mirrors to both pairs
+    async with session_maker() as s:
+        # Mirror on A→B pair
+        m1 = Mirror(
+            instance_pair_id=pair_ab_id,
+            source_project_id=100,
+            source_project_path="group-a/project1",
+            target_project_id=200,
+            target_project_path="group-b/project1",
+            enabled=True,
+            last_update_status="finished",
+        )
+        # Mirror on B→A pair
+        m2 = Mirror(
+            instance_pair_id=pair_ba_id,
+            source_project_id=201,
+            source_project_path="group-b/project2",
+            target_project_id=101,
+            target_project_path="group-a/project2",
+            enabled=True,
+            last_update_status="finished",
+        )
+        s.add_all([m1, m2])
+        await s.commit()
+
+    # Verify both pairs still exist and have their mirrors
+    resp = await client.get("/api/pairs")
+    pairs = resp.json()
+    pair_names = {p["name"] for p in pairs}
+    assert "A to B" in pair_names
+    assert "B to A" in pair_names
+
+    # Deleting one pair should not affect the other
+    resp_del = await client.delete(f"/api/pairs/{pair_ab_id}")
+    assert resp_del.status_code == 200
+
+    resp = await client.get("/api/pairs")
+    pairs = resp.json()
+    assert len(pairs) == 1
+    assert pairs[0]["name"] == "B to A"
+
