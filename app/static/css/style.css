@@ -47,7 +47,7 @@
 body.auth-required .header,
 body.auth-required .main-content,
 body.auth-required .tabs-container {
-    visibility: hidden;
+    display: none !important;
 }
 
 body.auth-required {
