@@ -461,6 +461,8 @@ function initTabs() {
                 if (typeof window.initTopologyTab === 'function') {
                     window.initTopologyTab();
                 }
+            } else if (targetId === 'backup-tab') {
+                loadBackupStats();
             } else if (targetId === 'about-tab') {
                 loadAboutInfo();
             }
@@ -560,7 +562,32 @@ function setupEventListeners() {
         if (tgtSearch && path) tgtSearch.value = path;
     });
 
-    // Token form
+    // Backup buttons
+    document.getElementById('create-backup-btn')?.addEventListener('click', async () => {
+        await createBackup();
+    });
+
+    document.getElementById('select-backup-btn')?.addEventListener('click', () => {
+        document.getElementById('restore-file-input')?.click();
+    });
+
+    document.getElementById('restore-file-input')?.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        const filenameSpan = document.getElementById('restore-filename');
+        const restoreBtn = document.getElementById('restore-backup-btn');
+
+        if (file) {
+            filenameSpan.textContent = file.name;
+            restoreBtn.disabled = false;
+        } else {
+            filenameSpan.textContent = 'No file selected';
+            restoreBtn.disabled = true;
+        }
+    });
+
+    document.getElementById('restore-backup-btn')?.addEventListener('click', async () => {
+        await restoreBackup();
+    });
 }
 
 function clearDatalist(datalistId) {
@@ -2207,6 +2234,145 @@ function showMessage(message, type = 'info') {
 }
 
 // Load About page information
+// ----------------------------
+// Backup & Restore Functions
+// ----------------------------
+
+async function loadBackupStats() {
+    try {
+        const data = await apiRequest('/api/backup/stats');
+
+        document.getElementById('backup-stat-instances').textContent = data.instances || '0';
+        document.getElementById('backup-stat-pairs').textContent = data.pairs || '0';
+        document.getElementById('backup-stat-mirrors').textContent = data.mirrors || '0';
+        document.getElementById('backup-stat-size').textContent = `${data.database_size_mb || '0'} MB`;
+    } catch (error) {
+        console.error('Failed to load backup statistics:', error);
+        showMessage('Failed to load backup statistics', 'error');
+    }
+}
+
+async function createBackup() {
+    const btn = document.getElementById('create-backup-btn');
+    const btnText = document.getElementById('create-backup-text');
+    const btnSpinner = document.getElementById('create-backup-spinner');
+
+    try {
+        // Show loading state
+        btn.disabled = true;
+        btnText.style.display = 'none';
+        btnSpinner.style.display = 'inline-block';
+
+        const response = await fetch('/api/backup/create');
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to create backup');
+        }
+
+        // Get filename from Content-Disposition header
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = 'mirror-maestro-backup.tar.gz';
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+            if (filenameMatch) {
+                filename = filenameMatch[1].replace(/"/g, '');
+            }
+        }
+
+        // Download the file
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+        showMessage('Backup created and downloaded successfully', 'success');
+    } catch (error) {
+        console.error('Backup creation failed:', error);
+        showMessage(`Failed to create backup: ${error.message}`, 'error');
+    } finally {
+        // Reset button state
+        btn.disabled = false;
+        btnText.style.display = 'inline';
+        btnSpinner.style.display = 'none';
+    }
+}
+
+async function restoreBackup() {
+    const fileInput = document.getElementById('restore-file-input');
+    const file = fileInput?.files?.[0];
+
+    if (!file) {
+        showMessage('Please select a backup file first', 'error');
+        return;
+    }
+
+    // Confirm with user
+    const confirmed = confirm(
+        '⚠️  WARNING: This will REPLACE all current data including:\n\n' +
+        '• All GitLab instances\n' +
+        '• All instance pairs\n' +
+        '• All mirrors\n' +
+        '• The encryption key\n\n' +
+        'This action cannot be undone. Are you sure you want to continue?'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    const btn = document.getElementById('restore-backup-btn');
+    const btnText = document.getElementById('restore-backup-text');
+    const btnSpinner = document.getElementById('restore-backup-spinner');
+    const createBackupFirst = document.getElementById('backup-before-restore')?.checked || false;
+
+    try {
+        // Show loading state
+        btn.disabled = true;
+        btnText.style.display = 'none';
+        btnSpinner.style.display = 'inline-block';
+
+        // Create FormData for file upload
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('create_backup_first', createBackupFirst.toString());
+
+        const response = await fetch('/api/backup/restore', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to restore backup');
+        }
+
+        const result = await response.json();
+
+        showMessage('Backup restored successfully! Reloading application...', 'success');
+
+        // Wait a moment for the message to be visible, then reload
+        setTimeout(() => {
+            window.location.reload();
+        }, 2000);
+
+    } catch (error) {
+        console.error('Backup restore failed:', error);
+        showMessage(`Failed to restore backup: ${error.message}`, 'error');
+
+        // Reset button state on error
+        btn.disabled = false;
+        btnText.style.display = 'inline';
+        btnSpinner.style.display = 'none';
+    }
+    // Note: We don't reset button state on success because we're reloading the page
+}
+
 async function loadAboutInfo() {
     try {
         const data = await apiRequest('/api/about');
