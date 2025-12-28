@@ -382,6 +382,15 @@ The application provides a RESTful API. Once running, visit:
 - `GET /api/backup/create` - Create and download a complete backup archive
 - `POST /api/backup/restore` - Restore from a backup archive (multipart form upload)
 
+#### Health Check
+- `GET /api/health/quick` - Quick health check for load balancers (no auth required)
+- `GET /api/health` - Detailed health check with component status, mirror stats, and token expiration
+- `GET /api/health?check_instances=true` - Extended health check with GitLab instance connectivity tests
+- `GET /health` - Legacy health endpoint for backward compatibility
+
+#### Search
+- `GET /api/search?q={query}` - Global search across instances, pairs, and mirrors
+
 ## Security
 
 ### Token Encryption
@@ -593,8 +602,8 @@ Contributions are welcome! Please:
 - [ ] Email notifications for mirror failures
 - [ ] Support for SSH-based mirroring
 - [ ] Multi-user support with role-based access
-- [ ] Advanced filtering and search
-- [ ] Mirror health checks and diagnostics
+- [x] Advanced filtering and search
+- [x] Mirror health checks and diagnostics
 - [ ] PostgreSQL database support
 
 ## Related Projects

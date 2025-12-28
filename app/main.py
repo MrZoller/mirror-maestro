@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db, migrate_mirrors_to_auto_tokens, drop_legacy_group_tables
-from app.api import instances, pairs, mirrors, export, topology, dashboard, backup, search
+from app.api import instances, pairs, mirrors, export, topology, dashboard, backup, search, health
 from app.core.auth import verify_credentials
 
 
@@ -53,6 +53,7 @@ app.include_router(topology.router)
 app.include_router(export.router)
 app.include_router(backup.router)
 app.include_router(search.router)
+app.include_router(health.router)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -69,9 +70,15 @@ async def root(request: Request, _: str = Depends(verify_credentials)):
 
 
 @app.get("/health")
-async def health():
-    """Health check endpoint."""
-    return {"status": "healthy"}
+async def health_legacy():
+    """
+    Legacy health check endpoint for backward compatibility.
+
+    For detailed health checks, use /api/health instead.
+    For quick checks suitable for load balancers, use /api/health/quick.
+    """
+    from datetime import datetime
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
 @app.get("/api/about")
