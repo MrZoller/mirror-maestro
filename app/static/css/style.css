@@ -117,6 +117,19 @@ header p {
     gap: 20px;
 }
 
+.header-title-section {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.header-logo {
+    height: 60px;
+    width: auto;
+    flex-shrink: 0;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
 /* Dark Mode Toggle */
 .dark-mode-toggle {
     background: rgba(255, 255, 255, 0.2);
