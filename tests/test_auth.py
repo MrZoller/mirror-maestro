@@ -51,7 +51,6 @@ def test_verify_legacy_credentials_rejects_bad_password(monkeypatch):
     assert exc.value.headers.get("WWW-Authenticate") == "Basic"
 
 
-@pytest.mark.skipif(True, reason="bcrypt/passlib version compatibility issue in test environment")
 def test_password_hashing():
     """Test password hashing and verification."""
     password = "secret123"
