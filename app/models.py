@@ -36,7 +36,6 @@ class InstancePair(Base):
 
     # Default mirror settings for this pair
     mirror_direction: Mapped[str] = mapped_column(String(10), default="pull", nullable=False)  # "pull" or "push"
-    mirror_protected_branches: Mapped[bool] = mapped_column(Boolean, default=True)
     mirror_overwrite_diverged: Mapped[bool] = mapped_column(Boolean, default=False)
     mirror_trigger_builds: Mapped[bool] = mapped_column(Boolean, default=False)
     only_mirror_protected_branches: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -67,7 +66,6 @@ class Mirror(Base):
     target_project_path: Mapped[str] = mapped_column(String(500), nullable=False)
 
     # Mirror settings (can override instance pair defaults, except direction which is pair-only)
-    mirror_protected_branches: Mapped[Optional[bool]] = mapped_column(Boolean)
     mirror_overwrite_diverged: Mapped[Optional[bool]] = mapped_column(Boolean)
     mirror_trigger_builds: Mapped[Optional[bool]] = mapped_column(Boolean)
     only_mirror_protected_branches: Mapped[Optional[bool]] = mapped_column(Boolean)

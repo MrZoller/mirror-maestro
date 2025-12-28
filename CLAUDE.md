@@ -903,7 +903,7 @@ def resolve_mirror_settings(mirror: Mirror, pair: InstancePair) -> dict:
         "mirror_direction": pair.mirror_direction,
     }
 
-    for setting in ["mirror_protected_branches", "mirror_overwrite_diverged"]:
+    for setting in ["mirror_overwrite_diverged", "only_mirror_protected_branches"]:
         # Try mirror-level override
         mirror_value = getattr(mirror, setting)
         if mirror_value is not None:
@@ -1026,8 +1026,8 @@ class MirrorCreate(BaseModel):
     source_project_path: str
     target_project_id: int
     target_project_path: str
-    mirror_protected_branches: Optional[bool] = None
     mirror_overwrite_diverged: Optional[bool] = None
+    only_mirror_protected_branches: Optional[bool] = None
     # ... other optional overrides
 
 # Response body
@@ -1090,7 +1090,7 @@ async def update_mirror(id: int, mirror_data: MirrorUpdate, db: AsyncSession = D
         setattr(mirror, field, value)
 
     # This allows clearing overrides by sending null:
-    # {"mirror_protected_branches": null}  -> clears override, inherits from group/pair
+    # {"mirror_overwrite_diverged": null}  -> clears override, inherits from pair
 ```
 
 ## Frontend Patterns
@@ -1754,7 +1754,7 @@ async def _maybe_migrate_sqlite():
 ```python
 MIRROR_SETTING_FIELDS = [
     "mirror_direction",
-    "mirror_protected_branches",
+    "mirror_overwrite_diverged",
     # ... existing fields ...
     "new_setting"  # Add here
 ]

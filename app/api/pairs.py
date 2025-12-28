@@ -18,7 +18,6 @@ class InstancePairCreate(BaseModel):
     source_instance_id: int
     target_instance_id: int
     mirror_direction: str = "pull"
-    mirror_protected_branches: bool = True
     mirror_overwrite_diverged: bool = False
     mirror_trigger_builds: bool = False
     only_mirror_protected_branches: bool = False
@@ -70,7 +69,6 @@ class InstancePairUpdate(BaseModel):
     source_instance_id: int | None = None
     target_instance_id: int | None = None
     mirror_direction: str | None = None
-    mirror_protected_branches: bool | None = None
     mirror_overwrite_diverged: bool | None = None
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
@@ -124,7 +122,6 @@ class InstancePairResponse(BaseModel):
     source_instance_id: int
     target_instance_id: int
     mirror_direction: str
-    mirror_protected_branches: bool
     mirror_overwrite_diverged: bool
     mirror_trigger_builds: bool
     only_mirror_protected_branches: bool
@@ -152,7 +149,6 @@ async def list_pairs(
             source_instance_id=pair.source_instance_id,
             target_instance_id=pair.target_instance_id,
             mirror_direction=pair.mirror_direction,
-            mirror_protected_branches=pair.mirror_protected_branches,
             mirror_overwrite_diverged=pair.mirror_overwrite_diverged,
             mirror_trigger_builds=pair.mirror_trigger_builds,
             only_mirror_protected_branches=pair.only_mirror_protected_branches,
@@ -195,7 +191,6 @@ async def create_pair(
         source_instance_id=pair.source_instance_id,
         target_instance_id=pair.target_instance_id,
         mirror_direction=pair.mirror_direction,
-        mirror_protected_branches=pair.mirror_protected_branches,
         mirror_overwrite_diverged=pair.mirror_overwrite_diverged,
         mirror_trigger_builds=pair.mirror_trigger_builds,
         only_mirror_protected_branches=pair.only_mirror_protected_branches,
@@ -213,7 +208,6 @@ async def create_pair(
         source_instance_id=db_pair.source_instance_id,
         target_instance_id=db_pair.target_instance_id,
         mirror_direction=db_pair.mirror_direction,
-        mirror_protected_branches=db_pair.mirror_protected_branches,
         mirror_overwrite_diverged=db_pair.mirror_overwrite_diverged,
         mirror_trigger_builds=db_pair.mirror_trigger_builds,
         only_mirror_protected_branches=db_pair.only_mirror_protected_branches,
@@ -246,7 +240,6 @@ async def get_pair(
         source_instance_id=pair.source_instance_id,
         target_instance_id=pair.target_instance_id,
         mirror_direction=pair.mirror_direction,
-        mirror_protected_branches=pair.mirror_protected_branches,
         mirror_overwrite_diverged=pair.mirror_overwrite_diverged,
         mirror_trigger_builds=pair.mirror_trigger_builds,
         only_mirror_protected_branches=pair.only_mirror_protected_branches,
@@ -294,8 +287,6 @@ async def update_pair(
         pair.target_instance_id = pair_update.target_instance_id
     if "mirror_direction" in fields:
         pair.mirror_direction = pair_update.mirror_direction
-    if "mirror_protected_branches" in fields:
-        pair.mirror_protected_branches = pair_update.mirror_protected_branches
     if "mirror_overwrite_diverged" in fields:
         pair.mirror_overwrite_diverged = pair_update.mirror_overwrite_diverged
     if "mirror_trigger_builds" in fields:
@@ -318,7 +309,6 @@ async def update_pair(
         source_instance_id=pair.source_instance_id,
         target_instance_id=pair.target_instance_id,
         mirror_direction=pair.mirror_direction,
-        mirror_protected_branches=pair.mirror_protected_branches,
         mirror_overwrite_diverged=pair.mirror_overwrite_diverged,
         mirror_trigger_builds=pair.mirror_trigger_builds,
         only_mirror_protected_branches=pair.only_mirror_protected_branches,
