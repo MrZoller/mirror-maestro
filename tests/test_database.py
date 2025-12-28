@@ -77,13 +77,11 @@ async def test_migration_adds_missing_columns():
             result = await conn.execute(text("PRAGMA table_info(instance_pairs)"))
             pair_columns = {row[1] for row in result.fetchall()}
             assert "mirror_branch_regex" in pair_columns
-            assert "mirror_user_id" in pair_columns
 
             # Check mirrors table
             result = await conn.execute(text("PRAGMA table_info(mirrors)"))
             mirror_columns = {row[1] for row in result.fetchall()}
             assert "mirror_branch_regex" in mirror_columns
-            assert "mirror_user_id" in mirror_columns
 
     finally:
         await engine.dispose()
