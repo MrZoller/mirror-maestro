@@ -1347,6 +1347,208 @@ async def update_instance(id: int, data: InstanceUpdate, db: AsyncSession = Depe
     return instance
 ```
 
+### SSL/TLS Configuration
+
+**Overview**:
+
+Mirror Maestro uses nginx as a reverse proxy to handle SSL/TLS termination. This approach:
+- Separates security concerns (nginx handles SSL, FastAPI handles business logic)
+- Provides production-ready SSL configuration
+- Allows for easy certificate management
+- Enables additional features like rate limiting, caching, etc.
+
+**Architecture**:
+
+```
+Client (HTTPS) → nginx (SSL termination) → FastAPI (HTTP on internal network)
+```
+
+**Setup Process**:
+
+1. **Generate or provide SSL certificates**:
+   ```bash
+   # Development: Self-signed certificate
+   ./scripts/generate-self-signed-cert.sh
+
+   # Production: Copy real certificates
+   mkdir -p ssl
+   cp /path/to/fullchain.pem ssl/cert.pem
+   cp /path/to/privkey.pem ssl/key.pem
+   ```
+
+2. **Enable SSL in .env**:
+   ```bash
+   SSL_ENABLED=true
+   ```
+
+3. **Configure nginx**:
+   ```bash
+   ./scripts/setup-ssl.sh
+   ```
+
+4. **Deploy**:
+   ```bash
+   docker-compose up -d
+   ```
+
+**Configuration Files**:
+
+- `nginx/templates/default.conf.template` - HTTP-only configuration
+- `nginx/templates/default-ssl.conf.template` - HTTPS with SSL configuration
+- `nginx/nginx.conf` - Generated configuration (gitignored)
+- `scripts/setup-ssl.sh` - Configuration script
+- `scripts/generate-self-signed-cert.sh` - Certificate generation script
+
+**nginx SSL Configuration Highlights**:
+
+```nginx
+# TLS protocols (modern configuration)
+ssl_protocols TLSv1.2 TLSv1.3;
+
+# Secure cipher suites
+ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:...';
+ssl_prefer_server_ciphers off;
+
+# Session optimization
+ssl_session_cache shared:SSL:10m;
+ssl_session_timeout 10m;
+
+# Security headers
+add_header Strict-Transport-Security "max-age=63072000" always;
+add_header X-Frame-Options "SAMEORIGIN" always;
+```
+
+**Certificate Management**:
+
+**For Development**:
+```bash
+# Generate self-signed certificate (valid 365 days)
+./scripts/generate-self-signed-cert.sh localhost
+
+# Browsers will show security warnings - this is expected
+```
+
+**For Production (Let's Encrypt)**:
+```bash
+# Install certbot
+sudo apt-get install certbot
+
+# Obtain certificate
+sudo certbot certonly --standalone -d yourdomain.com
+
+# Copy to project
+mkdir -p ssl
+sudo cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem ssl/cert.pem
+sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ssl/key.pem
+chmod 644 ssl/cert.pem
+chmod 600 ssl/key.pem
+
+# Setup auto-renewal (certbot usually sets this up automatically)
+sudo certbot renew --dry-run
+```
+
+**Certificate Renewal**:
+```bash
+# After renewing certificates, copy to ssl/ and reload nginx
+cp /path/to/new/cert.pem ssl/cert.pem
+cp /path/to/new/key.pem ssl/key.pem
+docker-compose restart nginx  # No need to restart entire stack
+```
+
+**Environment Variables**:
+
+```python
+# In app/config.py
+class Settings(BaseSettings):
+    # SSL/TLS Configuration
+    ssl_enabled: bool = False
+    ssl_cert_path: str = "/etc/nginx/ssl/cert.pem"
+    ssl_key_path: str = "/etc/nginx/ssl/key.pem"
+```
+
+```bash
+# In .env
+SSL_ENABLED=false
+SSL_CERT_PATH=/etc/nginx/ssl/cert.pem
+SSL_KEY_PATH=/etc/nginx/ssl/key.pem
+HTTP_PORT=80
+HTTPS_PORT=443
+```
+
+**Docker Compose Configuration**:
+
+```yaml
+services:
+  app:
+    expose:
+      - "8000"  # Internal only, not published
+    # ... other config
+
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+```
+
+**Best Practices**:
+
+1. **Use real certificates in production**: Never use self-signed certificates in production
+2. **Set up auto-renewal**: Let's Encrypt certificates expire every 90 days
+3. **Secure private keys**: `chmod 600 ssl/key.pem` (readable by owner only)
+4. **Enable HSTS**: Uncomment the `Strict-Transport-Security` header in production
+5. **Monitor certificate expiration**: Set up alerts before certificates expire
+6. **Keep cipher suites updated**: Review and update cipher configuration periodically
+7. **Separate environments**: Use different certificates for dev/staging/production
+
+**Troubleshooting**:
+
+```bash
+# Check certificate validity
+openssl x509 -in ssl/cert.pem -text -noout
+
+# Check certificate expiration
+openssl x509 -in ssl/cert.pem -noout -dates
+
+# Test nginx configuration
+docker-compose exec nginx nginx -t
+
+# View nginx logs
+docker-compose logs nginx
+
+# Verify SSL connection
+openssl s_client -connect localhost:443 -servername localhost
+```
+
+**Common Issues**:
+
+1. **Certificate/key mismatch**:
+   ```bash
+   # Verify they match
+   openssl x509 -noout -modulus -in ssl/cert.pem | openssl md5
+   openssl rsa -noout -modulus -in ssl/key.pem | openssl md5
+   # MD5 hashes should match
+   ```
+
+2. **Port already in use**:
+   ```bash
+   # Check what's using ports 80/443
+   sudo lsof -i :80
+   sudo lsof -i :443
+   ```
+
+3. **Permissions issues**:
+   ```bash
+   # Fix certificate permissions
+   chmod 644 ssl/cert.pem
+   chmod 600 ssl/key.pem
+   ```
+
 ## Testing Guidelines
 
 ### Test Structure

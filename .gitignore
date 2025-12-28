@@ -68,3 +68,13 @@ package-lock.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# SSL/TLS certificates (keep templates only)
+ssl/
+*.pem
+*.key
+*.crt
+*.csr
+
+# nginx generated configuration (keep templates only)
+nginx/nginx.conf
