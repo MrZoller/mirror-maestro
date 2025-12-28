@@ -8,6 +8,9 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 
 ## Screenshots
 
+<details>
+<summary>Click to view screenshots</summary>
+
 ### Dashboard
 ![Dashboard](docs/screenshots/01-dashboard.png?v=3)
 *Modern dashboard with live statistics, health charts, recent activity timeline, and quick actions*
@@ -41,6 +44,8 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 *Comprehensive help documentation with setup guides, troubleshooting tips, and best practices*
 
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
+
+</details>
 
 ## Features
 
