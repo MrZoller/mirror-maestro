@@ -189,7 +189,7 @@ async def verify_credentials(
     Verify authentication credentials.
 
     Supports:
-    - No auth (if auth_enabled=false)
+    - No auth (if auth_enabled=false AND multi_user_enabled=false)
     - Legacy single-user Basic Auth (if multi_user_enabled=false)
     - Multi-user JWT Bearer tokens
     - Multi-user Basic Auth (fallback for API clients)
@@ -198,11 +198,7 @@ async def verify_credentials(
     - str: username (legacy mode)
     - CurrentUser: full user object (multi-user mode)
     """
-    # Auth disabled - allow anonymous access
-    if not settings.auth_enabled:
-        return "authenticated"
-
-    # Multi-user mode
+    # Multi-user mode always requires authentication (takes precedence over auth_enabled)
     if settings.multi_user_enabled:
         # Try Bearer token first
         if bearer_credentials is not None:
@@ -218,6 +214,10 @@ async def verify_credentials(
             detail="Authentication required",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Auth disabled (only applies when multi_user_enabled=false)
+    if not settings.auth_enabled:
+        return "anonymous"
 
     # Legacy single-user mode
     if basic_credentials is None:
