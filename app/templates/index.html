@@ -877,6 +877,57 @@
                 </ul>
             </div>
 
+            <!-- Backup & Restore -->
+            <div class="card">
+                <h2>Backup & Restore</h2>
+                <p class="text-muted">Protect your Mirror Maestro configuration with backups.</p>
+
+                <h3>Creating Backups</h3>
+                <p>Regular backups protect against data loss from database corruption, accidental deletion, or server failures.</p>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('backup-tab'); return false;">Backup</a> tab</li>
+                    <li>Review the current database statistics (instances, pairs, mirrors, size)</li>
+                    <li>Click "Create & Download Backup" to download a complete backup</li>
+                    <li>Save the backup file (.tar.gz) to a secure location</li>
+                </ol>
+
+                <h3>What's Included in Backups</h3>
+                <p>Each backup archive contains:</p>
+                <ul>
+                    <li><strong>Database</strong> - All instances, pairs, mirrors, and configurations</li>
+                    <li><strong>Encryption key</strong> - Required to decrypt stored GitLab tokens</li>
+                    <li><strong>Metadata</strong> - Timestamp and version information</li>
+                </ul>
+
+                <h3>Restoring from Backup</h3>
+                <p><strong>⚠️ Warning:</strong> Restoring replaces ALL current data. Always create a backup first!</p>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('backup-tab'); return false;">Backup</a> tab</li>
+                    <li>Ensure "Create backup before restore" is checked (recommended)</li>
+                    <li>Click "Select Backup File" and choose your backup (.tar.gz)</li>
+                    <li>Click "Restore Backup" and confirm the action</li>
+                    <li>The application will reload with the restored data</li>
+                </ol>
+
+                <h3>Backup Best Practices</h3>
+                <ul>
+                    <li>Create backups regularly (daily or weekly recommended)</li>
+                    <li>Store backups in a secure location separate from your server</li>
+                    <li>Keep multiple backup versions (e.g., last 7 days)</li>
+                    <li>Test restores periodically to verify backup integrity</li>
+                    <li>Protect backup files - they contain encryption keys for all tokens</li>
+                </ul>
+
+                <h3>Migration Between Servers</h3>
+                <p>Backups can be used to migrate Mirror Maestro to a new server:</p>
+                <ol>
+                    <li>Create a backup on the old server</li>
+                    <li>Install Mirror Maestro on the new server</li>
+                    <li>Upload and restore the backup on the new server</li>
+                    <li>All instances, pairs, and mirrors will be migrated</li>
+                </ol>
+            </div>
+
             <!-- Troubleshooting -->
             <div class="card">
                 <h2>Troubleshooting</h2>
