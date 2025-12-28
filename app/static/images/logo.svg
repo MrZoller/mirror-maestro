@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 194">
   <defs>
     <style>
-      .tanuki-shape { fill: #e24329; }
-      .tanuki-left-ear { fill: #fc6d26; }
-      .tanuki-right-ear { fill: #fc6d26; }
-      .tanuki-nose { fill: #fca326; }
+      .tanuki-shape { fill: #ffffff; }
+      .tanuki-left-ear { fill: #ffffff; }
+      .tanuki-right-ear { fill: #ffffff; }
+      .tanuki-nose { fill: #ffffff; }
     </style>
   </defs>
   <g transform="translate(-80, 100)">
-    <!-- GitLab Tanuki Icon -->
+    <!-- GitLab Tanuki Icon (White for header visibility) -->
     <path class="tanuki-shape" d="M282,137.37l-.21-.56-21.2-55.3a5.5,5.5,0,0,0-2.18-2.63,5.6,5.6,0,0,0-8.41,3.2l-14.31,43.81H177.74l-14.31-43.81a5.61,5.61,0,0,0-8.41-3.2,5.5,5.5,0,0,0-2.18,2.63l-21.19,55.31-.22.55a39.36,39.36,0,0,0,13.06,45.49l.08.06.18.14L177,207.23l16,12.09,9.72,7.35a6.57,6.57,0,0,0,7.92,0l9.72-7.35,16-12.09,32.48-24.31.09-.07A39.36,39.36,0,0,0,282,137.37Z"/>
     <path class="tanuki-right-ear" d="M282,137.37l-.21-.56a71.5,71.5,0,0,0-28.5,12.82l-46.55,35.2,29.64,22.4,32.48-24.31.09-.07A39.36,39.36,0,0,0,282,137.37Z"/>
     <path class="tanuki-nose" d="M177,207.23l16,12.09,9.72,7.35a6.57,6.57,0,0,0,7.92,0l9.72-7.35,16-12.09-29.64-22.4Z"/>
