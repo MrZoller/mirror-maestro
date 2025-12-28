@@ -28,6 +28,14 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 ![Topology](docs/screenshots/05-topology.png)
 *Interactive topology visualization with animated data flows, zoom controls, and hover highlighting - click nodes or links to drill down into mirror details*
 
+### About
+![About](docs/screenshots/06-about.png)
+*Project information with version details, links to documentation, and technology stack*
+
+### Help
+![Help](docs/screenshots/07-help.png)
+*Comprehensive help documentation with setup guides, troubleshooting tips, and best practices*
+
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
 
 ## Features
