@@ -2793,6 +2793,10 @@ const authState = {
     token: null
 };
 
+// Promise that resolves when user is authenticated (for multi-user mode)
+let authReadyResolve = null;
+const authReady = new Promise(resolve => { authReadyResolve = resolve; });
+
 async function initAuth() {
     // Check auth mode from server
     try {
@@ -2800,27 +2804,38 @@ async function initAuth() {
         authState.isMultiUser = mode.multi_user_enabled;
 
         if (authState.isMultiUser) {
+            // Hide main content until authenticated
+            document.body.classList.add('auth-required');
+
             // Check for stored token
             const storedToken = localStorage.getItem('auth_token');
             if (storedToken) {
                 authState.token = storedToken;
                 try {
                     await loadCurrentUser();
+                    document.body.classList.remove('auth-required');
+                    authReadyResolve();
                 } catch (error) {
                     // Token is invalid, clear it
                     logout(false);
                     showLoginModal();
+                    // Wait for login to complete
+                    await authReady;
                 }
             } else {
                 showLoginModal();
+                // Wait for login to complete
+                await authReady;
             }
         } else {
-            // Legacy mode - hide user menu
+            // Legacy mode - hide user menu, auth is ready immediately
             hideUserMenu();
+            authReadyResolve();
         }
     } catch (error) {
         console.error('Failed to check auth mode:', error);
         hideUserMenu();
+        authReadyResolve(); // Resolve anyway to not block the app
     }
 }
 
@@ -2992,6 +3007,10 @@ async function handleLogin(event) {
 
         // Load user info
         await loadCurrentUser();
+
+        // Show main content and signal auth is complete
+        document.body.classList.remove('auth-required');
+        if (authReadyResolve) authReadyResolve();
 
         closeLoginModal();
         showMessage('Logged in successfully', 'success');
