@@ -1,39 +1,55 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" width="120" height="80">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 70" width="140" height="70">
   <defs>
-    <linearGradient id="batonGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+    <linearGradient id="foxGradient" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#fc6d26;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#e85515;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e24329;stop-opacity:1" />
     </linearGradient>
-    <linearGradient id="reflectionGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#fc6d26;stop-opacity:0.4" />
-      <stop offset="100%" style="stop-color:#fc6d26;stop-opacity:0.1" />
+    <linearGradient id="foxGradientReflect" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fc6d26;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e24329;stop-opacity:1" />
     </linearGradient>
   </defs>
 
-  <!-- Left side of M - top baton -->
-  <path d="M 20 15 L 35 35 L 32 37 L 17 17 Z" fill="url(#batonGradient)"/>
-  <circle cx="20" cy="15" r="4" fill="#fc6d26"/>
+  <!-- Left Fox (facing right) -->
+  <g id="left-fox">
+    <!-- Head -->
+    <path d="M 25 35 L 18 20 L 25 15 L 30 25 L 35 15 L 42 20 L 35 35 Z" fill="url(#foxGradient)"/>
+    <!-- Ear detail -->
+    <path d="M 22 18 L 25 22 L 28 18" fill="#e24329" opacity="0.6"/>
+    <path d="M 32 18 L 35 22 L 38 18" fill="#e24329" opacity="0.6"/>
+    <!-- Snout -->
+    <path d="M 35 30 L 40 32 L 40 36 L 35 38 Z" fill="#fc6d26"/>
+    <!-- Eye -->
+    <circle cx="31" cy="28" r="2.5" fill="white"/>
+    <circle cx="31" cy="28" r="1.2" fill="#333"/>
+  </g>
 
-  <!-- Left side of M - reflected baton -->
-  <path d="M 17 63 L 32 43 L 35 45 L 20 65 Z" fill="url(#reflectionGradient)"/>
-  <circle cx="20" cy="65" r="4" fill="#fc6d26" opacity="0.3"/>
+  <!-- Right Fox (facing left - mirrored) -->
+  <g id="right-fox">
+    <!-- Head -->
+    <path d="M 115 35 L 122 20 L 115 15 L 110 25 L 105 15 L 98 20 L 105 35 Z" fill="url(#foxGradientReflect)"/>
+    <!-- Ear detail -->
+    <path d="M 118 18 L 115 22 L 112 18" fill="#e24329" opacity="0.6"/>
+    <path d="M 108 18 L 105 22 L 102 18" fill="#e24329" opacity="0.6"/>
+    <!-- Snout -->
+    <path d="M 105 30 L 100 32 L 100 36 L 105 38 Z" fill="#fc6d26"/>
+    <!-- Eye -->
+    <circle cx="109" cy="28" r="2.5" fill="white"/>
+    <circle cx="109" cy="28" r="1.2" fill="#333"/>
+  </g>
 
-  <!-- Right side of M - top baton -->
-  <path d="M 100 15 L 85 35 L 88 37 L 103 17 Z" fill="url(#batonGradient)"/>
-  <circle cx="100" cy="15" r="4" fill="#fc6d26"/>
+  <!-- Sync arrows in center -->
+  <g id="sync-arrows">
+    <!-- Arrow pointing right (top) -->
+    <path d="M 48 28 L 68 28 L 65 25 M 68 28 L 65 31" stroke="#1f75cb" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- Right side of M - reflected baton -->
-  <path d="M 103 63 L 88 43 L 85 45 L 100 65 Z" fill="url(#reflectionGradient)"/>
-  <circle cx="100" cy="65" r="4" fill="#fc6d26" opacity="0.3"/>
+    <!-- Arrow pointing left (bottom) -->
+    <path d="M 92 42 L 72 42 L 75 39 M 72 42 L 75 45" stroke="#1f75cb" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- Center connecting batons -->
-  <path d="M 55 25 L 60 40 L 57 41 L 52 26 Z" fill="url(#batonGradient)"/>
-  <path d="M 65 25 L 60 40 L 63 41 L 68 26 Z" fill="url(#batonGradient)"/>
+    <!-- Curved sync indicator -->
+    <path d="M 70 30 Q 70 35 72 40" stroke="#1f75cb" stroke-width="1.5" fill="none" opacity="0.5" stroke-dasharray="2,2"/>
+  </g>
 
-  <!-- Center reflection -->
-  <path d="M 52 54 L 57 39 L 60 40 L 55 55 Z" fill="url(#reflectionGradient)"/>
-  <path d="M 68 54 L 63 39 L 60 40 L 65 55 Z" fill="url(#reflectionGradient)"/>
-
-  <!-- Reflection line (subtle) -->
-  <line x1="10" y1="40" x2="110" y2="40" stroke="#1f75cb" stroke-width="0.5" opacity="0.3" stroke-dasharray="2,2"/>
+  <!-- Subtle reflection line -->
+  <line x1="70" y1="10" x2="70" y2="60" stroke="#1f75cb" stroke-width="0.5" opacity="0.2" stroke-dasharray="3,3"/>
 </svg>
