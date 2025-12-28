@@ -9,31 +9,35 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 ## Screenshots
 
 ### Dashboard
-![Dashboard](docs/screenshots/01-dashboard.png?v=2)
+![Dashboard](docs/screenshots/01-dashboard.png?v=3)
 *Modern dashboard with live statistics, health charts, recent activity timeline, and quick actions*
 
 ### GitLab Instances
-![GitLab Instances](docs/screenshots/02-instances.png?v=2)
+![GitLab Instances](docs/screenshots/02-instances.png?v=3)
 *Manage GitLab instances and rotate their access tokens (tokens are never displayed)*
 
 ### Instance Pairs
-![Instance Pairs](docs/screenshots/03-pairs.png?v=2)
+![Instance Pairs](docs/screenshots/03-pairs.png?v=3)
 *Configure pairs of GitLab instances for mirroring*
 
 ### Mirrors Management
-![Mirrors](docs/screenshots/04-mirrors.png?v=2)
+![Mirrors](docs/screenshots/04-mirrors.png?v=3)
 *View and manage mirrors with token status, real-time sync status, and safe per-mirror edits*
 
 ### Topology
-![Topology](docs/screenshots/05-topology.png?v=2)
+![Topology](docs/screenshots/05-topology.png?v=3)
 *Interactive topology visualization with animated data flows, zoom controls, and hover highlighting - click nodes or links to drill down into mirror details*
 
+### Backup & Restore
+![Backup](docs/screenshots/06-backup.png?v=3)
+*Complete database backups with one-click creation and secure restore functionality*
+
 ### About
-![About](docs/screenshots/06-about.png?v=2)
+![About](docs/screenshots/07-about.png?v=3)
 *Project information with version details, links to documentation, and technology stack*
 
 ### Help
-![Help](docs/screenshots/07-help.png?v=2)
+![Help](docs/screenshots/08-help.png?v=3)
 *Comprehensive help documentation with setup guides, troubleshooting tips, and best practices*
 
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
@@ -54,8 +58,9 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **View Mirrors**: See all configured mirrors and their current status at a glance
 - **Create Mirrors**: Quickly set up new mirrors between projects with dropdown selection
 - **Sync Mirrors**: Force immediate mirror synchronization with a single click
-- **Edit/Remove Mirrors**: Modify safe mirror settings (and revert overrides back to “inherit”), or delete mirror configurations as needed
+- **Edit/Remove Mirrors**: Modify safe mirror settings (and revert overrides back to "inherit"), or delete mirror configurations as needed
 - **Import/Export**: Bulk import and export mirror settings for specified groups
+- **Backup & Restore**: Create complete backups of your database and encryption key; restore from backups to recover or migrate
 
 ### Modern Web Interface
 - **Comprehensive Dashboard**: Live statistics cards, health distribution charts (Chart.js), recent activity timeline, and quick actions
@@ -276,6 +281,53 @@ Bulk manage mirror configurations:
 - **Export**: Download mirror configurations as JSON for backup or sharing
 - **Import**: Upload JSON file to create multiple mirrors at once
 
+### 5. Backup & Restore
+
+Protect your Mirror Maestro configuration with complete database backups:
+
+1. Go to the **Backup** tab
+2. **Creating a Backup**:
+   - Review current statistics (instances, pairs, mirrors, database size)
+   - Click **Create & Download Backup**
+   - Save the `.tar.gz` file in a secure location
+3. **Restoring from a Backup**:
+   - Click **Select Backup File** and choose your backup archive
+   - Optionally enable "Create backup before restore" (recommended)
+   - Click **Restore Backup** and confirm the action
+   - The application will reload with the restored data
+
+#### Backup Contents
+
+Each backup archive includes:
+- **SQLite database** - All GitLab instances, instance pairs, and mirrors
+- **Encryption key** - Required to decrypt stored GitLab tokens
+- **Metadata** - Backup timestamp, version, and file manifest
+
+#### Security Warning
+
+⚠️ **Important**: Backup files contain your encryption key and can decrypt all stored GitLab tokens. Always:
+- Store backups in a secure location
+- Use encryption or access controls on backup storage
+- Never share backups publicly
+- Keep backups separate from your Mirror Maestro server
+
+#### Best Practices
+
+- **Regular backups**: Create backups daily or weekly depending on change frequency
+- **Test restores**: Periodically verify backups can be restored successfully
+- **Version retention**: Keep multiple backup versions in case of corruption
+- **Migration**: Use backups to migrate between servers or Docker hosts
+- **Pre-restore safety**: Always enable "Create backup before restore" when restoring
+
+#### Backup Format
+
+Backups are compressed tar archives (`.tar.gz`) with the naming format:
+```
+mirror-maestro-backup-YYYYMMDD-HHMMSS.tar.gz
+```
+
+Archives are portable across Mirror Maestro versions and can be restored on any compatible server.
+
 ## API Documentation
 
 The application provides a RESTful API. Once running, visit:
@@ -319,6 +371,11 @@ The application provides a RESTful API. Once running, visit:
 #### Dashboard
 - `GET /api/dashboard/metrics` - Dashboard metrics and statistics (total mirrors, health %, recent activity, charts)
 - `GET /api/dashboard/quick-stats` - Quick stats for live polling (syncing count, recent failures)
+
+#### Backup & Restore
+- `GET /api/backup/stats` - Get backup statistics (instance/pair/mirror counts, database size)
+- `GET /api/backup/create` - Create and download a complete backup archive
+- `POST /api/backup/restore` - Restore from a backup archive (multipart form upload)
 
 ## Security
 
