@@ -11,7 +11,6 @@ The following HTML files contain mockups with sample data for taking screenshots
 - `demo-pairs.html` - Instance Pairs configuration view
 - `demo-mirrors.html` - Mirrors management view (with token status)
 - `demo-topology.html` - Topology graph view
-- `demo-dashboard-dark.html` - Dashboard in dark mode
 
 ## Taking Screenshots
 
@@ -39,7 +38,6 @@ This will automatically generate all screenshots in the correct format.
    open docs/screenshots/demo-pairs.html
    open docs/screenshots/demo-mirrors.html
    open docs/screenshots/demo-topology.html
-   open docs/screenshots/demo-dashboard-dark.html
    ```
 
 2. Take screenshots using your browser's built-in tools or OS screenshot utility
@@ -53,7 +51,6 @@ This will automatically generate all screenshots in the correct format.
    - `03-pairs.png`
    - `04-mirrors.png`
    - `05-topology.png`
-   - `06-dashboard-dark.png`
 
 **Tip for Topology screenshot:** click a link to show the mirror drilldown list (health, staleness thresholds, and never-succeeded classification are visible in the details panel).
 
@@ -89,7 +86,6 @@ This will automatically generate all screenshots in the correct format.
 - `03-pairs.png` - Instance Pairs configuration
 - `04-mirrors.png` - Mirrors management (with token status badges)
 - `05-topology.png` - Topology graph (health/staleness + drilldown)
-- `06-dashboard-dark.png` - Dashboard in dark mode
 
 ## Image Optimization
 
