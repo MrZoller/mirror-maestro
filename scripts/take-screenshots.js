@@ -18,7 +18,9 @@ const DEMO_FILES = [
   { file: 'demo-instances.html', output: '02-instances.png', name: 'GitLab Instances' },
   { file: 'demo-pairs.html', output: '03-pairs.png', name: 'Instance Pairs' },
   { file: 'demo-mirrors.html', output: '04-mirrors.png', name: 'Mirrors' },
-  { file: 'demo-topology.html', output: '05-topology.png', name: 'Topology' }
+  { file: 'demo-topology.html', output: '05-topology.png', name: 'Topology' },
+  { file: 'demo-about.html', output: '06-about.png', name: 'About' },
+  { file: 'demo-help.html', output: '07-help.png', name: 'Help' }
 ];
 
 async function takeScreenshots() {
