@@ -12,10 +12,6 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 ![Dashboard](docs/screenshots/01-dashboard.png)
 *Modern dashboard with live statistics, health charts, recent activity timeline, and quick actions*
 
-### Dashboard (Dark Mode)
-![Dashboard Dark Mode](docs/screenshots/06-dashboard-dark.png)
-*Beautiful dark mode with comprehensive theming across all components*
-
 ### GitLab Instances
 ![GitLab Instances](docs/screenshots/02-instances.png)
 *Manage GitLab instances and rotate their access tokens (tokens are never displayed)*
