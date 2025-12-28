@@ -71,10 +71,6 @@
                     <div class="form-group">
                         <label>Default Mirror Settings</label>
                         <div class="checkbox-group">
-                            <input type="checkbox" id="pair-protected" name="mirror_protected_branches" checked>
-                            <label for="pair-protected">Mirror protected branches</label>
-                        </div>
-                        <div class="checkbox-group">
                             <input type="checkbox" id="pair-overwrite" name="mirror_overwrite_diverged">
                             <label for="pair-overwrite">Overwrite divergent branches</label>
                         </div>
@@ -86,15 +82,9 @@
                             <input type="checkbox" id="pair-only-protected" name="only_mirror_protected_branches">
                             <label for="pair-only-protected">Only mirror protected branches</label>
                         </div>
-                        <div class="form-row mt-10">
-                            <div class="form-group">
-                                <label for="pair-branch-regex">Mirror branch regex</label>
-                                <input type="text" id="pair-branch-regex" name="mirror_branch_regex" value="^main$|^release/.*$" placeholder="Optional (e.g., ^main$|^release/.*$)">
-                            </div>
-                            <div class="form-group">
-                                <label for="pair-mirror-user-id">Mirror user</label>
-                                <input type="number" id="pair-mirror-user-id" name="mirror_user_id" placeholder="Auto (from token) — optional override">
-                            </div>
+                        <div class="form-group mt-10">
+                            <label for="pair-branch-regex">Mirror branch regex</label>
+                            <input type="text" id="pair-branch-regex" name="mirror_branch_regex" value="^main$|^release/.*$" placeholder="Optional (e.g., ^main$|^release/.*$)">
                         </div>
                     </div>
 
@@ -140,10 +130,6 @@
                                 <div style="display:grid; gap:10px">
                                     <div class="checkbox-group">
                                         <input type="checkbox" checked>
-                                        <label>Mirror protected branches</label>
-                                    </div>
-                                    <div class="checkbox-group">
-                                        <input type="checkbox" checked>
                                         <label>Overwrite divergent branches</label>
                                     </div>
                                     <div class="checkbox-group">
@@ -155,7 +141,6 @@
                                         <label>Only mirror protected branches</label>
                                     </div>
                                     <input class="table-input" value="" placeholder="Mirror branch regex (pull only)" disabled>
-                                    <input class="table-input" value="" placeholder="Mirror user id (pull only)" disabled>
                                 </div>
                             </td>
                             <td>
@@ -175,8 +160,7 @@
                                     <span class="text-muted">overwrite:</span> false<br>
                                     <span class="text-muted">only_protected:</span> false<br>
                                     <span class="text-muted">trigger:</span> true<br>
-                                    <span class="text-muted">regex:</span> <code>^main$|^release/.*$</code><br>
-                                    <span class="text-muted">user:</span> mirror-bot <span class="text-muted">(#42)</span>
+                                    <span class="text-muted">regex:</span> <code>^main$|^release/.*$</code>
                                 </div>
                             </td>
                             <td>
@@ -196,8 +180,7 @@
                                     <span class="text-muted">overwrite:</span> false<br>
                                     <span class="text-muted">only_protected:</span> false<br>
                                     <span class="text-muted">trigger:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">user:</span> <span class="text-muted">n/a</span>
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span>
                                 </div>
                             </td>
                             <td>
