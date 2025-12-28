@@ -120,10 +120,6 @@
                                 <label for="mirror-branch-regex">Mirror branch regex (pull only)</label>
                                 <input type="text" id="mirror-branch-regex" name="mirror_branch_regex" placeholder="Inherit from pair">
                             </div>
-                            <div class="form-group">
-                                <label for="mirror-mirror-user-id">Mirror user (pull only)</label>
-                                <input type="number" id="mirror-mirror-user-id" name="mirror_user_id" placeholder="Inherit from pair">
-                            </div>
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary">Create Mirror</button>
@@ -180,12 +176,6 @@
                                             <option selected>Override</option>
                                         </select>
                                         <input class="table-input" value="^main$">
-                                        <label class="text-muted">mirror user id (pull only)</label>
-                                        <select class="table-select">
-                                            <option selected>Inherit</option>
-                                            <option>Override</option>
-                                        </select>
-                                        <input class="table-input" value="" disabled>
                                     </div>
                                 </div>
                             </td>
@@ -215,8 +205,7 @@
                                     <span class="text-muted">overwrite:</span> false<br>
                                     <span class="text-muted">only_protected:</span> false<br>
                                     <span class="text-muted">trigger:</span> false<br>
-                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">user:</span> 123
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -241,8 +230,7 @@
                                     <span class="text-muted">overwrite:</span> true<br>
                                     <span class="text-muted">only_protected:</span> false<br>
                                     <span class="text-muted">trigger:</span> true<br>
-                                    <span class="text-muted">regex:</span> <code>^release/.*$</code><br>
-                                    <span class="text-muted">user:</span> 77
+                                    <span class="text-muted">regex:</span> <code>^release/.*$</code>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -267,8 +255,7 @@
                                     <span class="text-muted">overwrite:</span> false<br>
                                     <span class="text-muted">only_protected:</span> true<br>
                                     <span class="text-muted">trigger:</span> true<br>
-                                    <span class="text-muted">regex:</span> <code>^(main|release/.*)$</code><br>
-                                    <span class="text-muted">user:</span> 123
+                                    <span class="text-muted">regex:</span> <code>^(main|release/.*)$</code>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -293,8 +280,7 @@
                                     <span class="text-muted">overwrite:</span> true<br>
                                     <span class="text-muted">only_protected:</span> true<br>
                                     <span class="text-muted">trigger:</span> false<br>
-                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">user:</span> 123
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -319,8 +305,7 @@
                                     <span class="text-muted">overwrite:</span> false<br>
                                     <span class="text-muted">only_protected:</span> false<br>
                                     <span class="text-muted">trigger:</span> true<br>
-                                    <span class="text-muted">regex:</span> <code>^main$</code><br>
-                                    <span class="text-muted">user:</span> 123
+                                    <span class="text-muted">regex:</span> <code>^main$</code>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -345,8 +330,7 @@
                                     <span class="text-muted">overwrite:</span> false<br>
                                     <span class="text-muted">only_protected:</span> false<br>
                                     <span class="text-muted">trigger:</span> false<br>
-                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">user:</span> 123
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span>
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
@@ -371,8 +355,7 @@
                                     <span class="text-muted">overwrite:</span> <span class="text-muted">n/a</span><br>
                                     <span class="text-muted">only_protected:</span> <span class="text-muted">n/a</span><br>
                                     <span class="text-muted">trigger:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span><br>
-                                    <span class="text-muted">user:</span> <span class="text-muted">n/a</span>
+                                    <span class="text-muted">regex:</span> <span class="text-muted">n/a</span>
                                 </div>
                             </td>
                             <td><span class="badge badge-warning">Disabled</span></td>
