@@ -1,18 +1,99 @@
+"""
+Authentication module supporting both legacy single-user mode and multi-user JWT mode.
+
+When MULTI_USER_ENABLED=false (default):
+  - Uses HTTP Basic Auth with AUTH_USERNAME/AUTH_PASSWORD from env
+  - Backward compatible with existing deployments
+
+When MULTI_USER_ENABLED=true:
+  - Uses JWT tokens with database-backed users
+  - Supports multiple users with admin/regular roles
+  - Initial admin created from INITIAL_ADMIN_USERNAME/PASSWORD
+"""
 import secrets
-from typing import Optional
-from fastapi import HTTPException, Security, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from datetime import datetime, timedelta
+from typing import Optional, Union
+
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPBearer, HTTPAuthorizationCredentials
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
+from app.database import get_db
 
 
-security = HTTPBasic()
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Security schemes
+http_basic = HTTPBasic(auto_error=False)
+http_bearer = HTTPBearer(auto_error=False)
 
 
-def verify_credentials(credentials: HTTPBasicCredentials = Security(security)) -> str:
-    """Verify HTTP Basic authentication credentials."""
-    if not settings.auth_enabled:
-        return "authenticated"
+class TokenData(BaseModel):
+    """Data extracted from JWT token."""
+    username: str
+    user_id: int
+    is_admin: bool
+    exp: datetime
 
+
+class CurrentUser(BaseModel):
+    """Represents the currently authenticated user."""
+    id: int
+    username: str
+    email: Optional[str] = None
+    is_admin: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against its hash."""
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_password_hash(password: str) -> str:
+    """Generate password hash."""
+    return pwd_context.hash(password)
+
+
+def create_access_token(user_id: int, username: str, is_admin: bool) -> str:
+    """Create a JWT access token."""
+    expire = datetime.utcnow() + timedelta(hours=settings.jwt_expiration_hours)
+    to_encode = {
+        "sub": username,
+        "user_id": user_id,
+        "is_admin": is_admin,
+        "exp": expire
+    }
+    return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_access_token(token: str) -> Optional[TokenData]:
+    """Decode and validate a JWT access token."""
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        username: str = payload.get("sub")
+        user_id: int = payload.get("user_id")
+        is_admin: bool = payload.get("is_admin", False)
+        exp = datetime.fromtimestamp(payload.get("exp"))
+
+        if username is None or user_id is None:
+            return None
+
+        return TokenData(username=username, user_id=user_id, is_admin=is_admin, exp=exp)
+    except JWTError:
+        return None
+
+
+def _verify_legacy_credentials(credentials: HTTPBasicCredentials) -> str:
+    """Verify credentials against legacy single-user config."""
     correct_username = secrets.compare_digest(
         credentials.username.encode("utf8"),
         settings.auth_username.encode("utf8")
@@ -30,3 +111,144 @@ def verify_credentials(credentials: HTTPBasicCredentials = Security(security)) -
         )
 
     return credentials.username
+
+
+async def _verify_jwt_token(
+    token: str,
+    db: AsyncSession
+) -> CurrentUser:
+    """Verify JWT token and return user."""
+    from app.models import User
+
+    token_data = decode_access_token(token)
+    if token_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Verify user still exists and is active
+    result = await db.execute(
+        select(User).where(User.id == token_data.user_id, User.is_active == True)
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return CurrentUser(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        is_admin=user.is_admin
+    )
+
+
+async def _verify_basic_credentials_multi_user(
+    credentials: HTTPBasicCredentials,
+    db: AsyncSession
+) -> CurrentUser:
+    """Verify Basic Auth credentials against database users."""
+    from app.models import User
+
+    result = await db.execute(
+        select(User).where(User.username == credentials.username, User.is_active == True)
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None or not verify_password(credentials.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    return CurrentUser(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        is_admin=user.is_admin
+    )
+
+
+async def verify_credentials(
+    request: Request,
+    basic_credentials: Optional[HTTPBasicCredentials] = Depends(http_basic),
+    bearer_credentials: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer),
+    db: AsyncSession = Depends(get_db)
+) -> Union[str, CurrentUser]:
+    """
+    Verify authentication credentials.
+
+    Supports:
+    - No auth (if auth_enabled=false)
+    - Legacy single-user Basic Auth (if multi_user_enabled=false)
+    - Multi-user JWT Bearer tokens
+    - Multi-user Basic Auth (fallback for API clients)
+
+    Returns:
+    - str: username (legacy mode)
+    - CurrentUser: full user object (multi-user mode)
+    """
+    # Auth disabled - allow anonymous access
+    if not settings.auth_enabled:
+        return "authenticated"
+
+    # Multi-user mode
+    if settings.multi_user_enabled:
+        # Try Bearer token first
+        if bearer_credentials is not None:
+            return await _verify_jwt_token(bearer_credentials.credentials, db)
+
+        # Fall back to Basic Auth (for API clients)
+        if basic_credentials is not None:
+            return await _verify_basic_credentials_multi_user(basic_credentials, db)
+
+        # No credentials provided
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Legacy single-user mode
+    if basic_credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    return _verify_legacy_credentials(basic_credentials)
+
+
+async def require_admin(
+    current_user: Union[str, CurrentUser] = Depends(verify_credentials)
+) -> CurrentUser:
+    """Require admin privileges for the current user."""
+    # Legacy mode - assume admin (single user has all permissions)
+    if isinstance(current_user, str):
+        return CurrentUser(id=0, username=current_user, is_admin=True)
+
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+
+    return current_user
+
+
+async def get_current_user(
+    current_user: Union[str, CurrentUser] = Depends(verify_credentials)
+) -> CurrentUser:
+    """Get the current authenticated user as a CurrentUser object."""
+    if isinstance(current_user, str):
+        # Legacy mode - create a pseudo-user
+        return CurrentUser(id=0, username=current_user, is_admin=True)
+    return current_user

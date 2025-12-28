@@ -465,6 +465,8 @@ function initTabs() {
                 }
             } else if (targetId === 'backup-tab') {
                 loadBackupStats();
+            } else if (targetId === 'settings-tab') {
+                loadUsers();
             } else if (targetId === 'about-tab') {
                 loadAboutInfo();
             }
@@ -2747,3 +2749,524 @@ function updateUrlState(updates) {
 
     window.history.replaceState({}, '', newUrl);
 }
+
+// ----------------------------
+// Authentication
+// ----------------------------
+
+const authState = {
+    isAuthenticated: false,
+    isMultiUser: false,
+    user: null,
+    token: null
+};
+
+async function initAuth() {
+    // Check auth mode from server
+    try {
+        const mode = await apiRequest('/api/auth/mode');
+        authState.isMultiUser = mode.multi_user_enabled;
+
+        if (authState.isMultiUser) {
+            // Check for stored token
+            const storedToken = localStorage.getItem('auth_token');
+            if (storedToken) {
+                authState.token = storedToken;
+                try {
+                    await loadCurrentUser();
+                } catch (error) {
+                    // Token is invalid, clear it
+                    logout(false);
+                    showLoginModal();
+                }
+            } else {
+                showLoginModal();
+            }
+        } else {
+            // Legacy mode - hide user menu
+            hideUserMenu();
+        }
+    } catch (error) {
+        console.error('Failed to check auth mode:', error);
+        hideUserMenu();
+    }
+}
+
+async function loadCurrentUser() {
+    const user = await authApiRequest('/api/auth/me');
+    authState.user = user;
+    authState.isAuthenticated = true;
+    updateUserMenu();
+
+    // Show Settings tab if admin
+    if (user.is_admin) {
+        const settingsTab = document.getElementById('settings-tab-btn');
+        if (settingsTab) settingsTab.style.display = '';
+    }
+}
+
+function updateUserMenu() {
+    const userMenu = document.getElementById('user-menu');
+    const userName = document.getElementById('user-name');
+    const userMenuUsername = document.getElementById('user-menu-username');
+    const userMenuRole = document.getElementById('user-menu-role');
+
+    if (authState.isAuthenticated && authState.user) {
+        if (userMenu) userMenu.style.display = '';
+        if (userName) userName.textContent = authState.user.username;
+        if (userMenuUsername) userMenuUsername.textContent = authState.user.username;
+        if (userMenuRole) userMenuRole.textContent = authState.user.is_admin ? 'Administrator' : 'User';
+    } else {
+        hideUserMenu();
+    }
+}
+
+function hideUserMenu() {
+    const userMenu = document.getElementById('user-menu');
+    if (userMenu) userMenu.style.display = 'none';
+}
+
+// Toggle user menu dropdown
+function initUserMenu() {
+    const toggle = document.getElementById('user-menu-toggle');
+    const menu = document.getElementById('user-menu');
+
+    if (toggle && menu) {
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menu.classList.toggle('open');
+        });
+
+        // Close when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.user-menu')) {
+                menu.classList.remove('open');
+            }
+        });
+    }
+}
+
+// API request with JWT token
+async function authApiRequest(url, options = {}) {
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers
+    };
+
+    if (authState.token) {
+        headers['Authorization'] = `Bearer ${authState.token}`;
+    }
+
+    const response = await fetch(url, {
+        ...options,
+        headers
+    });
+
+    if (!response.ok) {
+        let errorData;
+        let errorMessage = 'Request failed';
+
+        try {
+            errorData = await response.json();
+            errorMessage = errorData.detail || errorMessage;
+        } catch (e) {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+
+        // Handle auth errors
+        if (response.status === 401) {
+            logout(false);
+            showLoginModal();
+        }
+
+        throw new APIError(errorMessage, 'server', response.status, errorData);
+    }
+
+    return await response.json();
+}
+
+// Login Modal
+function showLoginModal() {
+    const modal = document.getElementById('login-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        document.getElementById('login-username')?.focus();
+    }
+}
+
+function closeLoginModal() {
+    const modal = document.getElementById('login-modal');
+    if (modal) modal.style.display = 'none';
+
+    // Clear form
+    document.getElementById('login-form')?.reset();
+    const errorEl = document.getElementById('login-error');
+    if (errorEl) errorEl.style.display = 'none';
+}
+
+async function handleLogin(event) {
+    event.preventDefault();
+
+    const username = document.getElementById('login-username')?.value;
+    const password = document.getElementById('login-password')?.value;
+    const submitBtn = document.getElementById('login-submit-btn');
+    const errorEl = document.getElementById('login-error');
+
+    if (!username || !password) {
+        if (errorEl) {
+            errorEl.textContent = 'Please enter username and password';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Signing in...';
+
+        const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Login failed');
+        }
+
+        const data = await response.json();
+
+        // Store token
+        authState.token = data.access_token;
+        localStorage.setItem('auth_token', data.access_token);
+
+        // Load user info
+        await loadCurrentUser();
+
+        closeLoginModal();
+        showMessage('Logged in successfully', 'success');
+
+    } catch (error) {
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.style.display = 'block';
+        }
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Sign In';
+    }
+}
+
+function logout(showMsg = true) {
+    authState.token = null;
+    authState.user = null;
+    authState.isAuthenticated = false;
+    localStorage.removeItem('auth_token');
+
+    hideUserMenu();
+
+    // Hide settings tab
+    const settingsTab = document.getElementById('settings-tab-btn');
+    if (settingsTab) settingsTab.style.display = 'none';
+
+    if (showMsg) {
+        showMessage('Logged out successfully', 'success');
+    }
+
+    if (authState.isMultiUser) {
+        showLoginModal();
+    }
+}
+
+// Change Password Modal
+function showChangePasswordModal() {
+    const modal = document.getElementById('change-password-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        document.getElementById('current-password')?.focus();
+    }
+
+    // Close user menu
+    document.getElementById('user-menu')?.classList.remove('open');
+}
+
+function closeChangePasswordModal() {
+    const modal = document.getElementById('change-password-modal');
+    if (modal) modal.style.display = 'none';
+
+    // Clear form
+    document.getElementById('change-password-form')?.reset();
+    const errorEl = document.getElementById('change-password-error');
+    if (errorEl) errorEl.style.display = 'none';
+}
+
+async function handleChangePassword(event) {
+    event.preventDefault();
+
+    const currentPassword = document.getElementById('current-password')?.value;
+    const newPassword = document.getElementById('new-password')?.value;
+    const confirmPassword = document.getElementById('confirm-new-password')?.value;
+    const submitBtn = document.getElementById('change-password-submit-btn');
+    const errorEl = document.getElementById('change-password-error');
+
+    // Validation
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        if (errorEl) {
+            errorEl.textContent = 'Please fill in all fields';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        if (errorEl) {
+            errorEl.textContent = 'New passwords do not match';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    if (newPassword.length < 8) {
+        if (errorEl) {
+            errorEl.textContent = 'Password must be at least 8 characters';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Changing...';
+
+        await authApiRequest('/api/auth/change-password', {
+            method: 'POST',
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            })
+        });
+
+        closeChangePasswordModal();
+        showMessage('Password changed successfully', 'success');
+
+    } catch (error) {
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.style.display = 'block';
+        }
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Change Password';
+    }
+}
+
+// ----------------------------
+// User Management (Admin only)
+// ----------------------------
+
+let usersData = [];
+
+async function loadUsers() {
+    const tbody = document.getElementById('users-list');
+    if (!tbody) return;
+
+    try {
+        showSkeletonLoader(tbody, 3);
+        usersData = await authApiRequest('/api/users');
+        renderUsers(usersData);
+    } catch (error) {
+        console.error('Failed to load users:', error);
+        showErrorState(tbody, error, loadUsers);
+    }
+}
+
+function renderUsers(users) {
+    const tbody = document.getElementById('users-list');
+    if (!tbody) return;
+
+    if (users.length === 0) {
+        showEmptyState(tbody, 'No Users', 'No users have been created yet.', null);
+        return;
+    }
+
+    tbody.innerHTML = users.map(user => {
+        const roleBadge = user.is_admin
+            ? '<span class="admin-badge">Admin</span>'
+            : '<span class="user-badge">User</span>';
+
+        const statusClass = user.is_active ? 'status-active' : 'status-inactive';
+        const statusText = user.is_active ? 'Active' : 'Inactive';
+
+        const isSelf = authState.user && authState.user.id === user.id;
+        const deleteDisabled = isSelf ? 'disabled title="Cannot delete yourself"' : '';
+
+        return `
+            <tr data-id="${user.id}">
+                <td>${escapeHtml(user.username)}${isSelf ? ' <span class="text-muted">(you)</span>' : ''}</td>
+                <td>${user.email ? escapeHtml(user.email) : '<span class="text-muted">-</span>'}</td>
+                <td>${roleBadge}</td>
+                <td><span class="${statusClass}">${statusText}</span></td>
+                <td>${new Date(user.created_at).toLocaleDateString()}</td>
+                <td>
+                    <div class="table-actions">
+                        <button class="btn btn-secondary btn-small" onclick="openEditUserModal(${user.id})">Edit</button>
+                        <button class="btn btn-danger btn-small" onclick="deleteUser(${user.id})" ${deleteDisabled}>Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function createUser() {
+    const username = document.getElementById('user-username')?.value;
+    const email = document.getElementById('user-email')?.value || null;
+    const password = document.getElementById('user-password')?.value;
+    const passwordConfirm = document.getElementById('user-password-confirm')?.value;
+    const isAdmin = document.getElementById('user-is-admin')?.checked || false;
+
+    if (!username || !password) {
+        showMessage('Username and password are required', 'error');
+        return;
+    }
+
+    if (password !== passwordConfirm) {
+        showMessage('Passwords do not match', 'error');
+        return;
+    }
+
+    if (password.length < 8) {
+        showMessage('Password must be at least 8 characters', 'error');
+        return;
+    }
+
+    try {
+        await authApiRequest('/api/users', {
+            method: 'POST',
+            body: JSON.stringify({ username, email, password, is_admin: isAdmin })
+        });
+
+        showMessage('User created successfully', 'success');
+        document.getElementById('user-form')?.reset();
+        await loadUsers();
+
+    } catch (error) {
+        showMessage(error.message, 'error');
+    }
+}
+
+function openEditUserModal(userId) {
+    const user = usersData.find(u => u.id === userId);
+    if (!user) return;
+
+    document.getElementById('edit-user-id').value = user.id;
+    document.getElementById('edit-user-username').value = user.username;
+    document.getElementById('edit-user-email').value = user.email || '';
+    document.getElementById('edit-user-password').value = '';
+    document.getElementById('edit-user-is-admin').checked = user.is_admin;
+    document.getElementById('edit-user-is-active').checked = user.is_active;
+
+    const modal = document.getElementById('edit-user-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeEditUserModal() {
+    const modal = document.getElementById('edit-user-modal');
+    if (modal) modal.style.display = 'none';
+
+    document.getElementById('edit-user-form')?.reset();
+    const errorEl = document.getElementById('edit-user-error');
+    if (errorEl) errorEl.style.display = 'none';
+}
+
+async function handleEditUser(event) {
+    event.preventDefault();
+
+    const userId = document.getElementById('edit-user-id')?.value;
+    const username = document.getElementById('edit-user-username')?.value;
+    const email = document.getElementById('edit-user-email')?.value || null;
+    const password = document.getElementById('edit-user-password')?.value || null;
+    const isAdmin = document.getElementById('edit-user-is-admin')?.checked;
+    const isActive = document.getElementById('edit-user-is-active')?.checked;
+    const submitBtn = document.getElementById('edit-user-submit-btn');
+    const errorEl = document.getElementById('edit-user-error');
+
+    if (!username) {
+        if (errorEl) {
+            errorEl.textContent = 'Username is required';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    if (password && password.length < 8) {
+        if (errorEl) {
+            errorEl.textContent = 'Password must be at least 8 characters';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+
+    const payload = { username, email, is_admin: isAdmin, is_active: isActive };
+    if (password) payload.password = password;
+
+    try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+
+        await authApiRequest(`/api/users/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+
+        closeEditUserModal();
+        showMessage('User updated successfully', 'success');
+        await loadUsers();
+
+        // Reload current user in case they edited themselves
+        if (authState.user && authState.user.id === parseInt(userId)) {
+            await loadCurrentUser();
+        }
+
+    } catch (error) {
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.style.display = 'block';
+        }
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save Changes';
+    }
+}
+
+async function deleteUser(userId) {
+    if (authState.user && authState.user.id === userId) {
+        showMessage('Cannot delete your own account', 'error');
+        return;
+    }
+
+    if (!confirm('Are you sure you want to delete this user?')) {
+        return;
+    }
+
+    try {
+        await authApiRequest(`/api/users/${userId}`, { method: 'DELETE' });
+        showMessage('User deleted successfully', 'success');
+        await loadUsers();
+    } catch (error) {
+        showMessage(error.message, 'error');
+    }
+}
+
+// Initialize auth when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    initUserMenu();
+    initAuth();
+
+    // User form submission
+    document.getElementById('user-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await createUser();
+    });
+});
