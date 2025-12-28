@@ -33,6 +33,7 @@
             <button class="tab" data-tab="pairs-tab">Instance Pairs</button>
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
             <button class="tab" data-tab="topology-tab">Topology</button>
+            <button class="tab" data-tab="about-tab">About</button>
             <button class="tab" data-tab="help-tab">Help</button>
         </div>
 
@@ -476,6 +477,64 @@
                             </div>
                         </div>
                     </aside>
+                </div>
+            </div>
+        </div>
+
+        <!-- About Tab -->
+        <div id="about-tab" class="tab-content">
+            <div class="card about-card">
+                <div class="about-header">
+                    <h1>Mirror Maestro</h1>
+                    <p class="about-version">Version <span id="about-version">-</span></p>
+                </div>
+
+                <p class="about-description">
+                    Orchestrate GitLab mirrors across multiple instance pairs with precision
+                </p>
+
+                <div class="about-section">
+                    <h3>Project Information</h3>
+                    <div class="about-links">
+                        <a href="https://github.com/MrZoller/mirror-maestro" target="_blank" rel="noopener" class="about-link">
+                            <span class="about-link-icon">📦</span>
+                            <div>
+                                <strong>GitHub Repository</strong>
+                                <span class="text-muted">Source code and issues</span>
+                            </div>
+                        </a>
+                        <a href="https://github.com/MrZoller/mirror-maestro#readme" target="_blank" rel="noopener" class="about-link">
+                            <span class="about-link-icon">📖</span>
+                            <div>
+                                <strong>Documentation</strong>
+                                <span class="text-muted">Setup and usage guide</span>
+                            </div>
+                        </a>
+                        <a href="https://github.com/MrZoller/mirror-maestro/blob/main/LICENSE" target="_blank" rel="noopener" class="about-link">
+                            <span class="about-link-icon">⚖️</span>
+                            <div>
+                                <strong>License</strong>
+                                <span class="text-muted">MIT License</span>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="about-section">
+                    <h3>Technology Stack</h3>
+                    <div class="about-tech">
+                        <span class="tech-badge">Python 3.11+</span>
+                        <span class="tech-badge">FastAPI</span>
+                        <span class="tech-badge">SQLAlchemy</span>
+                        <span class="tech-badge">SQLite</span>
+                        <span class="tech-badge">D3.js</span>
+                    </div>
+                </div>
+
+                <div class="about-footer">
+                    <p class="text-muted">
+                        Built with ❤️ for the GitLab community
+                    </p>
                 </div>
             </div>
         </div>

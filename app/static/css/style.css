@@ -1693,3 +1693,143 @@ table tbody tr:hover {
 .help-table tbody tr:hover {
     background: rgba(252, 109, 38, 0.04);
 }
+
+/* ----------------------------
+   About Page
+   ---------------------------- */
+
+.about-card {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.about-header {
+    text-align: center;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 24px;
+}
+
+.about-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 8px;
+}
+
+.about-version {
+    font-size: 1rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.about-description {
+    text-align: center;
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    margin-bottom: 32px;
+    line-height: 1.6;
+}
+
+.about-section {
+    margin-bottom: 32px;
+}
+
+.about-section h3 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text-primary);
+}
+
+.about-links {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.about-link {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    background: rgba(17, 24, 39, 0.02);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--text-primary);
+    transition: all 0.2s ease;
+}
+
+[data-theme="dark"] .about-link {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.about-link:hover {
+    background: rgba(252, 109, 38, 0.06);
+    border-color: var(--primary-color);
+    transform: translateX(4px);
+}
+
+.about-link-icon {
+    font-size: 2rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.about-link strong {
+    display: block;
+    font-size: 1rem;
+    margin-bottom: 4px;
+    color: var(--text-primary);
+}
+
+.about-link .text-muted {
+    font-size: 0.9rem;
+}
+
+.about-tech {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.tech-badge {
+    display: inline-block;
+    padding: 8px 16px;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: white;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.about-footer {
+    text-align: center;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-color);
+    margin-top: 32px;
+}
+
+.about-footer p {
+    font-size: 0.95rem;
+    margin: 0;
+}
+
+/* Responsive adjustments for About page */
+@media (max-width: 768px) {
+    .about-header h1 {
+        font-size: 2rem;
+    }
+
+    .about-description {
+        font-size: 1rem;
+    }
+
+    .about-link-icon {
+        font-size: 1.5rem;
+    }
+}
