@@ -1,83 +1,67 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" width="120" height="100">
-  <defs>
-    <linearGradient id="orangeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#fc6d26"/>
-      <stop offset="100%" style="stop-color:#e24329"/>
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" width="120" height="80">
+  <!-- Geometric GitLab Tanuki Maestro -->
+  <g id="tanuki-maestro">
 
-  <!-- Fox Maestro Character -->
-  <g id="fox-maestro">
+    <!-- GitLab Tanuki Head (geometric triangles) -->
+    <g id="tanuki-head">
+      <!-- Left ear triangle (darker orange, pointing up) -->
+      <path d="M 35 25 L 28 8 L 42 25 Z" fill="#e24329"/>
 
-    <!-- Head (larger, more rounded) -->
-    <ellipse cx="60" cy="32" rx="24" ry="22" fill="url(#orangeGrad)"/>
+      <!-- Right ear triangle (darker orange, pointing up) -->
+      <path d="M 65 25 L 72 8 L 58 25 Z" fill="#e24329"/>
 
-    <!-- Ears (GitLab-style pointed) -->
-    <path d="M 42 22 L 38 8 L 48 18 Z" fill="#fc6d26"/>
-    <path d="M 44 18 L 42 12 L 47 17 Z" fill="#fca326"/>
+      <!-- Left cheek triangle (light orange, pointing down) -->
+      <path d="M 28 25 L 35 42 L 42 25 Z" fill="#fc6d26"/>
 
-    <path d="M 78 22 L 82 8 L 72 18 Z" fill="#fc6d26"/>
-    <path d="M 76 18 L 78 12 L 73 17 Z" fill="#fca326"/>
+      <!-- Right cheek triangle (light orange, pointing down) -->
+      <path d="M 58 25 L 65 42 L 72 25 Z" fill="#fc6d26"/>
 
-    <!-- White facial markings (tanuki-style) -->
-    <ellipse cx="48" cy="34" rx="9" ry="8" fill="white"/>
-    <ellipse cx="72" cy="34" rx="9" ry="8" fill="white"/>
-    <path d="M 60 40 L 52 48 L 68 48 Z" fill="white"/>
+      <!-- Center/nose triangle (medium orange, pointing down) -->
+      <path d="M 42 25 L 50 40 L 58 25 Z" fill="#fca326"/>
 
-    <!-- Eyes (large, expressive) -->
-    <ellipse cx="48" cy="32" rx="5" ry="6" fill="#2d2d2d"/>
-    <circle cx="49" cy="31" r="2" fill="white"/>
+      <!-- Bottom jaw triangle (darker, pointing down) -->
+      <path d="M 35 42 L 50 52 L 65 42 Z" fill="#e24329"/>
 
-    <ellipse cx="72" cy="32" rx="5" ry="6" fill="#2d2d2d"/>
-    <circle cx="73" cy="31" r="2" fill="white"/>
-
-    <!-- Nose -->
-    <path d="M 60 42 L 57 46 L 63 46 Z" fill="#2d2d2d"/>
-
-    <!-- Smile -->
-    <path d="M 52 48 Q 60 52 68 48" stroke="#2d2d2d" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-
-    <!-- Body (rounded, fuller) -->
-    <ellipse cx="60" cy="68" rx="22" ry="20" fill="url(#orangeGrad)"/>
-
-    <!-- Tuxedo jacket -->
-    <path d="M 42 58 L 38 68 L 42 80 L 50 82 L 50 58 Z" fill="#1a1a2e"/>
-    <path d="M 78 58 L 82 68 L 78 80 L 70 82 L 70 58 Z" fill="#1a1a2e"/>
-
-    <!-- White shirt front -->
-    <ellipse cx="60" cy="68" rx="10" ry="16" fill="white"/>
-
-    <!-- Bow tie -->
-    <path d="M 48 54 L 52 58 L 48 62 Z" fill="#1f75cb"/>
-    <path d="M 72 54 L 68 58 L 72 62 Z" fill="#1f75cb"/>
-    <rect x="56" y="56" width="8" height="4" rx="1" fill="#1f75cb"/>
-
-    <!-- Right arm with baton (raised up) -->
-    <g id="right-arm">
-      <ellipse cx="82" cy="64" rx="6" ry="16" fill="url(#orangeGrad)" transform="rotate(-45 82 64)"/>
-      <circle cx="94" cy="42" r="5.5" fill="#fc6d26"/>
-      <!-- Conductor's baton -->
-      <line x1="96" y1="40" x2="112" y2="28" stroke="white" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="112" cy="28" r="3" fill="white"/>
-      <circle cx="112" cy="28" r="1.5" fill="#e0e0e0"/>
+      <!-- Eyes (simple dots) -->
+      <circle cx="38" cy="30" r="2.5" fill="#2d2d2d"/>
+      <circle cx="62" cy="30" r="2.5" fill="#2d2d2d"/>
+      <circle cx="39" cy="29" r="1" fill="white"/>
+      <circle cx="63" cy="29" r="1" fill="white"/>
     </g>
 
-    <!-- Left arm (down, conducting) -->
-    <g id="left-arm">
-      <ellipse cx="38" cy="64" rx="6" ry="14" fill="url(#orangeGrad)" transform="rotate(30 38 64)"/>
-      <circle cx="28" cy="76" r="5.5" fill="#fc6d26"/>
+    <!-- Bow tie (below head) -->
+    <g id="bowtie">
+      <path d="M 42 54 L 46 58 L 42 62 Z" fill="#1f75cb"/>
+      <path d="M 58 54 L 54 58 L 58 62 Z" fill="#1f75cb"/>
+      <rect x="48" y="56.5" width="4" height="3" rx="0.5" fill="#1f75cb"/>
     </g>
 
-    <!-- Legs/feet (visible at bottom) -->
-    <ellipse cx="52" cy="86" rx="6" ry="8" fill="url(#orangeGrad)"/>
-    <ellipse cx="68" cy="86" rx="6" ry="8" fill="url(#orangeGrad)"/>
+    <!-- Body (simple geometric) -->
+    <rect x="40" y="62" width="20" height="16" rx="2" fill="#1a1a2e"/>
+    <rect x="47" y="62" width="6" height="16" fill="white"/>
+
+    <!-- Conductor's baton (right side) -->
+    <g id="baton">
+      <!-- Arm suggestion (angular) -->
+      <path d="M 60 66 L 78 48" stroke="#fc6d26" stroke-width="3.5" stroke-linecap="round"/>
+      <!-- Hand -->
+      <circle cx="78" cy="48" r="4" fill="#fc6d26"/>
+      <!-- Baton -->
+      <line x1="80" y1="46" x2="95" y2="35" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="95" cy="35" r="2.5" fill="white"/>
+      <circle cx="95" cy="35" r="1.2" fill="#e0e0e0"/>
+    </g>
+
+    <!-- Left arm (angular) -->
+    <path d="M 40 66 L 26 72" stroke="#fc6d26" stroke-width="3.5" stroke-linecap="round"/>
+    <circle cx="26" cy="72" r="4" fill="#fc6d26"/>
 
     <!-- Music notes -->
     <g opacity="0.7">
-      <circle cx="106" cy="36" r="2.5" fill="#1f75cb"/>
-      <rect x="108" y="26" width="2" height="10" fill="#1f75cb"/>
-      <circle cx="102" cy="32" r="2" fill="#1f75cb"/>
-      <rect x="104" y="24" width="1.5" height="8" fill="#1f75cb"/>
+      <circle cx="90" cy="42" r="2" fill="#1f75cb"/>
+      <rect x="91.5" y="33" width="1.5" height="9" fill="#1f75cb"/>
+      <circle cx="86" cy="38" r="1.5" fill="#1f75cb"/>
+      <rect x="87.2" y="31" width="1.2" height="7" fill="#1f75cb"/>
     </g>
 
   </g>
