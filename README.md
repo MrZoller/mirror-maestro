@@ -80,7 +80,7 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 
 ### Technology Stack
 - **Backend**: Python 3.11+ with FastAPI
-- **Database**: SQLite (async with aiosqlite)
+- **Database**: PostgreSQL (async with asyncpg)
 - **Frontend**: Vanilla JavaScript with modern CSS
 - **Visualization**: Chart.js for charts, D3.js for topology graphs
 - **API Integration**: python-gitlab library
@@ -187,8 +187,13 @@ Create a `.env` file with the following variables:
 HOST=0.0.0.0
 PORT=8000
 
-# Database Configuration
-DATABASE_URL=sqlite+aiosqlite:///./data/mirrors.db
+# Database Configuration (PostgreSQL)
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/mirror_maestro
+
+# PostgreSQL credentials (used by docker-compose)
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=mirror_maestro
 
 # Authentication (optional but recommended)
 AUTH_ENABLED=true
@@ -304,7 +309,7 @@ Protect your Mirror Maestro configuration with complete database backups:
 #### Backup Contents
 
 Each backup archive includes:
-- **SQLite database** - All GitLab instances, instance pairs, and mirrors
+- **Database export** - All GitLab instances, instance pairs, and mirrors (JSON format)
 - **Encryption key** - Required to decrypt stored GitLab tokens
 - **Metadata** - Backup timestamp, version, and file manifest
 
@@ -604,7 +609,7 @@ Contributions are welcome! Please:
 - [ ] Multi-user support with role-based access
 - [x] Advanced filtering and search
 - [x] Mirror health checks and diagnostics
-- [ ] PostgreSQL database support
+- [x] PostgreSQL database support
 
 ## Related Projects
 

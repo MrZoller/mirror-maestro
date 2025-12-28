@@ -88,7 +88,7 @@ async def test_create_backup_empty_database(client):
 
         with tarfile.open(backup_file, "r:gz") as tar:
             members = tar.getnames()
-            assert "mirrors.db" in members
+            assert "database.json" in members
             assert "encryption.key" in members
             assert "backup_metadata.json" in members
 
@@ -97,7 +97,18 @@ async def test_create_backup_empty_database(client):
             metadata = json.loads(metadata_file.read().decode())
             assert "timestamp" in metadata
             assert "version" in metadata
-            assert metadata["files"] == ["mirrors.db", "encryption.key"]
+            assert metadata["version"] == "2.0"
+            assert metadata["format"] == "json"
+
+            # Check database.json structure
+            db_file = tar.extractfile("database.json")
+            db_data = json.loads(db_file.read().decode())
+            assert "gitlab_instances" in db_data
+            assert "instance_pairs" in db_data
+            assert "mirrors" in db_data
+            assert db_data["gitlab_instances"] == []
+            assert db_data["instance_pairs"] == []
+            assert db_data["mirrors"] == []
 
 
 @pytest.mark.asyncio
@@ -134,10 +145,14 @@ async def test_create_backup_with_data(client, session_maker, monkeypatch):
         with tarfile.open(backup_file, "r:gz") as tar:
             tar.extractall(extract_dir)
 
-        # Check that database file exists and has data
-        db_file = extract_dir / "mirrors.db"
+        # Check that database JSON file exists and has data
+        db_file = extract_dir / "database.json"
         assert db_file.exists()
-        assert db_file.stat().st_size > 0
+
+        db_data = json.loads(db_file.read_text())
+        assert len(db_data["gitlab_instances"]) == 1
+        assert db_data["gitlab_instances"][0]["name"] == "backup-test-inst"
+        assert db_data["gitlab_instances"][0]["url"] == "https://gitlab.example.com"
 
         # Verify encryption key exists
         key_file = extract_dir / "encryption.key"
@@ -168,12 +183,12 @@ async def test_restore_backup_missing_files(client):
         tmppath = Path(tmpdir)
 
         # Create incomplete backup (missing encryption.key)
-        test_db = tmppath / "mirrors.db"
-        test_db.write_text("fake db content")
+        test_db = tmppath / "database.json"
+        test_db.write_text('{"gitlab_instances": [], "instance_pairs": [], "mirrors": []}')
 
         backup_file = tmppath / "incomplete.tar.gz"
         with tarfile.open(backup_file, "w:gz") as tar:
-            tar.add(test_db, arcname="mirrors.db")
+            tar.add(test_db, arcname="database.json")
 
         backup_content = backup_file.read_bytes()
 
@@ -183,21 +198,41 @@ async def test_restore_backup_missing_files(client):
         data={"create_backup_first": "false"}
     )
     assert resp.status_code == 400
-    assert "Missing files" in resp.json()["detail"]
     assert "encryption.key" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_backup_creation_and_validation(client, session_maker, monkeypatch):
-    """Test backup creation and validation of backup contents.
+async def test_restore_backup_legacy_format_rejected(client):
+    """Test that legacy SQLite backup format is rejected."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmppath = Path(tmpdir)
 
-    Note: Full database restore is not tested here because replacing an active
-    database file during testing is not reliable. The restore functionality is
-    validated through other tests (invalid file, missing files) and works correctly
-    in production environments.
-    """
+        # Create a legacy backup (mirrors.db instead of database.json)
+        test_db = tmppath / "mirrors.db"
+        test_db.write_text("fake db content")
+        test_key = tmppath / "encryption.key"
+        test_key.write_text("fake key")
+
+        backup_file = tmppath / "legacy.tar.gz"
+        with tarfile.open(backup_file, "w:gz") as tar:
+            tar.add(test_db, arcname="mirrors.db")
+            tar.add(test_key, arcname="encryption.key")
+
+        backup_content = backup_file.read_bytes()
+
+    resp = await client.post(
+        "/api/backup/restore",
+        files={"file": ("legacy.tar.gz", io.BytesIO(backup_content), "application/gzip")},
+        data={"create_backup_first": "false"}
+    )
+    assert resp.status_code == 400
+    assert "older SQLite-based version" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_backup_creation_and_restore(client, session_maker, monkeypatch):
+    """Test full backup creation and restore cycle."""
     from app.api import instances as inst_mod
-    import sqlite3
 
     monkeypatch.setattr(inst_mod, "GitLabClient", FakeGitLabClient)
 
@@ -230,7 +265,7 @@ async def test_backup_creation_and_validation(client, session_maker, monkeypatch
         # Verify it's a valid archive
         with tarfile.open(backup_file, "r:gz") as tar:
             members = tar.getnames()
-            assert "mirrors.db" in members
+            assert "database.json" in members
             assert "encryption.key" in members
             assert "backup_metadata.json" in members
 
@@ -239,65 +274,168 @@ async def test_backup_creation_and_validation(client, session_maker, monkeypatch
             extract_dir.mkdir()
             tar.extractall(extract_dir)
 
-        # Validate database file
-        db_file = extract_dir / "mirrors.db"
+        # Validate database JSON
+        db_file = extract_dir / "database.json"
         assert db_file.exists()
 
-        # Verify database has the instance we created
-        conn = sqlite3.connect(db_file)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name, url, description FROM gitlab_instances WHERE name=?", ("roundtrip-test",))
-        result = cursor.fetchone()
-        conn.close()
-
-        assert result is not None
-        assert result[0] == "roundtrip-test"
-        assert result[1] == "https://gitlab.roundtrip.com"
-        assert result[2] == "Test instance for backup/restore"
+        db_data = json.loads(db_file.read_text())
+        assert len(db_data["gitlab_instances"]) == 1
+        instance = db_data["gitlab_instances"][0]
+        assert instance["name"] == "roundtrip-test"
+        assert instance["url"] == "https://gitlab.roundtrip.com"
+        assert instance["description"] == "Test instance for backup/restore"
 
         # Verify encryption key exists
         key_file = extract_dir / "encryption.key"
         assert key_file.exists()
         assert key_file.stat().st_size > 0
 
+    # Now test restore
+    restore_resp = await client.post(
+        "/api/backup/restore",
+        files={"file": ("backup.tar.gz", io.BytesIO(backup_content), "application/gzip")},
+        data={"create_backup_first": "false"}
+    )
+    assert restore_resp.status_code == 200
+    restore_data = restore_resp.json()
+    assert restore_data["success"] is True
+    assert restore_data["imported_counts"]["gitlab_instances"] == 1
+
+    # Verify data was restored
+    list_resp = await client.get("/api/instances")
+    assert list_resp.status_code == 200
+    instances = list_resp.json()
+    assert len(instances) == 1
+    assert instances[0]["name"] == "roundtrip-test"
+
 
 @pytest.mark.asyncio
 async def test_restore_creates_pre_backup(client, session_maker, monkeypatch, tmp_path):
     """Test that restore creates a pre-restore backup when requested."""
     from app.api import instances as inst_mod
-    from app import config
 
     monkeypatch.setattr(inst_mod, "GitLabClient", FakeGitLabClient)
 
-    # Override data directory to use temp path
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
+    # Create valid backup
+    db_data = {
+        "gitlab_instances": [],
+        "instance_pairs": [],
+        "mirrors": []
+    }
 
-    # We can't easily test the pre-restore backup creation without mocking
-    # the file system operations, so this is a simplified test
-    # In a real scenario, you'd check that the pre-restore backup file was created
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmppath = Path(tmpdir)
 
-    # Create minimal valid backup
-    test_db = data_dir / "test.db"
-    test_db.write_text("test db")
-    test_key = data_dir / "test.key"
-    test_key.write_text("test key")
+        db_file = tmppath / "database.json"
+        db_file.write_text(json.dumps(db_data))
 
-    backup_file = tmp_path / "test-backup.tar.gz"
-    with tarfile.open(backup_file, "w:gz") as tar:
-        tar.add(test_db, arcname="mirrors.db")
-        tar.add(test_key, arcname="encryption.key")
+        key_file = tmppath / "encryption.key"
+        key_file.write_bytes(b"test-key-content")
 
-    backup_content = backup_file.read_bytes()
+        backup_file = tmppath / "test-backup.tar.gz"
+        with tarfile.open(backup_file, "w:gz") as tar:
+            tar.add(db_file, arcname="database.json")
+            tar.add(key_file, arcname="encryption.key")
 
-    # Note: This test is limited because we can't easily verify the pre-restore
-    # backup was created without more complex mocking. The important part is
-    # that the restore accepts the parameter.
+        backup_content = backup_file.read_bytes()
+
+    # Note: We can't easily verify the pre-restore backup was created
+    # because it writes to ./data which may not exist in tests
+    # The important thing is that the parameter is accepted and doesn't error
     resp = await client.post(
         "/api/backup/restore",
         files={"file": ("backup.tar.gz", io.BytesIO(backup_content), "application/gzip")},
         data={"create_backup_first": "true"}
     )
-    # The restore might fail due to invalid database, but we're mainly testing
-    # that the parameter is accepted
-    assert resp.status_code in [200, 400, 500]
+    # The restore should succeed
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_restore_with_complex_data(client, session_maker, monkeypatch):
+    """Test restoring a backup with instances, pairs, and mirrors."""
+    # Create backup data with all entity types
+    db_data = {
+        "gitlab_instances": [
+            {
+                "id": 1,
+                "name": "Source GitLab",
+                "url": "https://source.gitlab.com",
+                "encrypted_token": "enc:source-token",
+                "api_user_id": 10,
+                "api_username": "source-user",
+                "description": "Source instance"
+            },
+            {
+                "id": 2,
+                "name": "Target GitLab",
+                "url": "https://target.gitlab.com",
+                "encrypted_token": "enc:target-token",
+                "api_user_id": 20,
+                "api_username": "target-user",
+                "description": "Target instance"
+            }
+        ],
+        "instance_pairs": [
+            {
+                "id": 1,
+                "name": "Source to Target",
+                "source_instance_id": 1,
+                "target_instance_id": 2,
+                "mirror_direction": "push",
+                "description": "Test pair"
+            }
+        ],
+        "mirrors": [
+            {
+                "id": 1,
+                "instance_pair_id": 1,
+                "source_project_id": 100,
+                "source_project_path": "group/project",
+                "target_project_id": 200,
+                "target_project_path": "group/project-mirror",
+                "enabled": True,
+                "last_update_status": "success"
+            }
+        ]
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmppath = Path(tmpdir)
+
+        db_file = tmppath / "database.json"
+        db_file.write_text(json.dumps(db_data))
+
+        key_file = tmppath / "encryption.key"
+        key_file.write_bytes(b"test-key-content")
+
+        backup_file = tmppath / "complex-backup.tar.gz"
+        with tarfile.open(backup_file, "w:gz") as tar:
+            tar.add(db_file, arcname="database.json")
+            tar.add(key_file, arcname="encryption.key")
+
+        backup_content = backup_file.read_bytes()
+
+    resp = await client.post(
+        "/api/backup/restore",
+        files={"file": ("complex-backup.tar.gz", io.BytesIO(backup_content), "application/gzip")},
+        data={"create_backup_first": "false"}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["imported_counts"]["gitlab_instances"] == 2
+    assert data["imported_counts"]["instance_pairs"] == 1
+    assert data["imported_counts"]["mirrors"] == 1
+
+    # Verify all data was restored
+    instances_resp = await client.get("/api/instances")
+    assert len(instances_resp.json()) == 2
+
+    pairs_resp = await client.get("/api/pairs")
+    assert len(pairs_resp.json()) == 1
+
+    mirrors_resp = await client.get("/api/mirrors?pair_id=1")
+    assert len(mirrors_resp.json()) == 1
