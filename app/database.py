@@ -146,6 +146,33 @@ async def _maybe_migrate_sqlite(conn) -> None:
                 f"ON {safe_table} {columns_str}"
             ))
 
+    # Add performance indexes for existing databases
+    # (New databases will get these from __table_args__ in models)
+    performance_indexes = {
+        "instance_pairs": [
+            ("idx_pair_source_instance", "source_instance_id"),
+            ("idx_pair_target_instance", "target_instance_id"),
+        ],
+        "mirrors": [
+            ("idx_mirror_instance_pair", "instance_pair_id"),
+            ("idx_mirror_last_update_status", "last_update_status"),
+            ("idx_mirror_updated_at", "updated_at"),
+        ],
+    }
+
+    for table, indexes in performance_indexes.items():
+        existing_indexes = await _existing_indexes(table)
+        for index_name, column in indexes:
+            if index_name in existing_indexes:
+                continue
+            # Validate identifiers before using in SQL
+            safe_table = _validate_table_name(table)
+            safe_index_name = _validate_identifier(index_name)
+            safe_column = _validate_identifier(column)
+            await conn.execute(text(
+                f"CREATE INDEX {safe_index_name} ON {safe_table} ({safe_column})"
+            ))
+
 
 async def get_db() -> AsyncSession:
     """Dependency for getting database sessions."""

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case, literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -19,34 +19,34 @@ async def get_dashboard_metrics(
 ):
     """Get dashboard metrics and statistics."""
 
-    # Total counts
-    total_mirrors_result = await db.execute(select(func.count(Mirror.id)))
-    total_mirrors = total_mirrors_result.scalar() or 0
+    # Get all counts in a single query using conditional aggregation
+    counts_result = await db.execute(
+        select(
+            func.count(Mirror.id).label('total_mirrors'),
+            func.count(case((Mirror.enabled == True, 1))).label('enabled_mirrors'),
+            func.count(case((Mirror.last_update_status == 'success', 1))).label('success'),
+            func.count(case((Mirror.last_update_status == 'failed', 1))).label('failed'),
+            func.count(case((Mirror.last_update_status == 'pending', 1))).label('pending'),
+            func.count(case((Mirror.last_update_status.is_(None), 1))).label('unknown'),
+        )
+    )
+    counts = counts_result.one()
 
+    total_mirrors = counts.total_mirrors or 0
+    enabled_mirrors = counts.enabled_mirrors or 0
+    status_counts = {
+        'success': counts.success or 0,
+        'failed': counts.failed or 0,
+        'pending': counts.pending or 0,
+        'unknown': counts.unknown or 0,
+    }
+
+    # Get pair and instance counts in parallel-ish (still 2 queries, but minimal)
     total_pairs_result = await db.execute(select(func.count(InstancePair.id)))
     total_pairs = total_pairs_result.scalar() or 0
 
     total_instances_result = await db.execute(select(func.count(GitLabInstance.id)))
     total_instances = total_instances_result.scalar() or 0
-
-    # Mirror health statistics
-    enabled_mirrors_result = await db.execute(
-        select(func.count(Mirror.id)).where(Mirror.enabled == True)
-    )
-    enabled_mirrors = enabled_mirrors_result.scalar() or 0
-
-    # Count mirrors by status
-    status_counts = {}
-    for status in ['success', 'failed', 'pending', None]:
-        if status is None:
-            result = await db.execute(
-                select(func.count(Mirror.id)).where(Mirror.last_update_status.is_(None))
-            )
-        else:
-            result = await db.execute(
-                select(func.count(Mirror.id)).where(Mirror.last_update_status == status)
-            )
-        status_counts[status or 'unknown'] = result.scalar() or 0
 
     # Calculate health percentage
     successful = status_counts.get('success', 0)
@@ -100,24 +100,21 @@ async def get_dashboard_metrics(
             "timestamp": mirror.updated_at.isoformat()
         })
 
-    # Mirrors by pair
-    pairs_result = await db.execute(select(InstancePair))
-    pairs = pairs_result.scalars().all()
-
-    mirrors_by_pair = []
-    for pair in pairs:
-        count_result = await db.execute(
-            select(func.count(Mirror.id)).where(Mirror.instance_pair_id == pair.id)
+    # Mirrors by pair - single query with GROUP BY
+    mirrors_by_pair_result = await db.execute(
+        select(
+            InstancePair.id,
+            InstancePair.name,
+            func.count(Mirror.id).label('count')
         )
-        count = count_result.scalar() or 0
-        mirrors_by_pair.append({
-            "pair_id": pair.id,
-            "pair_name": pair.name,
-            "count": count
-        })
-
-    # Sort by count descending
-    mirrors_by_pair.sort(key=lambda x: x['count'], reverse=True)
+        .outerjoin(Mirror, Mirror.instance_pair_id == InstancePair.id)
+        .group_by(InstancePair.id, InstancePair.name)
+        .order_by(func.count(Mirror.id).desc())
+    )
+    mirrors_by_pair = [
+        {"pair_id": row.id, "pair_name": row.name, "count": row.count or 0}
+        for row in mirrors_by_pair_result.all()
+    ]
 
     return {
         "summary": {
