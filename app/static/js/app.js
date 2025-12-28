@@ -619,12 +619,20 @@ class APIError extends Error {
 
 async function apiRequest(url, options = {}) {
     try {
+        // Build headers with optional auth token
+        const headers = {
+            'Content-Type': 'application/json',
+            ...options.headers
+        };
+
+        // Include JWT token if available (for multi-user mode)
+        if (typeof authState !== 'undefined' && authState.token) {
+            headers['Authorization'] = `Bearer ${authState.token}`;
+        }
+
         const response = await fetch(url, {
             ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            }
+            headers
         });
 
         if (!response.ok) {
@@ -2386,7 +2394,11 @@ async function createBackup() {
         btnText.style.display = 'none';
         btnSpinner.style.display = 'inline-block';
 
-        const response = await fetch('/api/backup/create');
+        const headers = {};
+        if (typeof authState !== 'undefined' && authState.token) {
+            headers['Authorization'] = `Bearer ${authState.token}`;
+        }
+        const response = await fetch('/api/backup/create', { headers });
 
         if (!response.ok) {
             const error = await response.json();
@@ -2465,8 +2477,13 @@ async function restoreBackup() {
         formData.append('file', file);
         formData.append('create_backup_first', createBackupFirst.toString());
 
+        const restoreHeaders = {};
+        if (typeof authState !== 'undefined' && authState.token) {
+            restoreHeaders['Authorization'] = `Bearer ${authState.token}`;
+        }
         const response = await fetch('/api/backup/restore', {
             method: 'POST',
+            headers: restoreHeaders,
             body: formData
         });
 
