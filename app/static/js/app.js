@@ -2301,7 +2301,11 @@ async function exportMirrors() {
     }
 
     try {
-        const response = await fetch(`/api/export/pair/${state.selectedPair}`);
+        const exportHeaders = {};
+        if (typeof authState !== 'undefined' && authState.token) {
+            exportHeaders['Authorization'] = `Bearer ${authState.token}`;
+        }
+        const response = await fetch(`/api/export/pair/${state.selectedPair}`, { headers: exportHeaders });
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -2579,7 +2583,12 @@ function initGlobalSearch() {
         resultsContainer.innerHTML = '<div class="search-loading"><div class="spinner"></div></div>';
 
         try {
+            const searchHeaders = {};
+            if (typeof authState !== 'undefined' && authState.token) {
+                searchHeaders['Authorization'] = `Bearer ${authState.token}`;
+            }
             const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=5`, {
+                headers: searchHeaders,
                 signal: globalSearchController.signal
             });
             const data = await response.json();
