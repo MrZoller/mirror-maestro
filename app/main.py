@@ -113,10 +113,16 @@ async def root(request: Request):
 
 
 @app.get("/favicon.ico")
-@app.get("/favicon.png")
-async def favicon():
-    """Serve the favicon from the root path where browsers look for it by default."""
-    return FileResponse("app/static/images/favicon.png", media_type="image/png")
+@app.get("/favicon-32x32.png")
+async def favicon_32():
+    """Serve the 32x32 favicon from the root path."""
+    return FileResponse("app/static/images/favicon-32x32.png", media_type="image/png")
+
+
+@app.get("/favicon-16x16.png")
+async def favicon_16():
+    """Serve the 16x16 favicon from the root path."""
+    return FileResponse("app/static/images/favicon-16x16.png", media_type="image/png")
 
 
 @app.get("/health")
