@@ -23,7 +23,6 @@ async def test_pairs_create_list_update_delete(client, session_maker):
         "source_instance_id": src_id,
         "target_instance_id": tgt_id,
         "mirror_direction": "pull",
-        "mirror_protected_branches": True,
         "mirror_overwrite_diverged": False,
         "mirror_trigger_builds": False,
         "only_mirror_protected_branches": False,
@@ -192,7 +191,6 @@ async def test_pairs_create_with_all_settings(client, session_maker):
             "source_instance_id": src_id,
             "target_instance_id": tgt_id,
             "mirror_direction": "pull",
-            "mirror_protected_branches": True,
             "mirror_overwrite_diverged": False,
             "mirror_trigger_builds": True,
             "only_mirror_protected_branches": True,
@@ -204,7 +202,6 @@ async def test_pairs_create_with_all_settings(client, session_maker):
     assert resp.status_code == 200
     data = resp.json()
     assert data["mirror_direction"] == "pull"
-    assert data["mirror_protected_branches"] is True
     assert data["mirror_overwrite_diverged"] is False
     assert data["mirror_trigger_builds"] is True
     assert data["only_mirror_protected_branches"] is True
@@ -236,14 +233,14 @@ async def test_pairs_update_multiple_fields(client, session_maker):
         json={
             "name": "renamed-pair",
             "description": "Updated description",
-            "mirror_protected_branches": True,
+            "mirror_overwrite_diverged": True,
         },
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["name"] == "renamed-pair"
     assert data["description"] == "Updated description"
-    assert data["mirror_protected_branches"] is True
+    assert data["mirror_overwrite_diverged"] is True
 
 
 @pytest.mark.asyncio

@@ -91,7 +91,6 @@ async def test_import_pair_mirrors_imports_and_skips_duplicates(client, session_
                 "source_project_id": 1,
                 "target_project_id": 2,
                 # Direction is determined by pair, not stored per-mirror
-                "mirror_protected_branches": None,
                 "mirror_overwrite_diverged": None,
                 "mirror_trigger_builds": None,
                 "only_mirror_protected_branches": None,
@@ -187,7 +186,6 @@ async def test_import_pair_with_all_mirror_settings(client, session_maker):
                 "source_project_id": 100,
                 "target_project_id": 200,
                 # Direction is determined by pair, not stored per-mirror
-                "mirror_protected_branches": True,
                 "mirror_overwrite_diverged": False,
                 "mirror_trigger_builds": True,
                 "only_mirror_protected_branches": True,
@@ -214,7 +212,6 @@ async def test_import_pair_with_all_mirror_settings(client, session_maker):
         )
         mirror = result.scalar_one()
         # Direction comes from pair, not stored on mirror
-        assert mirror.mirror_protected_branches is True
         assert mirror.mirror_overwrite_diverged is False
         assert mirror.mirror_trigger_builds is True
         assert mirror.only_mirror_protected_branches is True
