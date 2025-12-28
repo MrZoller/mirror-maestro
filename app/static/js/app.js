@@ -13,17 +13,23 @@ const state = {
 };
 
 // Initialize the application
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     initDarkMode();
     initTabs();
     setupEventListeners();
     initTableEnhancements();
     initGlobalSearch();
     initUrlState();
+    initUserMenu();
 
     // Demo screenshots open static HTML files via file://; avoid API calls there.
     const isFileDemo = (window?.location?.protocol || '') === 'file:';
     if (!isFileDemo) {
+        // Initialize auth first and wait for it to complete
+        // This ensures the JWT token is available for subsequent API calls
+        await initAuth();
+
+        // Now load data (token is ready)
         loadDashboard();
         loadInstances();
         loadPairs();
@@ -3302,12 +3308,8 @@ async function deleteUser(userId) {
     }
 }
 
-// Initialize auth when DOM is ready
+// User form submission handler (for Settings tab)
 document.addEventListener('DOMContentLoaded', () => {
-    initUserMenu();
-    initAuth();
-
-    // User form submission
     document.getElementById('user-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         await createUser();
