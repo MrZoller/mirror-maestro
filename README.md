@@ -32,15 +32,19 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 *Interactive topology visualization with animated data flows, zoom controls, and hover highlighting - click nodes or links to drill down into mirror details*
 
 ### Backup & Restore
-![Backup](docs/screenshots/06-backup.png?v=3)
+![Backup](docs/screenshots/06-backup.png?v=4)
 *Complete database backups with one-click creation and secure restore functionality*
 
+### Settings (Multi-User Mode)
+![Settings](docs/screenshots/07-settings.png?v=4)
+*User management with admin and regular user roles, active/inactive status, and secure password management*
+
 ### About
-![About](docs/screenshots/07-about.png?v=3)
+![About](docs/screenshots/08-about.png?v=4)
 *Project information with version details, links to documentation, and technology stack*
 
 ### Help
-![Help](docs/screenshots/08-help.png?v=3)
+![Help](docs/screenshots/09-help.png?v=4)
 *Comprehensive help documentation with setup guides, troubleshooting tips, and best practices*
 
 > **Note**: To generate screenshots with sample data, see [docs/screenshots/README.md](docs/screenshots/README.md)
