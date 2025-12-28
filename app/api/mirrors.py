@@ -95,7 +95,6 @@ class MirrorCreate(BaseModel):
     target_project_id: int
     target_project_path: str
     # Direction is determined by the instance pair, not overridable per-mirror
-    mirror_protected_branches: bool | None = None
     mirror_overwrite_diverged: bool | None = None
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
@@ -190,7 +189,6 @@ class MirrorRemoveExisting(BaseModel):
 
 class MirrorUpdate(BaseModel):
     # Direction cannot be changed - it's determined by the instance pair
-    mirror_protected_branches: bool | None = None
     mirror_overwrite_diverged: bool | None = None
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
@@ -218,7 +216,6 @@ class MirrorResponse(BaseModel):
     target_project_id: int
     target_project_path: str
     # Per-mirror setting overrides (direction is pair-only, not here)
-    mirror_protected_branches: bool | None
     mirror_overwrite_diverged: bool | None
     mirror_trigger_builds: bool | None
     only_mirror_protected_branches: bool | None
@@ -379,7 +376,6 @@ async def list_mirrors(
                 source_project_path=mirror.source_project_path,
                 target_project_id=mirror.target_project_id,
                 target_project_path=mirror.target_project_path,
-                mirror_protected_branches=mirror.mirror_protected_branches,
                 mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
                 mirror_trigger_builds=mirror.mirror_trigger_builds,
                 only_mirror_protected_branches=mirror.only_mirror_protected_branches,
@@ -459,11 +455,6 @@ async def create_mirror(
             detail=f"Invalid mirror direction: {direction}. Must be 'push' or 'pull'"
         )
 
-    protected_branches = (
-        mirror.mirror_protected_branches
-        if mirror.mirror_protected_branches is not None
-        else pair.mirror_protected_branches
-    )
     overwrite_diverged = (
         mirror.mirror_overwrite_diverged
         if mirror.mirror_overwrite_diverged is not None
@@ -624,7 +615,6 @@ async def create_mirror(
         target_project_id=mirror.target_project_id,
         target_project_path=mirror.target_project_path,
         # Direction is determined by pair, not stored on mirror
-        mirror_protected_branches=mirror.mirror_protected_branches,
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,
@@ -683,7 +673,6 @@ async def create_mirror(
         source_project_path=db_mirror.source_project_path,
         target_project_id=db_mirror.target_project_id,
         target_project_path=db_mirror.target_project_path,
-        mirror_protected_branches=db_mirror.mirror_protected_branches,
         mirror_overwrite_diverged=db_mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=db_mirror.mirror_trigger_builds,
         only_mirror_protected_branches=db_mirror.only_mirror_protected_branches,
@@ -839,7 +828,6 @@ async def get_mirror(
         source_project_path=mirror.source_project_path,
         target_project_id=mirror.target_project_id,
         target_project_path=mirror.target_project_path,
-        mirror_protected_branches=mirror.mirror_protected_branches,
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,
@@ -878,8 +866,6 @@ async def update_mirror(
     # Important: allow clearing overrides by accepting explicit nulls in the payload.
     # (FastAPI/Pydantic v2 tracks presence via `model_fields_set`.)
     fields = getattr(mirror_update, "model_fields_set", set())
-    if "mirror_protected_branches" in fields:
-        mirror.mirror_protected_branches = mirror_update.mirror_protected_branches
     if "mirror_overwrite_diverged" in fields:
         mirror.mirror_overwrite_diverged = mirror_update.mirror_overwrite_diverged
     if "mirror_trigger_builds" in fields:
@@ -999,7 +985,6 @@ async def update_mirror(
         source_project_path=mirror.source_project_path,
         target_project_id=mirror.target_project_id,
         target_project_path=mirror.target_project_path,
-        mirror_protected_branches=mirror.mirror_protected_branches,
         mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,

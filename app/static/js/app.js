@@ -1339,10 +1339,6 @@ function renderPairs(pairs) {
                     <td>
                         <div style="display:grid; gap:10px">
                             <div class="checkbox-group">
-                                <input type="checkbox" id="edit-pair-protected-${pair.id}" ${pair.mirror_protected_branches ? 'checked' : ''}>
-                                <label for="edit-pair-protected-${pair.id}">Mirror protected branches</label>
-                            </div>
-                            <div class="checkbox-group">
                                 <input type="checkbox" id="edit-pair-overwrite-${pair.id}" ${pair.mirror_overwrite_diverged ? 'checked' : ''}>
                                 <label for="edit-pair-overwrite-${pair.id}">Overwrite divergent branches</label>
                             </div>
@@ -1428,13 +1424,12 @@ async function savePairEdit(id) {
     const nameEl = document.getElementById(`edit-pair-name-${id}`);
     const descEl = document.getElementById(`edit-pair-description-${id}`);
     const dirEl = document.getElementById(`edit-pair-direction-${id}`);
-    const protectedEl = document.getElementById(`edit-pair-protected-${id}`);
     const overwriteEl = document.getElementById(`edit-pair-overwrite-${id}`);
     const triggerEl = document.getElementById(`edit-pair-trigger-${id}`);
     const onlyProtectedEl = document.getElementById(`edit-pair-only-protected-${id}`);
     const regexEl = document.getElementById(`edit-pair-regex-${id}`);
     const userEl = document.getElementById(`edit-pair-user-${id}`);
-    if (!nameEl || !dirEl || !protectedEl || !overwriteEl || !onlyProtectedEl) return;
+    if (!nameEl || !dirEl || !overwriteEl || !onlyProtectedEl) return;
 
     const direction = (dirEl.value || '').toString().toLowerCase();
     const isPush = direction === 'push';
@@ -1445,7 +1440,6 @@ async function savePairEdit(id) {
         name: (nameEl.value || '').toString().trim(),
         description: (descEl?.value || '').toString().trim() || null,
         mirror_direction: direction || 'pull',
-        mirror_protected_branches: !!protectedEl.checked,
         mirror_overwrite_diverged: !!overwriteEl.checked,
         only_mirror_protected_branches: !!onlyProtectedEl.checked,
         mirror_trigger_builds: isPush ? false : !!triggerEl?.checked,
@@ -1499,7 +1493,6 @@ async function createPair() {
         source_instance_id: parseInt(formData.get('source_instance_id')),
         target_instance_id: parseInt(formData.get('target_instance_id')),
         mirror_direction: formData.get('mirror_direction'),
-        mirror_protected_branches: formData.get('mirror_protected_branches') === 'on',
         mirror_overwrite_diverged: formData.get('mirror_overwrite_diverged') === 'on',
         mirror_trigger_builds: formData.get('mirror_trigger_builds') === 'on',
         only_mirror_protected_branches: formData.get('only_mirror_protected_branches') === 'on',
