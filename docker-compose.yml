@@ -1,6 +1,21 @@
 version: '3.8'
 
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-mirror_maestro}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-mirror_maestro}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   app:
     build: .
     ports:
@@ -11,11 +26,17 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - DATABASE_URL=sqlite+aiosqlite:///./data/mirrors.db
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-mirror_maestro}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
       - AUTH_USERNAME=${AUTH_USERNAME:-admin}
       - AUTH_PASSWORD=${AUTH_PASSWORD:-changeme}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     env_file:
       - .env
+
+volumes:
+  postgres_data:

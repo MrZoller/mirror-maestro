@@ -1,8 +1,10 @@
+"""Tests for database initialization and session management."""
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
-from app.database import init_db, _maybe_migrate_sqlite
+from app.database import init_db
 from app.models import Base
 
 
@@ -39,105 +41,6 @@ async def test_init_db_creates_all_tables():
     finally:
         # Restore original engine
         db_mod.engine = original_engine
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_migration_adds_missing_columns():
-    """Test that migrations add new columns to existing tables."""
-    # Create in-memory database
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-
-    try:
-        # Create tables without migrations
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-            # Remove a column that the migration should add (simulate old schema)
-            # First check which columns exist
-            result = await conn.execute(text("PRAGMA table_info(gitlab_instances)"))
-            columns_before = {row[1] for row in result.fetchall()}
-
-            # If api_user_id already exists from the model, we'll drop it and re-add via migration
-            # Note: SQLite doesn't support DROP COLUMN easily, so we'll test on a fresh table
-
-        # Now run the migration
-        async with engine.begin() as conn:
-            await _maybe_migrate_sqlite(conn)
-
-            # Check that migration columns were added
-            result = await conn.execute(text("PRAGMA table_info(gitlab_instances)"))
-            columns_after = {row[1] for row in result.fetchall()}
-
-            # These columns should be present after migration
-            assert "api_user_id" in columns_after
-            assert "api_username" in columns_after
-
-            # Check instance_pairs table
-            result = await conn.execute(text("PRAGMA table_info(instance_pairs)"))
-            pair_columns = {row[1] for row in result.fetchall()}
-            assert "mirror_branch_regex" in pair_columns
-
-            # Check mirrors table
-            result = await conn.execute(text("PRAGMA table_info(mirrors)"))
-            mirror_columns = {row[1] for row in result.fetchall()}
-            assert "mirror_branch_regex" in mirror_columns
-
-    finally:
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_migration_idempotent():
-    """Test that running migrations multiple times is safe."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-
-    try:
-        # Create tables
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-        # Run migration multiple times
-        async with engine.begin() as conn:
-            await _maybe_migrate_sqlite(conn)
-            await _maybe_migrate_sqlite(conn)
-            await _maybe_migrate_sqlite(conn)
-
-            # Verify columns still exist and are correct
-            result = await conn.execute(text("PRAGMA table_info(gitlab_instances)"))
-            columns = {row[1] for row in result.fetchall()}
-            assert "api_user_id" in columns
-            assert "api_username" in columns
-
-    finally:
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_migration_skips_non_sqlite():
-    """Test that SQLite migrations don't run on other databases."""
-    # This test uses an in-memory SQLite database but we'll simulate
-    # a different dialect by checking the function's behavior
-
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-            # The migration function checks conn.dialect.name
-            # For SQLite it should run, for others it should skip
-            assert conn.dialect.name == "sqlite"
-
-            # Run migration (should work for SQLite)
-            await _maybe_migrate_sqlite(conn)
-
-            # Verify it ran by checking for migrated columns
-            result = await conn.execute(text("PRAGMA table_info(gitlab_instances)"))
-            columns = {row[1] for row in result.fetchall()}
-            assert "api_user_id" in columns
-
-    finally:
         await engine.dispose()
 
 
@@ -185,40 +88,43 @@ async def test_get_db_yields_session():
 
 
 @pytest.mark.asyncio
-async def test_migration_preserves_existing_data():
-    """Test that migrations don't lose existing data."""
+async def test_tables_have_expected_columns():
+    """Test that tables have all expected columns defined in models."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
 
     try:
-        # Create tables and insert test data
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-            # Insert a test instance with required timestamp fields
-            await conn.execute(text(
-                "INSERT INTO gitlab_instances (name, url, encrypted_token, created_at, updated_at) "
-                "VALUES ('test', 'https://gitlab.com', 'enc:token', datetime('now'), datetime('now'))"
-            ))
+            # Check gitlab_instances columns
+            result = await conn.execute(text("PRAGMA table_info(gitlab_instances)"))
+            columns = {row[1] for row in result.fetchall()}
+            assert "id" in columns
+            assert "name" in columns
+            assert "url" in columns
+            assert "encrypted_token" in columns
+            assert "api_user_id" in columns
+            assert "api_username" in columns
+            assert "created_at" in columns
+            assert "updated_at" in columns
 
-            # Run migration
-            await _maybe_migrate_sqlite(conn)
+            # Check instance_pairs columns
+            result = await conn.execute(text("PRAGMA table_info(instance_pairs)"))
+            columns = {row[1] for row in result.fetchall()}
+            assert "id" in columns
+            assert "name" in columns
+            assert "source_instance_id" in columns
+            assert "target_instance_id" in columns
+            assert "mirror_direction" in columns
 
-            # Verify data is still there
-            result = await conn.execute(text(
-                "SELECT name, url FROM gitlab_instances WHERE name = 'test'"
-            ))
-            row = result.fetchone()
-            assert row is not None
-            assert row[0] == "test"
-            assert row[1] == "https://gitlab.com"
-
-            # Verify new columns exist with NULL values (they should be added by migration)
-            result = await conn.execute(text(
-                "SELECT api_user_id, api_username FROM gitlab_instances WHERE name = 'test'"
-            ))
-            row = result.fetchone()
-            assert row[0] is None  # api_user_id
-            assert row[1] is None  # api_username
+            # Check mirrors columns
+            result = await conn.execute(text("PRAGMA table_info(mirrors)"))
+            columns = {row[1] for row in result.fetchall()}
+            assert "id" in columns
+            assert "instance_pair_id" in columns
+            assert "source_project_id" in columns
+            assert "target_project_id" in columns
+            assert "enabled" in columns
 
     finally:
         await engine.dispose()
