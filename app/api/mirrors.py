@@ -99,7 +99,6 @@ class MirrorCreate(BaseModel):
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
     mirror_branch_regex: str | None = None
-    mirror_user_id: int | None = None
     enabled: bool = True
 
     @field_validator('mirror_branch_regex')
@@ -193,7 +192,6 @@ class MirrorUpdate(BaseModel):
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
     mirror_branch_regex: str | None = None
-    mirror_user_id: int | None = None
     enabled: bool | None = None
 
     @field_validator('mirror_branch_regex')
@@ -220,14 +218,12 @@ class MirrorResponse(BaseModel):
     mirror_trigger_builds: bool | None
     only_mirror_protected_branches: bool | None
     mirror_branch_regex: str | None
-    mirror_user_id: int | None
     # Effective settings (mirror overrides -> pair defaults)
     effective_mirror_direction: str | None = None
     effective_mirror_overwrite_diverged: bool | None = None
     effective_mirror_trigger_builds: bool | None = None
     effective_only_mirror_protected_branches: bool | None = None
     effective_mirror_branch_regex: str | None = None
-    effective_mirror_user_id: int | None = None
     mirror_id: int | None
     last_successful_update: str | None
     last_update_status: str | None
@@ -292,26 +288,11 @@ async def _resolve_effective_settings(
         if mirror.mirror_branch_regex is not None
         else pair.mirror_branch_regex
     )
-    mirror_user_id = (
-        mirror.mirror_user_id
-        if mirror.mirror_user_id is not None
-        else pair.mirror_user_id
-    )
 
     # Pull-only settings: if direction is push, treat as not applicable.
     if direction == "push":
         trigger_builds = None
         branch_regex = None
-        mirror_user_id = None
-
-    # If nothing set anywhere, prefer the API token's user for pull mirrors.
-    if direction == "pull" and mirror_user_id is None:
-        owner = target_instance
-        if owner is None:
-            # Best-effort: fetch only if needed (avoid extra queries otherwise)
-            res = await db.execute(select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id))
-            owner = res.scalar_one_or_none()
-        mirror_user_id = owner.api_user_id if owner else None
 
     return {
         "effective_mirror_direction": direction or None,
@@ -319,7 +300,6 @@ async def _resolve_effective_settings(
         "effective_only_mirror_protected_branches": only_protected,
         "effective_mirror_trigger_builds": trigger_builds,
         "effective_mirror_branch_regex": branch_regex,
-        "effective_mirror_user_id": mirror_user_id,
     }
 
 
@@ -380,7 +360,6 @@ async def list_mirrors(
                 mirror_trigger_builds=mirror.mirror_trigger_builds,
                 only_mirror_protected_branches=mirror.only_mirror_protected_branches,
                 mirror_branch_regex=mirror.mirror_branch_regex,
-                mirror_user_id=mirror.mirror_user_id,
                 mirror_id=mirror.mirror_id,
                 last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
                 last_update_status=mirror.last_update_status,
@@ -475,14 +454,6 @@ async def create_mirror(
         if mirror.mirror_branch_regex is not None
         else pair.mirror_branch_regex
     )
-    mirror_user_id_setting = (
-        mirror.mirror_user_id
-        if mirror.mirror_user_id is not None
-        else pair.mirror_user_id
-    )
-    # If nothing set anywhere, prefer the API token's user for pull mirrors.
-    if mirror_user_id_setting is None and direction == "pull":
-        mirror_user_id_setting = target_instance.api_user_id
 
     # Determine which project needs the token and create it
     # Push: token on target (allows pushing to it)
@@ -588,7 +559,7 @@ async def create_mirror(
                 keep_divergent_refs=not overwrite_diverged,
                 trigger_builds=trigger_builds,
                 mirror_branch_regex=branch_regex,
-                mirror_user_id=mirror_user_id_setting,
+                mirror_user_id=target_instance.api_user_id,
             )
             gitlab_mirror_id = result.get("id")
     except HTTPException:
@@ -619,7 +590,6 @@ async def create_mirror(
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,
         mirror_branch_regex=mirror.mirror_branch_regex,
-        mirror_user_id=mirror.mirror_user_id,
         mirror_id=gitlab_mirror_id,
         enabled=mirror.enabled,
         last_update_status="pending",
@@ -677,13 +647,11 @@ async def create_mirror(
         mirror_trigger_builds=db_mirror.mirror_trigger_builds,
         only_mirror_protected_branches=db_mirror.only_mirror_protected_branches,
         mirror_branch_regex=db_mirror.mirror_branch_regex,
-        mirror_user_id=db_mirror.mirror_user_id,
         effective_mirror_direction=direction,
         effective_mirror_overwrite_diverged=overwrite_diverged,
         effective_mirror_trigger_builds=trigger_builds if direction == "pull" else None,
         effective_only_mirror_protected_branches=only_protected,
         effective_mirror_branch_regex=branch_regex if direction == "pull" else None,
-        effective_mirror_user_id=mirror_user_id_setting if direction == "pull" else None,
         mirror_id=db_mirror.mirror_id,
         last_successful_update=db_mirror.last_successful_update.isoformat() if db_mirror.last_successful_update else None,
         last_update_status=db_mirror.last_update_status,
@@ -832,7 +800,6 @@ async def get_mirror(
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,
         mirror_branch_regex=mirror.mirror_branch_regex,
-        mirror_user_id=mirror.mirror_user_id,
         mirror_id=mirror.mirror_id,
         last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
         last_update_status=mirror.last_update_status,
@@ -874,8 +841,6 @@ async def update_mirror(
         mirror.only_mirror_protected_branches = mirror_update.only_mirror_protected_branches
     if "mirror_branch_regex" in fields:
         mirror.mirror_branch_regex = mirror_update.mirror_branch_regex
-    if "mirror_user_id" in fields:
-        mirror.mirror_user_id = mirror_update.mirror_user_id
     if "enabled" in fields:
         mirror.enabled = mirror_update.enabled
 
@@ -925,13 +890,6 @@ async def update_mirror(
                 if mirror.mirror_branch_regex is not None
                 else pair.mirror_branch_regex
             )
-            mirror_user_id = (
-                mirror.mirror_user_id
-                if mirror.mirror_user_id is not None
-                else pair.mirror_user_id
-            )
-            if mirror_user_id is None and direction == "pull":
-                mirror_user_id = instance.api_user_id
 
             # Update the mirror in GitLab
             client = GitLabClient(instance.url, instance.encrypted_token)
@@ -943,7 +901,7 @@ async def update_mirror(
                 keep_divergent_refs=not overwrite_diverged,
                 trigger_builds=trigger_builds if direction == "pull" else None,
                 mirror_branch_regex=branch_regex if direction == "pull" else None,
-                mirror_user_id=mirror_user_id if direction == "pull" else None,
+                mirror_user_id=instance.api_user_id if direction == "pull" else None,
                 mirror_direction=direction,
             )
 
@@ -989,7 +947,6 @@ async def update_mirror(
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,
         mirror_branch_regex=mirror.mirror_branch_regex,
-        mirror_user_id=mirror.mirror_user_id,
         mirror_id=mirror.mirror_id,
         last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
         last_update_status=mirror.last_update_status,

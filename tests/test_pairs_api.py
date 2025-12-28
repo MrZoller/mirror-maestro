@@ -195,7 +195,6 @@ async def test_pairs_create_with_all_settings(client, session_maker):
             "mirror_trigger_builds": True,
             "only_mirror_protected_branches": True,
             "mirror_branch_regex": "^main$",
-            "mirror_user_id": 123,
             "description": "Test pair with all settings"
         },
     )
@@ -206,7 +205,6 @@ async def test_pairs_create_with_all_settings(client, session_maker):
     assert data["mirror_trigger_builds"] is True
     assert data["only_mirror_protected_branches"] is True
     assert data["mirror_branch_regex"] == "^main$"
-    assert data["mirror_user_id"] == 123
 
 
 @pytest.mark.asyncio

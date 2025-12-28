@@ -190,7 +190,6 @@ async def test_import_pair_with_all_mirror_settings(client, session_maker):
                 "mirror_trigger_builds": True,
                 "only_mirror_protected_branches": True,
                 "mirror_branch_regex": "^release/.*$",
-                "mirror_user_id": 42,
                 "enabled": True,
             }
         ],
@@ -216,7 +215,6 @@ async def test_import_pair_with_all_mirror_settings(client, session_maker):
         assert mirror.mirror_trigger_builds is True
         assert mirror.only_mirror_protected_branches is True
         assert mirror.mirror_branch_regex == "^release/.*$"
-        assert mirror.mirror_user_id == 42
         assert mirror.enabled is True
 
 
