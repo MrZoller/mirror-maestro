@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +66,8 @@ class UserUpdate(BaseModel):
 
 class UserResponse(BaseModel):
     """User information response."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     email: Optional[str] = None
@@ -73,9 +75,6 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 def _check_multi_user_mode():

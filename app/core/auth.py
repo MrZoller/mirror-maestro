@@ -18,7 +18,7 @@ import bcrypt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,13 +41,12 @@ class TokenData(BaseModel):
 
 class CurrentUser(BaseModel):
     """Represents the currently authenticated user."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     email: Optional[str] = None
     is_admin: bool = False
-
-    class Config:
-        from_attributes = True
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
