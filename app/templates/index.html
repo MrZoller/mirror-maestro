@@ -24,6 +24,26 @@
                         <span class="theme-icon theme-icon-light">☀️</span>
                         <span class="theme-icon theme-icon-dark">🌙</span>
                     </button>
+                    <div class="user-menu" id="user-menu" style="display: none;">
+                        <button class="user-menu-toggle" id="user-menu-toggle" aria-label="User menu">
+                            <span class="user-avatar">👤</span>
+                            <span class="user-name" id="user-name">User</span>
+                            <span class="user-menu-arrow">▼</span>
+                        </button>
+                        <div class="user-menu-dropdown" id="user-menu-dropdown">
+                            <div class="user-menu-info">
+                                <div class="user-menu-username" id="user-menu-username">-</div>
+                                <div class="user-menu-role" id="user-menu-role">-</div>
+                            </div>
+                            <hr class="user-menu-divider">
+                            <button class="user-menu-item" onclick="showChangePasswordModal()">
+                                Change Password
+                            </button>
+                            <button class="user-menu-item user-menu-logout" onclick="logout()">
+                                Logout
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -40,6 +60,7 @@
             <button class="tab" data-tab="mirrors-tab">Mirrors</button>
             <button class="tab" data-tab="topology-tab">Topology</button>
             <button class="tab" data-tab="backup-tab">Backup</button>
+            <button class="tab" data-tab="settings-tab" id="settings-tab-btn" style="display: none;">Settings</button>
             <button class="tab" data-tab="about-tab">About</button>
             <button class="tab" data-tab="help-tab">Help</button>
         </div>
@@ -619,6 +640,66 @@
             </div>
         </div>
 
+        <!-- Settings Tab (admin only) -->
+        <div id="settings-tab" class="tab-content">
+            <div class="card">
+                <h2>User Management</h2>
+                <p class="text-muted">Manage users who can access Mirror Maestro.</p>
+
+                <form id="user-form" class="mt-20">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="user-username">Username *</label>
+                            <input type="text" id="user-username" name="username" required placeholder="e.g., johndoe">
+                        </div>
+                        <div class="form-group">
+                            <label for="user-email">Email</label>
+                            <input type="email" id="user-email" name="email" placeholder="user@example.com">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="user-password">Password *</label>
+                            <input type="password" id="user-password" name="password" required placeholder="Minimum 8 characters">
+                        </div>
+                        <div class="form-group">
+                            <label for="user-password-confirm">Confirm Password *</label>
+                            <input type="password" id="user-password-confirm" name="password_confirm" required placeholder="Confirm password">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="user-is-admin" name="is_admin">
+                            <label for="user-is-admin">Administrator (can manage other users)</label>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Create User</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h3>Users</h3>
+                <table id="users-table" class="enhanced-table">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-list">
+                        <tr><td colspan="6" class="text-center"><div class="spinner"></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- About Tab -->
         <div id="about-tab" class="tab-content">
             <div class="card about-card">
@@ -1120,6 +1201,102 @@
                     <li>Open an issue on the <a href="https://github.com/MrZoller/mirror-maestro/issues" target="_blank" rel="noopener">Mirror Maestro GitHub repository</a></li>
                 </ul>
             </div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal" style="display: none;">
+        <div class="modal-backdrop" onclick="closeLoginModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Sign In</h2>
+                <button class="modal-close" onclick="closeLoginModal()" aria-label="Close">&times;</button>
+            </div>
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="login-username">Username</label>
+                    <input type="text" id="login-username" name="username" required autocomplete="username" placeholder="Enter your username">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" name="password" required autocomplete="current-password" placeholder="Enter your password">
+                </div>
+                <div id="login-error" class="message message-error" style="display: none;"></div>
+                <button type="submit" class="btn btn-primary" id="login-submit-btn" style="width: 100%;">
+                    Sign In
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="change-password-modal" class="modal" style="display: none;">
+        <div class="modal-backdrop" onclick="closeChangePasswordModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Change Password</h2>
+                <button class="modal-close" onclick="closeChangePasswordModal()" aria-label="Close">&times;</button>
+            </div>
+            <form id="change-password-form" onsubmit="handleChangePassword(event)">
+                <div class="form-group">
+                    <label for="current-password">Current Password</label>
+                    <input type="password" id="current-password" name="current_password" required autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                    <label for="new-password">New Password</label>
+                    <input type="password" id="new-password" name="new_password" required autocomplete="new-password" placeholder="Minimum 8 characters">
+                </div>
+                <div class="form-group">
+                    <label for="confirm-new-password">Confirm New Password</label>
+                    <input type="password" id="confirm-new-password" name="confirm_password" required autocomplete="new-password">
+                </div>
+                <div id="change-password-error" class="message message-error" style="display: none;"></div>
+                <button type="submit" class="btn btn-primary" id="change-password-submit-btn" style="width: 100%;">
+                    Change Password
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="edit-user-modal" class="modal" style="display: none;">
+        <div class="modal-backdrop" onclick="closeEditUserModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit User</h2>
+                <button class="modal-close" onclick="closeEditUserModal()" aria-label="Close">&times;</button>
+            </div>
+            <form id="edit-user-form" onsubmit="handleEditUser(event)">
+                <input type="hidden" id="edit-user-id" name="id">
+                <div class="form-group">
+                    <label for="edit-user-username">Username</label>
+                    <input type="text" id="edit-user-username" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-user-email">Email</label>
+                    <input type="email" id="edit-user-email" name="email">
+                </div>
+                <div class="form-group">
+                    <label for="edit-user-password">New Password (leave blank to keep current)</label>
+                    <input type="password" id="edit-user-password" name="password" placeholder="Leave blank to keep current">
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="edit-user-is-admin" name="is_admin">
+                        <label for="edit-user-is-admin">Administrator</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="edit-user-is-active" name="is_active" checked>
+                        <label for="edit-user-is-active">Active</label>
+                    </div>
+                </div>
+                <div id="edit-user-error" class="message message-error" style="display: none;"></div>
+                <button type="submit" class="btn btn-primary" id="edit-user-submit-btn" style="width: 100%;">
+                    Save Changes
+                </button>
+            </form>
         </div>
     </div>
 

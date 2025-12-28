@@ -85,7 +85,7 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **Visualization**: Chart.js for charts, D3.js for topology graphs
 - **API Integration**: python-gitlab library
 - **Deployment**: Docker and Docker Compose
-- **Authentication**: HTTP Basic Auth (optional)
+- **Authentication**: HTTP Basic Auth (single-user) or JWT tokens (multi-user)
 - **Security**: Encrypted storage of GitLab tokens using Fernet encryption
 
 ### Project Structure
@@ -200,6 +200,18 @@ AUTH_ENABLED=true
 AUTH_USERNAME=admin
 AUTH_PASSWORD=changeme
 
+# Multi-User Mode (optional)
+# Set to true to enable JWT-based authentication with multiple users
+MULTI_USER_ENABLED=false
+# Initial admin user (only used when multi-user mode is first enabled)
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=changeme
+INITIAL_ADMIN_EMAIL=
+# JWT Settings (auto-generated secret if not provided)
+JWT_SECRET_KEY=your-secret-key-here
+JWT_ALGORITHM=HS256
+JWT_EXPIRATION_HOURS=24
+
 # Logging
 LOG_LEVEL=INFO
 
@@ -220,6 +232,45 @@ The app uses **Instance Access Tokens** to call the GitLab API:
 - Created when you create a mirror
 - Deleted when you delete a mirror
 - Can be manually rotated via the "Rotate Token" button in the mirrors table
+
+### Multi-User Mode
+
+Mirror Maestro supports two authentication modes:
+
+#### Single-User Mode (Default)
+- Uses HTTP Basic Auth with a single username/password
+- Configured via `AUTH_ENABLED`, `AUTH_USERNAME`, `AUTH_PASSWORD`
+- Good for personal use or small teams
+
+#### Multi-User Mode
+- JWT-based authentication with individual user accounts
+- Admin users can create and manage other users
+- Each user has their own login credentials
+- Enabled by setting `MULTI_USER_ENABLED=true`
+
+**Enabling Multi-User Mode:**
+
+1. Set the following environment variables:
+   ```bash
+   MULTI_USER_ENABLED=true
+   INITIAL_ADMIN_USERNAME=admin
+   INITIAL_ADMIN_PASSWORD=your-secure-password
+   JWT_SECRET_KEY=your-jwt-secret-key
+   ```
+
+2. Restart the application. An initial admin user will be created automatically.
+
+3. Log in with the admin credentials and go to the **Settings** tab to manage users.
+
+**User Management (Admin only):**
+- Create new users with username, email (optional), and password
+- Assign admin privileges to users
+- Deactivate users without deleting them
+- Delete users (except yourself and the last admin)
+
+**User Features:**
+- Change your own password via the user menu
+- View your username and role in the top-right user menu
 
 ## Usage Guide
 
