@@ -1,4 +1,5 @@
 import json
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -99,12 +100,28 @@ async def test_import_pair_mirrors_imports_and_skips_duplicates(client, session_
         ],
     }
 
-    resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
-    assert resp.status_code == 200
-    assert resp.json()["imported"] == 1
-    assert resp.json()["skipped"] == 0
+    # Mock GitLab client to simulate actual mirror creation
+    with patch('app.api.mirrors.GitLabClient') as MockClient:
+        mock_client = MagicMock()
+        mock_client.create_project_access_token.return_value = {
+            "id": 123,
+            "token": "test-token-value"
+        }
+        mock_client.create_push_mirror.return_value = {"id": 456}
+        mock_client.create_pull_mirror.return_value = {"id": 789}
+        mock_client.get_project_mirrors.return_value = []
+        MockClient.return_value = mock_client
 
-    # Import again should skip existing
+        resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["imported"] == 1
+        assert resp.json()["skipped"] == 0
+
+        # Verify GitLab client was called
+        assert mock_client.create_project_access_token.called
+        assert mock_client.create_push_mirror.called or mock_client.create_pull_mirror.called
+
+    # Import again should skip existing (no mocking needed for duplicate check)
     resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
     assert resp.status_code == 200
     assert resp.json()["imported"] == 0
@@ -195,10 +212,22 @@ async def test_import_pair_with_all_mirror_settings(client, session_maker):
         ],
     }
 
-    resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
-    assert resp.status_code == 200
-    assert resp.json()["imported"] == 1
-    assert resp.json()["errors"] == []
+    # Mock GitLab client
+    with patch('app.api.mirrors.GitLabClient') as MockClient:
+        mock_client = MagicMock()
+        mock_client.create_project_access_token.return_value = {
+            "id": 123,
+            "token": "test-token-value"
+        }
+        mock_client.create_push_mirror.return_value = {"id": 456}
+        mock_client.create_pull_mirror.return_value = {"id": 789}
+        mock_client.get_project_mirrors.return_value = []
+        MockClient.return_value = mock_client
+
+        resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["imported"] == 1
+        assert resp.json()["errors"] == []
 
     # Verify the mirror was created with all settings
     from sqlalchemy import select
@@ -216,6 +245,9 @@ async def test_import_pair_with_all_mirror_settings(client, session_maker):
         assert mirror.only_mirror_protected_branches is True
         assert mirror.mirror_branch_regex == "^release/.*$"
         assert mirror.enabled is True
+        # Verify GitLab mirror was actually created
+        assert mirror.mirror_id is not None
+        assert mirror.gitlab_token_id is not None
 
 
 @pytest.mark.asyncio
@@ -252,11 +284,23 @@ async def test_import_pair_multiple_mirrors(client, session_maker):
         ],
     }
 
-    resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
-    assert resp.status_code == 200
-    assert resp.json()["imported"] == 3
-    assert resp.json()["skipped"] == 0
-    assert resp.json()["errors"] == []
+    # Mock GitLab client
+    with patch('app.api.mirrors.GitLabClient') as MockClient:
+        mock_client = MagicMock()
+        mock_client.create_project_access_token.return_value = {
+            "id": 123,
+            "token": "test-token-value"
+        }
+        mock_client.create_push_mirror.return_value = {"id": 456}
+        mock_client.create_pull_mirror.return_value = {"id": 789}
+        mock_client.get_project_mirrors.return_value = []
+        MockClient.return_value = mock_client
+
+        resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["imported"] == 3
+        assert resp.json()["skipped"] == 0
+        assert resp.json()["errors"] == []
 
 
 @pytest.mark.asyncio
@@ -281,10 +325,22 @@ async def test_export_import_roundtrip(client, session_maker):
     # Import to pair2 (change pair_id in the payload)
     import_payload = {"pair_id": pair2_id, "mirrors": export_data["mirrors"]}
 
-    import_resp = await client.post(f"/api/export/pair/{pair2_id}", json=import_payload)
-    assert import_resp.status_code == 200
-    assert import_resp.json()["imported"] == 2
-    assert import_resp.json()["skipped"] == 0
+    # Mock GitLab client for import
+    with patch('app.api.mirrors.GitLabClient') as MockClient:
+        mock_client = MagicMock()
+        mock_client.create_project_access_token.return_value = {
+            "id": 123,
+            "token": "test-token-value"
+        }
+        mock_client.create_push_mirror.return_value = {"id": 456}
+        mock_client.create_pull_mirror.return_value = {"id": 789}
+        mock_client.get_project_mirrors.return_value = []
+        MockClient.return_value = mock_client
+
+        import_resp = await client.post(f"/api/export/pair/{pair2_id}", json=import_payload)
+        assert import_resp.status_code == 200
+        assert import_resp.json()["imported"] == 2
+        assert import_resp.json()["skipped"] == 0
 
     # Verify pair2 now has the mirrors
     verify_resp = await client.get(f"/api/export/pair/{pair2_id}")
@@ -359,9 +415,21 @@ async def test_import_mixed_success_and_skips(client, session_maker):
         ],
     }
 
-    resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
-    assert resp.status_code == 200
-    assert resp.json()["imported"] == 2
-    assert resp.json()["skipped"] == 1
-    assert resp.json()["errors"] == []
+    # Mock GitLab client
+    with patch('app.api.mirrors.GitLabClient') as MockClient:
+        mock_client = MagicMock()
+        mock_client.create_project_access_token.return_value = {
+            "id": 123,
+            "token": "test-token-value"
+        }
+        mock_client.create_push_mirror.return_value = {"id": 456}
+        mock_client.create_pull_mirror.return_value = {"id": 789}
+        mock_client.get_project_mirrors.return_value = []
+        MockClient.return_value = mock_client
+
+        resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["imported"] == 2
+        assert resp.json()["skipped"] == 1
+        assert resp.json()["errors"] == []
 
