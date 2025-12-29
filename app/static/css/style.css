@@ -752,6 +752,11 @@ table tbody tr:hover {
     border-radius: var(--radius-sm);
     margin-bottom: 20px;
     border-left: 4px solid;
+    white-space: pre-wrap;
+    font-family: var(--font-mono, 'Monaco', 'Courier New', monospace);
+    font-size: 0.9em;
+    max-height: 400px;
+    overflow-y: auto;
 }
 
 .message-success {
@@ -764,6 +769,12 @@ table tbody tr:hover {
     background: #fce8e6;
     border-color: var(--danger-color);
     color: var(--danger-color);
+}
+
+.message-warning {
+    background: #fff4e6;
+    border-color: var(--warning-color);
+    color: #b87503;
 }
 
 .message-info {
