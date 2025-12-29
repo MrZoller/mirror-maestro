@@ -209,6 +209,36 @@ class GitLabClient:
         except Exception as e:
             _handle_gitlab_error(e, f"Failed to fetch project {project_id}")
 
+    def get_project_by_path(self, project_path: str) -> Dict[str, Any]:
+        """
+        Get a specific project by its path_with_namespace.
+
+        Args:
+            project_path: Full project path including namespace (e.g., 'group/subgroup/project')
+
+        Returns:
+            Dict with project info including 'id' and 'path_with_namespace'
+
+        Raises:
+            GitLabNotFoundError: If project doesn't exist
+            GitLabClientError: For other errors
+        """
+        try:
+            # GitLab API supports getting projects by path (URL-encoded)
+            # python-gitlab handles the encoding automatically
+            p = self.gl.projects.get(project_path)
+            return {
+                "id": p.id,
+                "name": p.name,
+                "path": p.path,
+                "path_with_namespace": p.path_with_namespace,
+                "description": p.description if hasattr(p, "description") else "",
+                "http_url_to_repo": p.http_url_to_repo,
+                "ssh_url_to_repo": p.ssh_url_to_repo,
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to fetch project by path '{project_path}'")
+
     def get_groups(
         self,
         search: Optional[str] = None,
