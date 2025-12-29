@@ -453,10 +453,83 @@ Create and manage mirrors between projects:
 
 ### 4. Import/Export
 
-Bulk manage mirror configurations:
+Bulk manage mirror configurations with portable JSON files.
 
-- **Export**: Download mirror configurations as JSON for backup or sharing
-- **Import**: Upload JSON file to create multiple mirrors at once
+#### How to Use
+
+1. **Select an instance pair** from the Mirrors tab
+2. Click **Export** to download all mirrors for that pair as JSON
+3. Click **Import** to upload a JSON file and create mirrors for the selected pair
+
+#### Export Format
+
+Exports are **portable across environments** (dev/staging/prod):
+
+- **Project paths** (not IDs) - e.g., `group/subgroup/project`
+- **Mirror settings** - All configuration options (overwrite diverged, protected branches, etc.)
+- **Metadata** (informational only) - Source instance, target instance, direction, export timestamp
+
+Example export structure:
+```json
+{
+  "metadata": {
+    "exported_at": "2024-01-15T10:30:00Z",
+    "pair_name": "GitLab.com → Self-hosted",
+    "source_instance_name": "GitLab.com",
+    "source_instance_url": "https://gitlab.com",
+    "target_instance_name": "Self-hosted",
+    "target_instance_url": "https://gitlab.example.com",
+    "mirror_direction": "push",
+    "total_mirrors": 2
+  },
+  "mirrors": [
+    {
+      "source_project_path": "mygroup/project1",
+      "target_project_path": "mirrors/project1",
+      "mirror_overwrite_diverged": false,
+      "only_mirror_protected_branches": true,
+      "enabled": true
+    }
+  ]
+}
+```
+
+#### Import Process
+
+When you import mirrors, Mirror Maestro:
+
+1. **Looks up project IDs** from paths via GitLab API
+2. **Creates project access tokens** in GitLab
+3. **Creates actual mirrors** in GitLab (push or pull)
+4. **Stores mirror records** in the database
+
+The result is **identical to creating mirrors via the UI**.
+
+#### Import Results
+
+After import completes, you'll see a detailed summary:
+
+- **Imported count** - Successfully created mirrors
+- **Skipped count** - Mirrors that already exist
+- **Errors** - Detailed list of failures with specific project paths
+- **Skipped details** - Which mirrors were skipped and why
+
+Example:
+```
+Import complete: 8 imported, 2 skipped
+
+Skipped (2):
+  • [1/10] group/existing → mirror/existing: Already exists in database
+  • [5/10] group/duplicate → mirror/duplicate: Already exists in database
+```
+
+#### Important Notes
+
+- **Select the correct pair** before importing - the import creates mirrors for the currently selected pair
+- **Metadata is ignored** on import - only the `mirrors` array is used
+- **Projects must exist** - Both source and target projects must exist in their respective GitLab instances
+- **Duplicates are skipped** - If a mirror already exists (same source/target paths), it won't be created again
+- **Import continues on errors** - If some mirrors fail, others will still be imported
 
 ### 5. Backup & Restore
 
@@ -624,10 +697,13 @@ AUTH_PASSWORD=your_secure_password
 - Ensure the access token has write permissions
 - Check that the projects are not already being mirrored
 
-**Import Fails**
-- Validate JSON format matches export format
-- Ensure projects exist in the selected instance pair
-- Check for duplicate mirrors
+**Import Fails or Has Errors**
+- **Check the detailed error messages** - The import results show exactly which mirrors failed and why (e.g., `[3/10] group/bad → mirror/bad: Project not found`)
+- **Validate JSON format** - Must have `mirrors` array with `source_project_path` and `target_project_path` fields
+- **Ensure projects exist** - Both source and target projects must exist in their respective GitLab instances
+- **Check project paths** - Must use full paths like `namespace/project` or `group/subgroup/project` (not just project names)
+- **Verify pair selection** - Make sure you have the correct instance pair selected before importing
+- **Check GitLab tokens** - Instance tokens need `api` scope to look up projects and create mirrors
 
 ### Logs
 

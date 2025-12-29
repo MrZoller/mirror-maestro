@@ -341,11 +341,26 @@
                 <div class="flex-between">
                     <h2>Mirrors</h2>
                     <div class="flex">
-                        <button class="btn btn-secondary btn-small" onclick="exportMirrors()">Export</button>
-                        <button class="btn btn-secondary btn-small" onclick="importMirrors()">Import</button>
+                        <button class="btn btn-secondary btn-small" onclick="exportMirrors()" title="Download mirrors for selected pair as JSON">Export</button>
+                        <button class="btn btn-secondary btn-small" onclick="importMirrors()" title="Upload JSON file to create mirrors for selected pair">Import</button>
                     </div>
                 </div>
                 <p class="text-muted">Manage mirrors for your instance pairs.</p>
+
+                <details class="help-section" style="margin: 12px 0; padding: 12px; background: #f9fafb; border-left: 3px solid var(--info-color); border-radius: 4px;">
+                    <summary style="cursor: pointer; font-weight: 500; color: var(--info-color);">💡 Import/Export Help</summary>
+                    <div style="margin-top: 8px; font-size: 0.9em; line-height: 1.5;">
+                        <p><strong>Export:</strong> Downloads all mirrors for the selected pair as a portable JSON file. Uses project paths (not IDs) so exports work across different environments.</p>
+                        <p><strong>Import:</strong> Creates mirrors from a JSON file. The import will:</p>
+                        <ul style="margin: 4px 0 4px 20px;">
+                            <li>Look up project IDs from paths via GitLab API</li>
+                            <li>Create project access tokens in GitLab</li>
+                            <li>Create actual push/pull mirrors in GitLab</li>
+                            <li>Show detailed results (imported, skipped, errors)</li>
+                        </ul>
+                        <p style="margin-top: 8px;"><strong>Important:</strong> Select the correct instance pair before importing. Projects must exist in both GitLab instances.</p>
+                    </div>
+                </details>
 
                 <div class="form-group mt-20">
                     <label for="pair-selector">Select Instance Pair *</label>
