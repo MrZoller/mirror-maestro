@@ -151,8 +151,14 @@ async def test_import_pair_mirrors_imports_and_skips_duplicates(client, session_
 
         resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
         assert resp.status_code == 200
-        assert resp.json()["imported"] == 0
-        assert resp.json()["skipped"] == 1
+        result = resp.json()
+        assert result["imported"] == 0
+        assert result["skipped"] == 1
+        # Verify skipped_details contains the mirror identifier
+        assert "skipped_details" in result
+        assert len(result["skipped_details"]) == 1
+        assert "[1/1]" in result["skipped_details"][0]
+        assert "a/b → c/d" in result["skipped_details"][0]
 
 
 @pytest.mark.asyncio
@@ -292,17 +298,17 @@ async def test_import_pair_multiple_mirrors(client, session_maker):
     payload = {
         "mirrors": [
             {
-                "source_project_path": "project1",
+                "source_project_path": "group/project1",
                 "target_project_path": "mirror/project1",
                 "enabled": True,
             },
             {
-                "source_project_path": "project2",
+                "source_project_path": "group/project2",
                 "target_project_path": "mirror/project2",
                 "enabled": True,
             },
             {
-                "source_project_path": "project3",
+                "source_project_path": "group/project3",
                 "target_project_path": "mirror/project3",
                 "enabled": False,
             },
@@ -316,9 +322,9 @@ async def test_import_pair_multiple_mirrors(client, session_maker):
         # Mock project lookup with different IDs per project
         def get_project_id(path):
             project_ids = {
-                "project1": 1, "mirror/project1": 10,
-                "project2": 2, "mirror/project2": 20,
-                "project3": 3, "mirror/project3": 30
+                "group/project1": 1, "mirror/project1": 10,
+                "group/project2": 2, "mirror/project2": 20,
+                "group/project3": 3, "mirror/project3": 30
             }
             return {"id": project_ids[path], "path_with_namespace": path}
 
@@ -339,9 +345,10 @@ async def test_import_pair_multiple_mirrors(client, session_maker):
 
         resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
         assert resp.status_code == 200
-        assert resp.json()["imported"] == 3
-        assert resp.json()["skipped"] == 0
-        assert resp.json()["errors"] == []
+        result = resp.json()
+        assert result["imported"] == 3
+        assert result["skipped"] == 0
+        assert result["errors"] == []
 
 
 @pytest.mark.asyncio
@@ -351,8 +358,8 @@ async def test_export_import_roundtrip(client, session_maker):
     src_id = await seed_instance(session_maker, name="src")
     tgt_id = await seed_instance(session_maker, name="tgt")
     pair1_id = await seed_pair(session_maker, name="pair1", src_id=src_id, tgt_id=tgt_id)
-    await seed_mirror(session_maker, pair_id=pair1_id, src_path="proj1", tgt_path="mirror1")
-    await seed_mirror(session_maker, pair_id=pair1_id, src_path="proj2", tgt_path="mirror2")
+    await seed_mirror(session_maker, pair_id=pair1_id, src_path="group/proj1", tgt_path="mirror/proj1")
+    await seed_mirror(session_maker, pair_id=pair1_id, src_path="group/proj2", tgt_path="mirror/proj2")
 
     # Export from pair1
     export_resp = await client.get(f"/api/export/pair/{pair1_id}")
@@ -373,8 +380,8 @@ async def test_export_import_roundtrip(client, session_maker):
         # Mock project lookup
         def get_project_id(path):
             project_ids = {
-                "proj1": 1, "mirror1": 10,
-                "proj2": 2, "mirror2": 20
+                "group/proj1": 1, "mirror/proj1": 10,
+                "group/proj2": 2, "mirror/proj2": 20
             }
             return {"id": project_ids.get(path, 999), "path_with_namespace": path}
 
@@ -437,8 +444,8 @@ async def test_import_mixed_success_and_skips(client, session_maker):
     await seed_mirror(
         session_maker,
         pair_id=pair_id,
-        src_path="existing",
-        tgt_path="existing-mirror",
+        src_path="group/existing",
+        tgt_path="mirror/existing",
         src_project_id=100,
         tgt_project_id=200
     )
@@ -447,18 +454,18 @@ async def test_import_mixed_success_and_skips(client, session_maker):
     payload = {
         "mirrors": [
             {
-                "source_project_path": "existing",
-                "target_project_path": "existing-mirror",
+                "source_project_path": "group/existing",
+                "target_project_path": "mirror/existing",
                 "enabled": True,
             },
             {
-                "source_project_path": "new1",
-                "target_project_path": "new1-mirror",
+                "source_project_path": "group/new1",
+                "target_project_path": "mirror/new1",
                 "enabled": True,
             },
             {
-                "source_project_path": "new2",
-                "target_project_path": "new2-mirror",
+                "source_project_path": "group/new2",
+                "target_project_path": "mirror/new2",
                 "enabled": True,
             },
         ],
@@ -471,9 +478,9 @@ async def test_import_mixed_success_and_skips(client, session_maker):
         # Mock project lookup
         def get_project_id(path):
             project_ids = {
-                "existing": 100, "existing-mirror": 200,
-                "new1": 10, "new1-mirror": 20,
-                "new2": 30, "new2-mirror": 40
+                "group/existing": 100, "mirror/existing": 200,
+                "group/new1": 10, "mirror/new1": 20,
+                "group/new2": 30, "mirror/new2": 40
             }
             return {"id": project_ids[path], "path_with_namespace": path}
 
@@ -494,7 +501,14 @@ async def test_import_mixed_success_and_skips(client, session_maker):
 
         resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
         assert resp.status_code == 200
-        assert resp.json()["imported"] == 2
-        assert resp.json()["skipped"] == 1
-        assert resp.json()["errors"] == []
+        result = resp.json()
+        assert result["imported"] == 2
+        assert result["skipped"] == 1
+        assert result["errors"] == []
+        # Verify skipped_details contains the mirror identifier
+        assert "skipped_details" in result
+        assert len(result["skipped_details"]) == 1
+        assert "[1/3]" in result["skipped_details"][0]
+        assert "group/existing → mirror/existing" in result["skipped_details"][0]
+        assert "Already exists" in result["skipped_details"][0]
 
