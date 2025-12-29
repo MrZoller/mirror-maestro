@@ -2348,7 +2348,24 @@ async function importMirrors() {
                 body: JSON.stringify(data)
             });
 
-            showMessage(`Import complete: ${result.imported} imported, ${result.skipped} skipped`, 'success');
+            // Build detailed message
+            let message = `Import complete: ${result.imported} imported, ${result.skipped} skipped`;
+
+            // Add errors if any
+            if (result.errors && result.errors.length > 0) {
+                message += `\n\nErrors (${result.errors.length}):\n` + result.errors.map(e => `  • ${e}`).join('\n');
+            }
+
+            // Add skipped details if any
+            if (result.skipped_details && result.skipped_details.length > 0) {
+                message += `\n\nSkipped (${result.skipped_details.length}):\n` + result.skipped_details.map(s => `  • ${s}`).join('\n');
+            }
+
+            // Show as error if there were errors, warning if only skips, success if all imported
+            const messageType = result.errors && result.errors.length > 0 ? 'error' :
+                                result.skipped > 0 ? 'warning' : 'success';
+
+            showMessage(message, messageType);
             await loadMirrors();
         } catch (error) {
             console.error('Failed to import mirrors:', error);
