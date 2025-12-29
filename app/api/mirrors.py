@@ -413,54 +413,51 @@ async def list_mirrors(
     return out
 
 
-@router.post("", response_model=MirrorResponse)
-async def create_mirror(
-    mirror: MirrorCreate,
-    db: AsyncSession = Depends(get_db),
-    _: str = Depends(verify_credentials)
-):
-    """Create a new mirror with automatic project access token."""
-    # Get the instance pair
-    pair_result = await db.execute(
-        select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
-    )
-    pair = pair_result.scalar_one_or_none()
-    if not pair:
-        raise HTTPException(status_code=404, detail="Instance pair not found")
+async def _create_mirror_internal(
+    db: AsyncSession,
+    pair: InstancePair,
+    source_instance: GitLabInstance,
+    target_instance: GitLabInstance,
+    mirror_data: MirrorCreate,
+    skip_duplicate_check: bool = False
+) -> Mirror:
+    """
+    Internal helper to create a mirror with all GitLab API calls and token management.
 
-    # Get source and target instances
-    source_result = await db.execute(
-        select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id)
-    )
-    source_instance = source_result.scalar_one_or_none()
+    Args:
+        db: Database session
+        pair: Instance pair
+        source_instance: Source GitLab instance
+        target_instance: Target GitLab instance
+        mirror_data: Mirror configuration data
+        skip_duplicate_check: If True, skip duplicate checking (for imports that already checked)
 
-    target_result = await db.execute(
-        select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id)
-    )
-    target_instance = target_result.scalar_one_or_none()
+    Returns:
+        Created Mirror object
 
-    if not source_instance or not target_instance:
-        raise HTTPException(status_code=404, detail="Source or target instance not found")
-
+    Raises:
+        HTTPException: On any error during creation
+    """
     # Check for duplicate mirror (same pair + source + target projects)
-    duplicate_check = await db.execute(
-        select(Mirror).where(
-            Mirror.instance_pair_id == mirror.instance_pair_id,
-            Mirror.source_project_id == mirror.source_project_id,
-            Mirror.target_project_id == mirror.target_project_id
+    if not skip_duplicate_check:
+        duplicate_check = await db.execute(
+            select(Mirror).where(
+                Mirror.instance_pair_id == mirror_data.instance_pair_id,
+                Mirror.source_project_id == mirror_data.source_project_id,
+                Mirror.target_project_id == mirror_data.target_project_id
+            )
         )
-    )
-    existing_mirror = duplicate_check.scalar_one_or_none()
-    if existing_mirror:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": f"Mirror already exists for this project pair",
-                "existing_mirror_id": existing_mirror.id,
-                "source_project": mirror.source_project_path,
-                "target_project": mirror.target_project_path
-            }
-        )
+        existing_mirror = duplicate_check.scalar_one_or_none()
+        if existing_mirror:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": f"Mirror already exists for this project pair",
+                    "existing_mirror_id": existing_mirror.id,
+                    "source_project": mirror_data.source_project_path,
+                    "target_project": mirror_data.target_project_path
+                }
+            )
 
     # Direction comes from the instance pair (not overridable per-mirror)
     direction = pair.mirror_direction
@@ -473,23 +470,23 @@ async def create_mirror(
         )
 
     overwrite_diverged = (
-        mirror.mirror_overwrite_diverged
-        if mirror.mirror_overwrite_diverged is not None
+        mirror_data.mirror_overwrite_diverged
+        if mirror_data.mirror_overwrite_diverged is not None
         else pair.mirror_overwrite_diverged
     )
     trigger_builds = (
-        mirror.mirror_trigger_builds
-        if mirror.mirror_trigger_builds is not None
+        mirror_data.mirror_trigger_builds
+        if mirror_data.mirror_trigger_builds is not None
         else pair.mirror_trigger_builds
     )
     only_protected = (
-        mirror.only_mirror_protected_branches
-        if mirror.only_mirror_protected_branches is not None
+        mirror_data.only_mirror_protected_branches
+        if mirror_data.only_mirror_protected_branches is not None
         else pair.only_mirror_protected_branches
     )
     branch_regex = (
-        mirror.mirror_branch_regex
-        if mirror.mirror_branch_regex is not None
+        mirror_data.mirror_branch_regex
+        if mirror_data.mirror_branch_regex is not None
         else pair.mirror_branch_regex
     )
 
@@ -498,13 +495,13 @@ async def create_mirror(
     # Pull: token on source (allows reading from it)
     if direction == "push":
         token_instance = target_instance
-        token_project_id = mirror.target_project_id
-        token_project_path = mirror.target_project_path
+        token_project_id = mirror_data.target_project_id
+        token_project_path = mirror_data.target_project_path
         token_scopes = ["write_repository"]
     else:
         token_instance = source_instance
-        token_project_id = mirror.source_project_id
-        token_project_path = mirror.source_project_path
+        token_project_id = mirror_data.source_project_id
+        token_project_path = mirror_data.source_project_path
         token_scopes = ["read_repository"]
 
     # Calculate token expiration (1 year from now)
@@ -556,9 +553,9 @@ async def create_mirror(
             # For push mirrors, configure on source to push to target
             client = GitLabClient(source_instance.url, source_instance.encrypted_token)
             result = client.create_push_mirror(
-                mirror.source_project_id,
+                mirror_data.source_project_id,
                 remote_url,
-                enabled=mirror.enabled,
+                enabled=mirror_data.enabled,
                 keep_divergent_refs=not overwrite_diverged,
                 only_protected_branches=only_protected,
             )
@@ -568,7 +565,7 @@ async def create_mirror(
             client = GitLabClient(target_instance.url, target_instance.encrypted_token)
 
             # GitLab effectively supports only one pull mirror per project.
-            existing = client.get_project_mirrors(mirror.target_project_id)
+            existing = client.get_project_mirrors(mirror_data.target_project_id)
             existing_pull = [m for m in (existing or []) if str(m.get("mirror_direction") or "").lower() == "pull"]
             if existing_pull:
                 # Cleanup the token we just created
@@ -590,9 +587,9 @@ async def create_mirror(
                 )
 
             result = client.create_pull_mirror(
-                mirror.target_project_id,
+                mirror_data.target_project_id,
                 remote_url,
-                enabled=mirror.enabled,
+                enabled=mirror_data.enabled,
                 only_protected_branches=only_protected,
                 keep_divergent_refs=not overwrite_diverged,
                 trigger_builds=trigger_builds,
@@ -618,18 +615,18 @@ async def create_mirror(
     # Create the mirror record in database
     # CRITICAL: If DB commit fails, we must clean up the GitLab mirror and token
     db_mirror = Mirror(
-        instance_pair_id=mirror.instance_pair_id,
-        source_project_id=mirror.source_project_id,
-        source_project_path=mirror.source_project_path,
-        target_project_id=mirror.target_project_id,
-        target_project_path=mirror.target_project_path,
+        instance_pair_id=mirror_data.instance_pair_id,
+        source_project_id=mirror_data.source_project_id,
+        source_project_path=mirror_data.source_project_path,
+        target_project_id=mirror_data.target_project_id,
+        target_project_path=mirror_data.target_project_path,
         # Direction is determined by pair, not stored on mirror
-        mirror_overwrite_diverged=mirror.mirror_overwrite_diverged,
-        mirror_trigger_builds=mirror.mirror_trigger_builds,
-        only_mirror_protected_branches=mirror.only_mirror_protected_branches,
-        mirror_branch_regex=mirror.mirror_branch_regex,
+        mirror_overwrite_diverged=mirror_data.mirror_overwrite_diverged,
+        mirror_trigger_builds=mirror_data.mirror_trigger_builds,
+        only_mirror_protected_branches=mirror_data.only_mirror_protected_branches,
+        mirror_branch_regex=mirror_data.mirror_branch_regex,
         mirror_id=gitlab_mirror_id,
-        enabled=mirror.enabled,
+        enabled=mirror_data.enabled,
         last_update_status="pending",
         # Token fields
         encrypted_mirror_token=encrypted_token,
@@ -653,7 +650,7 @@ async def create_mirror(
         if gitlab_mirror_id:
             try:
                 cleanup_instance = source_instance if direction == "push" else target_instance
-                cleanup_project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
+                cleanup_project_id = mirror_data.source_project_id if direction == "push" else mirror_data.target_project_id
                 cleanup_client = GitLabClient(cleanup_instance.url, cleanup_instance.encrypted_token)
                 cleanup_client.delete_mirror(cleanup_project_id, gitlab_mirror_id)
                 logging.info(f"Successfully cleaned up orphaned GitLab mirror {gitlab_mirror_id}")
@@ -673,6 +670,72 @@ async def create_mirror(
             status_code=500,
             detail="Failed to save mirror to database. GitLab resources have been cleaned up."
         )
+
+    # Return the created mirror object (not a response model)
+    return db_mirror
+
+
+@router.post("", response_model=MirrorResponse)
+async def create_mirror(
+    mirror: MirrorCreate,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials)
+):
+    """Create a new mirror with automatic project access token."""
+    # Get the instance pair
+    pair_result = await db.execute(
+        select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+    )
+    pair = pair_result.scalar_one_or_none()
+    if not pair:
+        raise HTTPException(status_code=404, detail="Instance pair not found")
+
+    # Get source and target instances
+    source_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id)
+    )
+    source_instance = source_result.scalar_one_or_none()
+
+    target_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id)
+    )
+    target_instance = target_result.scalar_one_or_none()
+
+    if not source_instance or not target_instance:
+        raise HTTPException(status_code=404, detail="Source or target instance not found")
+
+    # Call the internal helper to do the actual work
+    db_mirror = await _create_mirror_internal(
+        db=db,
+        pair=pair,
+        source_instance=source_instance,
+        target_instance=target_instance,
+        mirror_data=mirror,
+        skip_duplicate_check=False
+    )
+
+    # Get direction for response
+    direction = pair.mirror_direction
+    overwrite_diverged = (
+        mirror.mirror_overwrite_diverged
+        if mirror.mirror_overwrite_diverged is not None
+        else pair.mirror_overwrite_diverged
+    )
+    trigger_builds = (
+        mirror.mirror_trigger_builds
+        if mirror.mirror_trigger_builds is not None
+        else pair.mirror_trigger_builds
+    )
+    only_protected = (
+        mirror.only_mirror_protected_branches
+        if mirror.only_mirror_protected_branches is not None
+        else pair.only_mirror_protected_branches
+    )
+    branch_regex = (
+        mirror.mirror_branch_regex
+        if mirror.mirror_branch_regex is not None
+        else pair.mirror_branch_regex
+    )
 
     return MirrorResponse(
         id=db_mirror.id,
