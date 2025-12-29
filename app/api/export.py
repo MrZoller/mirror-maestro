@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.models import Mirror, InstancePair
+from app.models import Mirror, InstancePair, GitLabInstance
 from app.core.auth import verify_credentials
+from app.api.mirrors import _create_mirror_internal, MirrorCreate
 
 
 def _safe_download_filename(name: str) -> str:
@@ -116,8 +117,12 @@ async def import_pair_mirrors(
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
-    """Import mirrors for a specific instance pair from JSON."""
-    # Verify pair exists
+    """
+    Import mirrors for a specific instance pair from JSON.
+
+    This creates actual mirrors in GitLab with tokens, exactly like creating via the UI.
+    """
+    # Verify pair exists and get instances
     pair_result = await db.execute(
         select(InstancePair).where(InstancePair.id == pair_id)
     )
@@ -126,12 +131,26 @@ async def import_pair_mirrors(
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
 
+    # Get source and target instances
+    source_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id)
+    )
+    source_instance = source_result.scalar_one_or_none()
+
+    target_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id)
+    )
+    target_instance = target_result.scalar_one_or_none()
+
+    if not source_instance or not target_instance:
+        raise HTTPException(status_code=404, detail="Source or target instance not found")
+
     imported_count = 0
     skipped_count = 0
     errors = []
 
     for mirror_data in import_data.mirrors:
-        # Check if mirror already exists
+        # Check if mirror already exists (by source/target project paths)
         existing_result = await db.execute(
             select(Mirror).where(
                 Mirror.instance_pair_id == pair_id,
@@ -146,8 +165,8 @@ async def import_pair_mirrors(
             continue
 
         try:
-            # Create new mirror (direction is determined by pair, not stored per-mirror)
-            db_mirror = Mirror(
+            # Convert MirrorExport to MirrorCreate
+            mirror_create = MirrorCreate(
                 instance_pair_id=pair_id,
                 source_project_id=mirror_data.source_project_id,
                 source_project_path=mirror_data.source_project_path,
@@ -157,16 +176,30 @@ async def import_pair_mirrors(
                 mirror_trigger_builds=mirror_data.mirror_trigger_builds,
                 only_mirror_protected_branches=mirror_data.only_mirror_protected_branches,
                 mirror_branch_regex=mirror_data.mirror_branch_regex,
-                enabled=mirror_data.enabled,
-                last_update_status="pending"
+                enabled=mirror_data.enabled
             )
-            db.add(db_mirror)
-            # Commit each mirror individually to ensure partial imports work correctly
-            # This way, if one mirror fails, previously imported mirrors are still persisted
-            await db.commit()
+
+            # Create the mirror using the same logic as the create endpoint
+            # This will:
+            # 1. Create project access token in GitLab
+            # 2. Create the actual mirror in GitLab
+            # 3. Store the mirror record in the database
+            await _create_mirror_internal(
+                db=db,
+                pair=pair,
+                source_instance=source_instance,
+                target_instance=target_instance,
+                mirror_data=mirror_create,
+                skip_duplicate_check=True  # We already checked above
+            )
             imported_count += 1
+
+        except HTTPException as http_exc:
+            # HTTP exceptions from the helper (like 409 conflicts)
+            await db.rollback()
+            errors.append(f"Failed to import {mirror_data.source_project_path}: {http_exc.detail}")
         except Exception as e:
-            # Rollback the failed mirror and continue with others
+            # Any other error
             await db.rollback()
             errors.append(f"Failed to import {mirror_data.source_project_path}: {str(e)}")
 
