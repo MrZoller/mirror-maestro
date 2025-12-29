@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.models import Mirror, InstancePair, GitLabInstance
 from app.core.auth import verify_credentials
+from app.core.gitlab_client import GitLabClient
 from app.api.mirrors import _create_mirror_internal, MirrorCreate
 
 
@@ -195,15 +196,18 @@ async def import_pair_mirrors(
         raise HTTPException(status_code=404, detail="Source or target instance not found")
 
     # Create GitLab clients for looking up project IDs
-    from app.core.gitlab_client import GitLabClient
     source_client = GitLabClient(source_instance.url, source_instance.encrypted_token)
     target_client = GitLabClient(target_instance.url, target_instance.encrypted_token)
 
     imported_count = 0
     skipped_count = 0
     errors = []
+    skipped = []  # Track which mirrors were skipped with details
+    total_mirrors = len(import_data.mirrors)
 
-    for mirror_data in import_data.mirrors:
+    for idx, mirror_data in enumerate(import_data.mirrors, start=1):
+        mirror_identifier = f"[{idx}/{total_mirrors}] {mirror_data.source_project_path} → {mirror_data.target_project_path}"
+
         # Check if mirror already exists (by source/target project paths)
         existing_result = await db.execute(
             select(Mirror).where(
@@ -216,6 +220,7 @@ async def import_pair_mirrors(
 
         if existing:
             skipped_count += 1
+            skipped.append(f"{mirror_identifier}: Already exists in database")
             continue
 
         try:
@@ -262,17 +267,22 @@ async def import_pair_mirrors(
             imported_count += 1
 
         except HTTPException as http_exc:
-            # HTTP exceptions from the helper (like 409 conflicts)
+            # HTTP exceptions from the helper (like 409 conflicts for existing pull mirrors)
             await db.rollback()
-            errors.append(f"Failed to import {mirror_data.source_project_path}: {http_exc.detail}")
+            # Extract the detail - could be a dict with 'message' key or a string
+            detail_msg = http_exc.detail
+            if isinstance(detail_msg, dict):
+                detail_msg = detail_msg.get("message", str(detail_msg))
+            errors.append(f"{mirror_identifier}: {detail_msg}")
         except Exception as e:
             # Any other error
             await db.rollback()
-            errors.append(f"Failed to import {mirror_data.source_project_path}: {str(e)}")
+            errors.append(f"{mirror_identifier}: {str(e)}")
 
     return {
         "status": "completed",
         "imported": imported_count,
         "skipped": skipped_count,
+        "skipped_details": skipped,
         "errors": errors
     }
