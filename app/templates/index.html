@@ -345,22 +345,7 @@
                         <button class="btn btn-secondary btn-small" onclick="importMirrors()" title="Upload JSON file to create mirrors for selected pair">Import</button>
                     </div>
                 </div>
-                <p class="text-muted">Manage mirrors for your instance pairs.</p>
-
-                <details class="help-section" style="margin: 12px 0; padding: 12px; background: #f9fafb; border-left: 3px solid var(--info-color); border-radius: 4px;">
-                    <summary style="cursor: pointer; font-weight: 500; color: var(--info-color);">💡 Import/Export Help</summary>
-                    <div style="margin-top: 8px; font-size: 0.9em; line-height: 1.5;">
-                        <p><strong>Export:</strong> Downloads all mirrors for the selected pair as a portable JSON file. Uses project paths (not IDs) so exports work across different environments.</p>
-                        <p><strong>Import:</strong> Creates mirrors from a JSON file. The import will:</p>
-                        <ul style="margin: 4px 0 4px 20px;">
-                            <li>Look up project IDs from paths via GitLab API</li>
-                            <li>Create project access tokens in GitLab</li>
-                            <li>Create actual push/pull mirrors in GitLab</li>
-                            <li>Show detailed results (imported, skipped, errors)</li>
-                        </ul>
-                        <p style="margin-top: 8px;"><strong>Important:</strong> Select the correct instance pair before importing. Projects must exist in both GitLab instances.</p>
-                    </div>
-                </details>
+                <p class="text-muted">Manage mirrors for your instance pairs. <a href="#" onclick="switchTab('help'); return false;" style="color: var(--info-color);">See Import/Export help →</a></p>
 
                 <div class="form-group mt-20">
                     <label for="pair-selector">Select Instance Pair *</label>
@@ -1013,6 +998,78 @@
                     <li><strong>Yellow</strong> - Some mirrors have warnings or are stale</li>
                     <li><strong>Red</strong> - Mirrors have errors that need attention</li>
                 </ul>
+            </div>
+
+            <!-- Import/Export -->
+            <div class="card">
+                <h2>Import/Export</h2>
+                <p class="text-muted">Bulk manage mirror configurations with portable JSON files.</p>
+
+                <h3>How to Use</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a> tab</li>
+                    <li>Select an instance pair from the dropdown</li>
+                    <li>Click <strong>Export</strong> to download all mirrors for that pair as JSON</li>
+                    <li>Click <strong>Import</strong> to upload a JSON file and create mirrors</li>
+                </ol>
+
+                <h3>Export Format</h3>
+                <p>Exports are <strong>portable across environments</strong> (dev/staging/prod):</p>
+                <ul>
+                    <li><strong>Project paths</strong> (not IDs) - e.g., <code>group/subgroup/project</code></li>
+                    <li><strong>Mirror settings</strong> - All configuration options (overwrite diverged, protected branches, etc.)</li>
+                    <li><strong>Metadata</strong> (informational only) - Source/target instances, direction, export timestamp</li>
+                </ul>
+
+                <h3>What Happens During Import</h3>
+                <p>When you import a JSON file, Mirror Maestro performs these steps:</p>
+                <ol>
+                    <li><strong>Looks up project IDs</strong> from paths via GitLab API</li>
+                    <li><strong>Creates project access tokens</strong> in GitLab</li>
+                    <li><strong>Creates actual mirrors</strong> in GitLab (push or pull)</li>
+                    <li><strong>Stores mirror records</strong> in the database</li>
+                </ol>
+                <p class="alert alert-info"><strong>Note:</strong> The result is <em>identical to creating mirrors via the UI</em>. This is not just a database import - it creates real, functional GitLab mirrors with authentication tokens.</p>
+
+                <h3>Import Results</h3>
+                <p>After import completes, you'll see a detailed summary:</p>
+                <ul>
+                    <li><strong>Imported count</strong> - Successfully created mirrors</li>
+                    <li><strong>Skipped count</strong> - Mirrors that already exist</li>
+                    <li><strong>Skipped details</strong> - Which mirrors were skipped and why (e.g., <code>[1/10] group/existing → mirror/existing: Already exists in database</code>)</li>
+                    <li><strong>Errors</strong> - Detailed list of failures with specific project paths (e.g., <code>[3/10] bad/project → mirror/bad: Project not found</code>)</li>
+                </ul>
+
+                <h3>Important Notes</h3>
+                <ul>
+                    <li><strong>Select the correct pair</strong> - Import creates mirrors for the currently selected pair, not the pair from the export file</li>
+                    <li><strong>Metadata is ignored</strong> - Only the <code>mirrors</code> array is used during import</li>
+                    <li><strong>Projects must exist</strong> - Both source and target projects must already exist in their respective GitLab instances</li>
+                    <li><strong>Duplicates are skipped</strong> - If a mirror already exists (same source/target paths), it won't be created again</li>
+                    <li><strong>Import continues on errors</strong> - If some mirrors fail, others will still be imported</li>
+                    <li><strong>Use full project paths</strong> - Paths must be in format <code>namespace/project</code> or <code>group/subgroup/project</code> (not just project names)</li>
+                </ul>
+
+                <h3>Example Export Structure</h3>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>{
+  "metadata": {
+    "exported_at": "2024-01-15T10:30:00Z",
+    "pair_name": "GitLab.com → Self-hosted",
+    "source_instance_name": "GitLab.com",
+    "target_instance_name": "Self-hosted",
+    "mirror_direction": "push",
+    "total_mirrors": 2
+  },
+  "mirrors": [
+    {
+      "source_project_path": "mygroup/project1",
+      "target_project_path": "mirrors/project1",
+      "mirror_overwrite_diverged": false,
+      "only_mirror_protected_branches": true,
+      "enabled": true
+    }
+  ]
+}</code></pre>
             </div>
 
             <!-- Backup & Restore -->
