@@ -237,6 +237,25 @@ class MirrorResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MirrorListResponse(BaseModel):
+    """Paginated mirror list response."""
+    mirrors: List[MirrorResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class GroupSummary(BaseModel):
+    """Summary statistics for a group path."""
+    group_path: str
+    mirror_count: int
+    enabled_count: int
+    disabled_count: int
+    failed_count: int
+    level: int  # Nesting level (0 = top-level, 1 = first subgroup, etc.)
+
+
 def _compute_token_status(expires_at: datetime | None) -> str:
     """Compute token status based on expiration date."""
     if expires_at is None:
@@ -303,18 +322,23 @@ async def _resolve_effective_settings(
     }
 
 
-@router.get("", response_model=List[MirrorResponse])
+@router.get("", response_model=MirrorListResponse)
 async def list_mirrors(
     instance_pair_id: int | None = None,
     status: str | None = None,
     enabled: bool | None = None,
     search: str | None = None,
     token_status: str | None = None,
+    group_path: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    order_by: str = "created_at",
+    order_dir: str = "desc",
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
     """
-    List all mirrors with optional filtering.
+    List all mirrors with optional filtering and pagination.
 
     Query parameters:
     - instance_pair_id: Filter by instance pair ID
@@ -322,7 +346,17 @@ async def list_mirrors(
     - enabled: Filter by enabled status (true/false)
     - search: Search in source and target project paths (case-insensitive)
     - token_status: Filter by token status ('active', 'expiring_soon', 'expired', 'none')
+    - group_path: Filter by group path prefix (e.g., 'group1/subgroup1')
+    - page: Page number (default: 1)
+    - page_size: Items per page (default: 50, max: 200)
+    - order_by: Field to order by (created_at, updated_at, source_project_path, target_project_path, last_update_status)
+    - order_dir: Order direction (asc, desc)
     """
+    # Validate and limit page_size
+    page = max(1, page)
+    page_size = max(1, min(200, page_size))
+
+    # Build base query
     query = select(Mirror)
 
     # Apply filters
@@ -342,15 +376,55 @@ async def list_mirrors(
             (Mirror.target_project_path.ilike(search_term))
         )
 
+    if group_path is not None and group_path.strip():
+        # Filter by group path prefix (e.g., "group1/subgroup1" matches "group1/subgroup1/project")
+        group_prefix = f"{group_path.strip()}/%"
+        query = query.where(
+            (Mirror.source_project_path.ilike(group_prefix)) |
+            (Mirror.target_project_path.ilike(group_prefix))
+        )
+
+    # Count total before pagination
+    from sqlalchemy import func, select as sql_select
+    count_query = sql_select(func.count()).select_from(query.alias())
+    count_result = await db.execute(count_query)
+    total_count = count_result.scalar() or 0
+
+    # Apply ordering
+    order_column = {
+        'created_at': Mirror.created_at,
+        'updated_at': Mirror.updated_at,
+        'source_project_path': Mirror.source_project_path,
+        'target_project_path': Mirror.target_project_path,
+        'last_update_status': Mirror.last_update_status,
+    }.get(order_by, Mirror.created_at)
+
+    if order_dir.lower() == 'asc':
+        query = query.order_by(order_column.asc())
+    else:
+        query = query.order_by(order_column.desc())
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
+
     result = await db.execute(query)
     mirrors = result.scalars().all()
 
     # Token status filter is applied post-query since it's computed
     if token_status is not None:
         mirrors = [m for m in mirrors if _compute_token_status(m.mirror_token_expires_at) == token_status]
+        # Adjust total count for post-query filter
+        total_count = len(mirrors)
 
     if not mirrors:
-        return []
+        return MirrorListResponse(
+            mirrors=[],
+            total=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=0
+        )
 
     # Bulk-load all pairs and instances to avoid N+1 queries
     # Get unique pair IDs from mirrors
@@ -410,7 +484,92 @@ async def list_mirrors(
             )
         )
 
-    return out
+    # Calculate pagination metadata
+    total_pages = (total_count + page_size - 1) // page_size
+
+    return MirrorListResponse(
+        mirrors=out,
+        total=total_count,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages
+    )
+
+
+@router.get("/groups", response_model=List[GroupSummary])
+async def list_mirror_groups(
+    instance_pair_id: int | None = None,
+    max_level: int = 2,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials)
+):
+    """
+    Get summary statistics of mirrors grouped by path hierarchy.
+
+    Returns group paths at various nesting levels with mirror counts and status.
+    This is useful for navigating large sets of mirrors organized in nested groups.
+
+    Query parameters:
+    - instance_pair_id: Filter by instance pair ID
+    - max_level: Maximum nesting level to return (0=top-level only, 1=include first subgroup, etc.)
+    """
+    # Build query to get all mirrors
+    query = select(Mirror)
+
+    if instance_pair_id is not None:
+        query = query.where(Mirror.instance_pair_id == instance_pair_id)
+
+    result = await db.execute(query)
+    mirrors = result.scalars().all()
+
+    if not mirrors:
+        return []
+
+    # Build group statistics from paths
+    from collections import defaultdict
+    group_stats = defaultdict(lambda: {
+        'count': 0,
+        'enabled': 0,
+        'disabled': 0,
+        'failed': 0,
+        'level': 0
+    })
+
+    for mirror in mirrors:
+        # Process both source and target paths
+        for path in [mirror.source_project_path, mirror.target_project_path]:
+            # Split path into parts (e.g., "group1/subgroup1/project" -> ["group1", "subgroup1", "project"])
+            parts = path.split('/')
+
+            # Generate all parent group paths up to max_level
+            for level in range(min(len(parts) - 1, max_level + 1)):  # -1 to exclude project name
+                group_path = '/'.join(parts[:level + 1])
+                stats = group_stats[group_path]
+                stats['count'] += 1
+                stats['level'] = level
+
+                if mirror.enabled:
+                    stats['enabled'] += 1
+                else:
+                    stats['disabled'] += 1
+
+                if mirror.last_update_status == 'failed':
+                    stats['failed'] += 1
+
+    # Convert to response models
+    summaries = [
+        GroupSummary(
+            group_path=group_path,
+            mirror_count=stats['count'],
+            enabled_count=stats['enabled'],
+            disabled_count=stats['disabled'],
+            failed_count=stats['failed'],
+            level=stats['level']
+        )
+        for group_path, stats in sorted(group_stats.items())
+    ]
+
+    return summaries
 
 
 async def _create_mirror_internal(
