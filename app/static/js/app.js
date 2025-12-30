@@ -1947,7 +1947,7 @@ function renderMirrors(mirrors) {
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
                         <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
-                        <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate</button>
+                        <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate Token</button>
                         <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
                     </div>
                 </td>
