@@ -885,6 +885,40 @@
                     <li><strong>Pair 2:</strong> Instance B → Instance A (e.g., "Staging to Production")</li>
                 </ul>
                 <p>Each pair can have independent settings (direction, branch filters, overwrite policies, etc.). The <a href="#" onclick="switchTab('topology-tab'); return false;">Topology</a> view will display both directions as separate links between the instances, making bidirectional relationships easy to visualize.</p>
+
+                <h3>Batch Mirror Sync</h3>
+                <p>The "Sync All" button in the Instance Pairs table allows you to trigger sync for all enabled mirrors in a pair with a single click. This is particularly useful when:</p>
+                <ul>
+                    <li><strong>Resuming after outages</strong> - When a GitLab instance goes down temporarily, all mirrors may stop syncing and need manual resumption</li>
+                    <li><strong>Post-maintenance sync</strong> - After scheduled maintenance or upgrades</li>
+                    <li><strong>Large-scale updates</strong> - When you need to sync hundreds of mirrors at once</li>
+                </ul>
+
+                <h4>How Batch Sync Works</h4>
+                <p>When you click "Sync All", Mirror Maestro:</p>
+                <ol>
+                    <li>Fetches all enabled mirrors for the selected pair</li>
+                    <li>Sequentially triggers each mirror's sync operation</li>
+                    <li>Applies rate limiting between operations (default: 200ms delay)</li>
+                    <li>Continues processing even if some mirrors fail</li>
+                    <li>Returns a detailed summary with success/failure counts and timing metrics</li>
+                </ol>
+
+                <h4>Rate Limiting Protection</h4>
+                <p>To prevent overwhelming GitLab instances with too many API requests, batch operations use intelligent rate limiting:</p>
+                <ul>
+                    <li><strong>Configurable delay</strong> - Default 200ms between operations (~300 requests/minute, well under GitLab's typical 600/min limit)</li>
+                    <li><strong>Automatic retry</strong> - If GitLab returns a 429 "Too Many Requests" error, operations are retried with exponential backoff</li>
+                    <li><strong>Progress tracking</strong> - Real-time progress with estimated completion time</li>
+                    <li><strong>Detailed reporting</strong> - Shows which mirrors succeeded, failed, or were skipped</li>
+                </ul>
+
+                <h4>Example: Syncing 100 Mirrors</h4>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>With default settings (200ms delay):
+- Total time: ~20 seconds
+- Rate: ~300 operations/minute
+- Well under GitLab's API limits
+- Safe for large mirror sets</code></pre>
             </div>
 
             <!-- Authentication & Tokens -->
@@ -1022,14 +1056,25 @@
                 </ul>
 
                 <h3>What Happens During Import</h3>
-                <p>When you import a JSON file, Mirror Maestro performs these steps:</p>
+                <p>When you import a JSON file, Mirror Maestro performs these steps for each mirror:</p>
                 <ol>
                     <li><strong>Looks up project IDs</strong> from paths via GitLab API</li>
                     <li><strong>Creates project access tokens</strong> in GitLab</li>
                     <li><strong>Creates actual mirrors</strong> in GitLab (push or pull)</li>
                     <li><strong>Stores mirror records</strong> in the database</li>
+                    <li><strong>Applies rate limiting</strong> - Waits 200ms before processing the next mirror</li>
                 </ol>
                 <p class="alert alert-info"><strong>Note:</strong> The result is <em>identical to creating mirrors via the UI</em>. This is not just a database import - it creates real, functional GitLab mirrors with authentication tokens.</p>
+
+                <h4>Import Rate Limiting</h4>
+                <p>Importing many mirrors can generate hundreds of GitLab API requests (each mirror requires ~4 API calls). To prevent overwhelming your GitLab instances:</p>
+                <ul>
+                    <li><strong>Sequential processing</strong> - Mirrors are created one at a time, not in parallel</li>
+                    <li><strong>Automatic delays</strong> - 200ms delay between each mirror (configurable)</li>
+                    <li><strong>Retry logic</strong> - Automatic retry with exponential backoff on rate limit errors</li>
+                    <li><strong>Progress metrics</strong> - Import results include duration and operations/second</li>
+                </ul>
+                <p><strong>Example:</strong> Importing 100 mirrors takes approximately 40-60 seconds with default settings, processing at a safe rate of ~200-300 API requests/minute.</p>
 
                 <h3>Import Results</h3>
                 <p>After import completes, you'll see a detailed summary:</p>
