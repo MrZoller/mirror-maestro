@@ -72,8 +72,10 @@ async def test_instances_delete_cascades_pairs_mirrors_group_settings_and_tokens
     """
     Deleting a GitLab instance should also delete any associated instance pairs and mirrors
     (and related group defaults), plus group access tokens for that instance.
+    This now includes GitLab cleanup with rate limiting before database deletion.
     """
     from app.api import instances as inst_mod
+    from unittest.mock import AsyncMock, patch
 
     monkeypatch.setattr(inst_mod, "GitLabClient", FakeGitLabClient)
     FakeGitLabClient.test_ok = True
@@ -121,10 +123,17 @@ async def test_instances_delete_cascades_pairs_mirrors_group_settings_and_tokens
         s.add(m)
         await s.commit()
 
-    # Delete source instance and assert cascade.
-    resp = await client.delete(f"/api/instances/{src_id}")
-    assert resp.status_code == 200, resp.text
-    assert resp.json() == {"status": "deleted"}
+    # Mock the cleanup helper to verify GitLab cleanup is called
+    cleanup_mock = AsyncMock(return_value=(False, None, False, None))
+    with patch('app.api.instances._cleanup_mirror_from_gitlab', cleanup_mock):
+        # Delete source instance and assert cascade.
+        resp = await client.delete(f"/api/instances/{src_id}")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"status": "deleted"}
+
+        # Verify GitLab cleanup was called for the mirror
+        assert cleanup_mock.called
+        assert cleanup_mock.call_count == 1
 
     async with session_maker() as s:
         inst_src = (await s.execute(select(GitLabInstance).where(GitLabInstance.id == src_id))).scalar_one_or_none()
@@ -137,6 +146,83 @@ async def test_instances_delete_cascades_pairs_mirrors_group_settings_and_tokens
 
         mirrors = (await s.execute(select(Mirror).where(Mirror.instance_pair_id == pair_id))).scalars().all()
         assert mirrors == []
+
+
+@pytest.mark.asyncio
+async def test_instances_delete_with_gitlab_cleanup_failures(client, session_maker, monkeypatch):
+    """
+    Test that instance deletion continues even if GitLab cleanup fails,
+    and returns appropriate warnings.
+    """
+    from app.api import instances as inst_mod
+    from unittest.mock import AsyncMock, patch
+
+    monkeypatch.setattr(inst_mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.test_ok = True
+
+    # Create instances and pair
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst-src", "url": "https://src.example.com", "token": "t-src", "description": ""},
+    )
+    src_id = resp.json()["id"]
+
+    resp = await client.post(
+        "/api/instances",
+        json={"name": "inst-tgt", "url": "https://tgt.example.com", "token": "t-tgt", "description": ""},
+    )
+    tgt_id = resp.json()["id"]
+
+    resp = await client.post(
+        "/api/pairs",
+        json={
+            "name": "test-pair",
+            "source_instance_id": src_id,
+            "target_instance_id": tgt_id,
+            "mirror_direction": "pull",
+        },
+    )
+    pair_id = resp.json()["id"]
+
+    async with session_maker() as s:
+        # Add two mirrors
+        m1 = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="platform/proj1",
+            target_project_id=2,
+            target_project_path="platform/proj1",
+            mirror_id=77,
+            enabled=True,
+        )
+        m2 = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=3,
+            source_project_path="platform/proj2",
+            target_project_id=4,
+            target_project_path="platform/proj2",
+            mirror_id=88,
+            enabled=True,
+        )
+        s.add_all([m1, m2])
+        await s.commit()
+
+    # Mock cleanup to fail for GitLab cleanup but succeed for token cleanup
+    cleanup_mock = AsyncMock(return_value=(True, "GitLab API error", False, None))
+    with patch('app.api.instances._cleanup_mirror_from_gitlab', cleanup_mock):
+        resp = await client.delete(f"/api/instances/{src_id}")
+        assert resp.status_code == 200
+        result = resp.json()
+
+        # Should return warnings about GitLab cleanup failures
+        assert "warnings" in result
+        assert result["warning_count"] == 2
+        assert cleanup_mock.call_count == 2
+
+    # Database records should still be deleted
+    async with session_maker() as s:
+        inst_src = (await s.execute(select(GitLabInstance).where(GitLabInstance.id == src_id))).scalar_one_or_none()
+        assert inst_src is None
 
 
 @pytest.mark.asyncio
