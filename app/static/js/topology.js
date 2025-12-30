@@ -9,6 +9,7 @@
     rootG: null,
     simulation: null,
     resizeObserver: null,
+    resizeTimeout: null, // Debounce timeout for ResizeObserver
     lastRenderKey: "",
     selected: null, // {type: 'node'|'link', data}
     hovered: null, // {type: 'node'|'link', data}
@@ -1061,7 +1062,13 @@
     const canvas = byId("topology-canvas");
     if (canvas) {
       topology.resizeObserver = new ResizeObserver(() => {
-        if (topology.raw) render();
+        // Debounce resize events to prevent infinite render loops
+        if (topology.resizeTimeout) {
+          clearTimeout(topology.resizeTimeout);
+        }
+        topology.resizeTimeout = setTimeout(() => {
+          if (topology.raw) render();
+        }, 150);
       });
       topology.resizeObserver.observe(canvas);
     }
