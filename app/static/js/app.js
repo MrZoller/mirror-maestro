@@ -1527,6 +1527,7 @@ function renderPairs(pairs) {
                 <td>${settingsCell}</td>
                 <td>
                     <div class="table-actions">
+                        <button class="btn btn-primary btn-small" onclick="syncAllMirrors(${pair.id})" title="Trigger sync for all enabled mirrors in this pair">Sync All</button>
                         <button class="btn btn-secondary btn-small" onclick="beginPairEdit(${pair.id})">Edit</button>
                         <button class="btn btn-danger btn-small" onclick="deletePair(${pair.id})">Delete</button>
                     </div>
@@ -1689,6 +1690,67 @@ async function deletePair(id) {
         await loadPairs();
     } catch (error) {
         console.error('Failed to delete pair:', error);
+    }
+}
+
+async function syncAllMirrors(pairId) {
+    // Get mirror count first
+    let mirrorCount = 0;
+    try {
+        const mirrors = await apiRequest(`/api/mirrors?instance_pair_id=${pairId}&enabled=true`);
+        mirrorCount = (mirrors || []).length;
+    } catch (e) {
+        console.error('Failed to get mirror count:', e);
+    }
+
+    if (mirrorCount === 0) {
+        showMessage('No enabled mirrors found for this pair', 'warning');
+        return;
+    }
+
+    const pair = state.pairs.find(p => p.id === pairId);
+    const pairName = pair ? pair.name : `pair ${pairId}`;
+
+    const confirmMsg =
+        `Trigger sync for all ${mirrorCount} enabled mirror(s) in "${pairName}"?\n\n` +
+        `This will sequentially trigger updates with rate limiting to avoid overwhelming GitLab.\n` +
+        `This may take a few minutes for large mirror sets.`;
+
+    if (!confirm(confirmMsg)) return;
+
+    try {
+        showMessage(`Starting batch sync for ${mirrorCount} mirrors...`, 'info');
+
+        const result = await apiRequest(`/api/pairs/${pairId}/sync-mirrors`, {
+            method: 'POST'
+        });
+
+        // Show detailed results
+        const successMsg = [
+            `Batch sync completed:`,
+            `✓ ${result.succeeded} succeeded`,
+            result.failed > 0 ? `✗ ${result.failed} failed` : null,
+            result.skipped > 0 ? `⊘ ${result.skipped} skipped` : null,
+            `⏱ ${result.duration_seconds}s (${result.operations_per_second} ops/sec)`
+        ].filter(Boolean).join('\n');
+
+        if (result.failed > 0) {
+            console.error('Batch sync errors:', result.errors);
+            showMessage(
+                `${successMsg}\n\nCheck console for error details.`,
+                'warning'
+            );
+        } else {
+            showMessage(successMsg, 'success');
+        }
+
+        // Reload mirrors if we're viewing this pair
+        if (state.selectedPair === pairId) {
+            await loadMirrors();
+        }
+    } catch (error) {
+        console.error('Failed to sync mirrors:', error);
+        showMessage(`Failed to sync mirrors: ${error.message}`, 'error');
     }
 }
 
