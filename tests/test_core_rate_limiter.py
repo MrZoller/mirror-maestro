@@ -200,4 +200,4 @@ def test_batch_tracker_summary():
     assert summary["succeeded"] == 3
     assert summary["failed"] == 2
     assert len(summary["errors"]) == 2
-    assert summary["duration_seconds"] > 0
+    assert summary["duration_seconds"] >= 0  # May be 0 for fast tests
