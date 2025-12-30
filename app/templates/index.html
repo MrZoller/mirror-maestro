@@ -426,7 +426,40 @@
             </div>
 
             <div class="card">
-                <h3>Configured Mirrors</h3>
+                <div class="flex-between">
+                    <h3>Configured Mirrors</h3>
+                    <div class="flex" style="gap:10px;">
+                        <button class="btn btn-secondary btn-small" onclick="toggleMirrorViewMode()" title="Toggle between flat list and tree view">
+                            <span id="view-mode-icon">🌳</span> Tree View
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filter and sort controls -->
+                <div class="mirror-controls mt-20 mb-10" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="mirror-group-filter" class="text-muted" style="margin-bottom:6px">Filter by group path</label>
+                        <input type="text" id="mirror-group-filter" placeholder="e.g., group1/subgroup1" onchange="filterByGroupPath(this.value)">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="mirror-sort-by" class="text-muted" style="margin-bottom:6px">Sort by</label>
+                        <select id="mirror-sort-by" onchange="changeMirrorSort(this.value, document.getElementById('mirror-sort-dir').value)">
+                            <option value="created_at">Created Date</option>
+                            <option value="updated_at">Updated Date</option>
+                            <option value="source_project_path">Source Path</option>
+                            <option value="target_project_path">Target Path</option>
+                            <option value="last_update_status">Status</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="mirror-sort-dir" class="text-muted" style="margin-bottom:6px">Order</label>
+                        <select id="mirror-sort-dir" onchange="changeMirrorSort(document.getElementById('mirror-sort-by').value, this.value)">
+                            <option value="desc" selected>Descending</option>
+                            <option value="asc">Ascending</option>
+                        </select>
+                    </div>
+                </div>
+
                 <table id="mirrors-table" class="enhanced-table">
                     <thead>
                         <tr>
@@ -444,6 +477,9 @@
                         <tr><td colspan="8" class="text-center text-muted">Select an instance pair to view mirrors</td></tr>
                     </tbody>
                 </table>
+
+                <!-- Pagination controls -->
+                <div id="mirror-pagination" class="mt-20"></div>
             </div>
         </div>
 
