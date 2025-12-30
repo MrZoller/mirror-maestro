@@ -2250,22 +2250,18 @@ function toggleTreeGroup(element) {
 
 // View mode toggle
 async function toggleMirrorViewMode() {
-    const iconEl = document.getElementById('view-mode-icon');
-    const isTree = state.mirrorsPagination.viewMode === 'tree';
+    const btn = document.querySelector('[onclick="toggleMirrorViewMode()"]');
+    if (!btn) return;
 
     // Toggle view mode
+    const isTree = state.mirrorsPagination.viewMode === 'tree';
     state.mirrorsPagination.viewMode = isTree ? 'flat' : 'tree';
 
-    // Update button icon/text
-    if (iconEl) {
-        const btn = iconEl.closest('button');
-        if (state.mirrorsPagination.viewMode === 'tree') {
-            iconEl.textContent = '📋';
-            btn.childNodes[1].textContent = ' Flat View';
-        } else {
-            iconEl.textContent = '🌳';
-            btn.childNodes[1].textContent = ' Tree View';
-        }
+    // Update button content
+    if (state.mirrorsPagination.viewMode === 'tree') {
+        btn.innerHTML = '<span id="view-mode-icon">📋</span> Flat View';
+    } else {
+        btn.innerHTML = '<span id="view-mode-icon">🌳</span> Tree View';
     }
 
     // Re-render with new view mode
