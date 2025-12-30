@@ -471,8 +471,9 @@ async def test_mirrors_list_returns_all_mirrors(client, session_maker):
     assert data['total'] == 2
     mirrors = data['mirrors']
     assert len(mirrors) == 2
-    assert mirrors[0]["source_project_path"] == "group/proj1"
-    assert mirrors[1]["source_project_path"] == "group/proj2"
+    # Default order is created_at desc, so mirror2 (created last) appears first
+    assert mirrors[0]["source_project_path"] == "group/proj2"
+    assert mirrors[1]["source_project_path"] == "group/proj1"
 
 
 @pytest.mark.asyncio
