@@ -408,7 +408,11 @@ async def test_mirrors_list_empty(client):
     """Test listing mirrors when none exist."""
     resp = await client.get("/api/mirrors")
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data['mirrors'] == []
+    assert data['total'] == 0
+    assert data['page'] == 1
+    assert data['total_pages'] == 0
 
 
 @pytest.mark.asyncio
@@ -463,7 +467,9 @@ async def test_mirrors_list_returns_all_mirrors(client, session_maker):
 
     resp = await client.get("/api/mirrors")
     assert resp.status_code == 200
-    mirrors = resp.json()
+    data = resp.json()
+    assert data['total'] == 2
+    mirrors = data['mirrors']
     assert len(mirrors) == 2
     assert mirrors[0]["source_project_path"] == "group/proj1"
     assert mirrors[1]["source_project_path"] == "group/proj2"
@@ -954,19 +960,25 @@ async def test_mirrors_list_filtered_by_pair(client, session_maker):
     # Get all mirrors
     resp = await client.get("/api/mirrors")
     assert resp.status_code == 200
-    assert len(resp.json()) == 3
+    data = resp.json()
+    assert data['total'] == 3
+    assert len(data['mirrors']) == 3
 
     # Filter by pair1
     resp = await client.get(f"/api/mirrors?instance_pair_id={pair1_id}")
     assert resp.status_code == 200
-    pair1_mirrors = resp.json()
+    data = resp.json()
+    assert data['total'] == 2
+    pair1_mirrors = data['mirrors']
     assert len(pair1_mirrors) == 2
     assert all(m["instance_pair_id"] == pair1_id for m in pair1_mirrors)
 
     # Filter by pair2
     resp = await client.get(f"/api/mirrors?instance_pair_id={pair2_id}")
     assert resp.status_code == 200
-    pair2_mirrors = resp.json()
+    data = resp.json()
+    assert data['total'] == 1
+    pair2_mirrors = data['mirrors']
     assert len(pair2_mirrors) == 1
     assert pair2_mirrors[0]["instance_pair_id"] == pair2_id
 
