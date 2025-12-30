@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import logging
+from importlib.metadata import version, PackageNotFoundError
 from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -10,6 +11,13 @@ from app.config import settings
 from app.database import init_db, migrate_mirrors_to_auto_tokens, drop_legacy_group_tables, AsyncSessionLocal
 from app.api import instances, pairs, mirrors, export, topology, dashboard, backup, search, health, auth, users
 from app.core.auth import verify_credentials, get_password_hash
+
+
+# Get version from package metadata (pyproject.toml)
+try:
+    __version__ = version("mirror-maestro")
+except PackageNotFoundError:
+    __version__ = "1.0.0"  # Fallback for development
 
 
 async def _create_initial_admin():
@@ -68,7 +76,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_title,
     description=settings.app_description,
-    version="0.1.0",
+    version=__version__,
     lifespan=lifespan
 )
 
