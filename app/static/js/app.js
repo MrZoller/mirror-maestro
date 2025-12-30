@@ -3,6 +3,16 @@ const state = {
     instances: [],
     pairs: [],
     mirrors: [],
+    mirrorsPagination: {
+        total: 0,
+        page: 1,
+        pageSize: 50,
+        totalPages: 0,
+        orderBy: 'created_at',
+        orderDir: 'desc',
+        groupPath: '',
+        viewMode: 'flat', // 'flat' or 'tree'
+    },
     selectedPair: null,
     mirrorProjectInstances: { source: null, target: null },
     editing: {
@@ -1765,7 +1775,7 @@ function updatePairSelector() {
 }
 
 // Mirrors
-async function loadMirrors() {
+async function loadMirrors(resetPage = false) {
     const container = document.getElementById('mirrors-list');
     if (!container) return;
 
@@ -1782,9 +1792,43 @@ async function loadMirrors() {
     try {
         showSkeletonLoader(container, 5);
 
-        const mirrors = await apiRequest(`/api/mirrors?instance_pair_id=${state.selectedPair}`);
-        state.mirrors = mirrors;
-        renderMirrors(mirrors);
+        // Reset to page 1 if requested (e.g., when changing filters)
+        if (resetPage) {
+            state.mirrorsPagination.page = 1;
+        }
+
+        // Build query params with pagination and filtering
+        const params = new URLSearchParams({
+            instance_pair_id: state.selectedPair,
+            page: state.mirrorsPagination.page,
+            page_size: state.mirrorsPagination.pageSize,
+            order_by: state.mirrorsPagination.orderBy,
+            order_dir: state.mirrorsPagination.orderDir,
+        });
+
+        // Add optional filters
+        if (state.mirrorsPagination.groupPath) {
+            params.append('group_path', state.mirrorsPagination.groupPath);
+        }
+
+        const response = await apiRequest(`/api/mirrors?${params}`);
+
+        // Update state with paginated data
+        state.mirrors = response.mirrors;
+        state.mirrorsPagination.total = response.total;
+        state.mirrorsPagination.page = response.page;
+        state.mirrorsPagination.pageSize = response.page_size;
+        state.mirrorsPagination.totalPages = response.total_pages;
+
+        // Render based on view mode
+        if (state.mirrorsPagination.viewMode === 'tree') {
+            renderMirrorsTree(response.mirrors);
+        } else {
+            renderMirrors(response.mirrors);
+        }
+
+        // Render pagination controls
+        renderMirrorPagination();
     } catch (error) {
         console.error('Failed to load mirrors:', error);
         showErrorState(container, error, loadMirrors);
@@ -1934,8 +1978,8 @@ function renderMirrors(mirrors) {
 
         return `
             <tr>
-                <td>${escapeHtml(mirror.source_project_path)}</td>
-                <td>${escapeHtml(mirror.target_project_path)}</td>
+                <td>${formatProjectPath(mirror.source_project_path)}</td>
+                <td>${formatProjectPath(mirror.target_project_path)}</td>
                 <td>${settingsCell}</td>
                 <td>${statusBadge}</td>
                 <td>${updateStatus}</td>
@@ -1969,6 +2013,280 @@ async function rotateMirrorToken(mirrorId) {
     } catch (error) {
         console.error('Failed to rotate token:', error);
     }
+}
+
+// Pagination controls
+function renderMirrorPagination() {
+    const container = document.getElementById('mirror-pagination');
+    if (!container) return;
+
+    const { page, totalPages, total, pageSize } = state.mirrorsPagination;
+
+    if (totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const startItem = (page - 1) * pageSize + 1;
+    const endItem = Math.min(page * pageSize, total);
+
+    // Generate page number buttons (show current, prev 2, next 2, first, last)
+    const pageButtons = [];
+
+    // Always show first page
+    if (page > 3) {
+        pageButtons.push(`<button class="btn btn-secondary btn-small" onclick="changeMirrorPage(1)">1</button>`);
+        if (page > 4) {
+            pageButtons.push(`<span class="pagination-ellipsis">...</span>`);
+        }
+    }
+
+    // Show pages around current page
+    for (let i = Math.max(1, page - 2); i <= Math.min(totalPages, page + 2); i++) {
+        if (i === page) {
+            pageButtons.push(`<button class="btn btn-primary btn-small" disabled>${i}</button>`);
+        } else {
+            pageButtons.push(`<button class="btn btn-secondary btn-small" onclick="changeMirrorPage(${i})">${i}</button>`);
+        }
+    }
+
+    // Always show last page
+    if (page < totalPages - 2) {
+        if (page < totalPages - 3) {
+            pageButtons.push(`<span class="pagination-ellipsis">...</span>`);
+        }
+        pageButtons.push(`<button class="btn btn-secondary btn-small" onclick="changeMirrorPage(${totalPages})">${totalPages}</button>`);
+    }
+
+    container.innerHTML = `
+        <div class="pagination-controls">
+            <div class="pagination-info">
+                Showing ${startItem}-${endItem} of ${total} mirrors
+            </div>
+            <div class="pagination-buttons">
+                <button class="btn btn-secondary btn-small" onclick="changeMirrorPage(${page - 1})" ${page === 1 ? 'disabled' : ''}>
+                    Previous
+                </button>
+                ${pageButtons.join('')}
+                <button class="btn btn-secondary btn-small" onclick="changeMirrorPage(${page + 1})" ${page === totalPages ? 'disabled' : ''}>
+                    Next
+                </button>
+            </div>
+            <div class="pagination-size">
+                <select id="mirror-page-size" onchange="changeMirrorPageSize(this.value)" class="table-select">
+                    <option value="25" ${pageSize === 25 ? 'selected' : ''}>25 per page</option>
+                    <option value="50" ${pageSize === 50 ? 'selected' : ''}>50 per page</option>
+                    <option value="100" ${pageSize === 100 ? 'selected' : ''}>100 per page</option>
+                    <option value="200" ${pageSize === 200 ? 'selected' : ''}>200 per page</option>
+                </select>
+            </div>
+        </div>
+    `;
+}
+
+async function changeMirrorPage(newPage) {
+    if (newPage < 1 || newPage > state.mirrorsPagination.totalPages) return;
+    state.mirrorsPagination.page = newPage;
+    await loadMirrors();
+}
+
+async function changeMirrorPageSize(newSize) {
+    state.mirrorsPagination.pageSize = parseInt(newSize);
+    state.mirrorsPagination.page = 1; // Reset to first page
+    await loadMirrors();
+}
+
+// Format project path with smart truncation and breadcrumbs
+function formatProjectPath(path, options = {}) {
+    const { maxParts = 3, showTooltip = true } = options;
+    const parts = path.split('/');
+
+    if (parts.length <= maxParts) {
+        // Short path, show it all
+        return showTooltip
+            ? `<span title="${escapeHtml(path)}">${escapeHtml(path)}</span>`
+            : escapeHtml(path);
+    }
+
+    // Long path, show breadcrumbs with truncation
+    const displayParts = [
+        '...', // Indicate truncation
+        ...parts.slice(-maxParts) // Show last N parts
+    ];
+
+    const displayPath = displayParts.join(' / ');
+
+    return `<span class="project-path-breadcrumb" title="${escapeHtml(path)}">${escapeHtml(displayPath)}</span>`;
+}
+
+// Tree view rendering
+function renderMirrorsTree(mirrors) {
+    const tbody = document.getElementById('mirrors-list');
+    if (!tbody) return;
+
+    if (mirrors.length === 0) {
+        showEmptyState(
+            tbody,
+            'No Mirrors Yet',
+            'This instance pair doesn\'t have any mirrors configured. Create one using the form above.',
+            null
+        );
+        return;
+    }
+
+    // Build tree structure from paths
+    const tree = buildMirrorTree(mirrors);
+
+    // Render tree
+    tbody.innerHTML = renderTreeNode(tree, 0);
+}
+
+function buildMirrorTree(mirrors) {
+    const tree = {};
+
+    mirrors.forEach(mirror => {
+        // Use source path for grouping
+        const parts = mirror.source_project_path.split('/');
+        let current = tree;
+
+        // Build tree structure
+        parts.forEach((part, index) => {
+            if (!current[part]) {
+                current[part] = {
+                    name: part,
+                    level: index,
+                    children: {},
+                    mirrors: []
+                };
+            }
+
+            // If this is the last part (project name), add the mirror
+            if (index === parts.length - 1) {
+                current[part].mirrors.push(mirror);
+            }
+
+            current = current[part].children;
+        });
+    });
+
+    return tree;
+}
+
+function renderTreeNode(node, level, parentPath = '') {
+    let html = '';
+
+    for (const key in node) {
+        const item = node[key];
+        const currentPath = parentPath ? `${parentPath}/${item.name}` : item.name;
+        const hasChildren = Object.keys(item.children).length > 0;
+        const hasMirrors = item.mirrors.length > 0;
+        const indent = level * 20;
+
+        if (hasChildren) {
+            // Group node (collapsible)
+            html += `
+                <tr class="tree-group-row" data-level="${level}">
+                    <td colspan="8" style="padding-left: ${indent}px;">
+                        <div class="tree-group-header" onclick="toggleTreeGroup(this)">
+                            <span class="tree-toggle">▼</span>
+                            <span class="tree-group-name">${escapeHtml(item.name)}/</span>
+                            <span class="tree-group-count">(${countMirrorsInTree(item)} mirrors)</span>
+                        </div>
+                    </td>
+                </tr>
+                <tbody class="tree-group-children">
+                    ${renderTreeNode(item.children, level + 1, currentPath)}
+                </tbody>
+            `;
+        }
+
+        if (hasMirrors) {
+            // Render mirrors for this node
+            item.mirrors.forEach(mirror => {
+                html += `
+                    <tr class="tree-mirror-row" data-level="${level}" style="padding-left: ${indent}px;">
+                        <td style="padding-left: ${indent + 20}px;">${escapeHtml(mirror.source_project_path)}</td>
+                        <td>${formatProjectPath(mirror.target_project_path)}</td>
+                        <td><!-- Settings --></td>
+                        <td>${mirror.enabled ? '<span class="badge badge-success">Enabled</span>' : '<span class="badge badge-warning">Disabled</span>'}</td>
+                        <td>${mirror.last_update_status || 'N/A'}</td>
+                        <td>${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}</td>
+                        <td><!-- Token --></td>
+                        <td>
+                            <div class="table-actions">
+                                <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
+                                <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})">Sync</button>
+                                <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+    }
+
+    return html;
+}
+
+function countMirrorsInTree(node) {
+    let count = node.mirrors.length;
+    for (const key in node.children) {
+        count += countMirrorsInTree(node.children[key]);
+    }
+    return count;
+}
+
+function toggleTreeGroup(element) {
+    const toggle = element.querySelector('.tree-toggle');
+    const row = element.closest('tr');
+    const childrenBody = row.nextElementSibling;
+
+    if (childrenBody && childrenBody.classList.contains('tree-group-children')) {
+        const isCollapsed = childrenBody.style.display === 'none';
+        childrenBody.style.display = isCollapsed ? '' : 'none';
+        toggle.textContent = isCollapsed ? '▼' : '▶';
+    }
+}
+
+// View mode toggle
+async function toggleMirrorViewMode() {
+    const iconEl = document.getElementById('view-mode-icon');
+    const isTree = state.mirrorsPagination.viewMode === 'tree';
+
+    // Toggle view mode
+    state.mirrorsPagination.viewMode = isTree ? 'flat' : 'tree';
+
+    // Update button icon/text
+    if (iconEl) {
+        const btn = iconEl.closest('button');
+        if (state.mirrorsPagination.viewMode === 'tree') {
+            iconEl.textContent = '📋';
+            btn.childNodes[1].textContent = ' Flat View';
+        } else {
+            iconEl.textContent = '🌳';
+            btn.childNodes[1].textContent = ' Tree View';
+        }
+    }
+
+    // Re-render with new view mode
+    if (state.mirrorsPagination.viewMode === 'tree') {
+        renderMirrorsTree(state.mirrors);
+    } else {
+        renderMirrors(state.mirrors);
+    }
+}
+
+// Group path filtering
+async function filterByGroupPath(groupPath) {
+    state.mirrorsPagination.groupPath = groupPath.trim();
+    await loadMirrors(true); // Reset to page 1
+}
+
+// Sort controls
+async function changeMirrorSort(orderBy, orderDir) {
+    state.mirrorsPagination.orderBy = orderBy;
+    state.mirrorsPagination.orderDir = orderDir;
+    await loadMirrors(true); // Reset to page 1
 }
 
 function beginMirrorEdit(id) {

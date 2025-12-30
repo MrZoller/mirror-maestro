@@ -2522,3 +2522,135 @@ table tbody tr:hover {
 .status-inactive {
     color: var(--text-secondary);
 }
+
+/* ========================================
+   Pagination Controls
+   ======================================== */
+
+.pagination-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    flex-wrap: wrap;
+}
+
+.pagination-info {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.pagination-buttons {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.pagination-ellipsis {
+    color: var(--text-secondary);
+    padding: 0 0.5rem;
+    user-select: none;
+}
+
+.pagination-size select {
+    min-width: 140px;
+}
+
+/* ========================================
+   Tree View
+   ======================================== */
+
+.tree-group-row {
+    background: var(--background);
+    border-top: 2px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.tree-group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 0;
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.tree-group-header:hover {
+    color: var(--primary-color);
+}
+
+.tree-toggle {
+    display: inline-block;
+    width: 1rem;
+    text-align: center;
+    font-size: 0.875rem;
+    transition: transform var(--transition-speed);
+}
+
+.tree-group-name {
+    font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace;
+    color: var(--primary-color);
+}
+
+.tree-group-count {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 400;
+}
+
+.tree-group-children {
+    display: table-row-group;
+}
+
+.tree-mirror-row {
+    border-left: 3px solid var(--border-color);
+}
+
+.tree-mirror-row:hover {
+    background: var(--background);
+    border-left-color: var(--primary-color);
+}
+
+/* ========================================
+   Project Path Display
+   ======================================== */
+
+.project-path-breadcrumb {
+    font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    cursor: help;
+}
+
+.project-path-breadcrumb:hover {
+    color: var(--primary-color);
+}
+
+/* ========================================
+   Mirror Controls
+   ======================================== */
+
+.mirror-controls {
+    background: var(--background);
+    padding: 1rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.mirror-controls label {
+    display: block;
+    font-weight: 500;
+}
+
+.mirror-controls input,
+.mirror-controls select {
+    width: 100%;
+}

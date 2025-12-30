@@ -74,6 +74,9 @@ class Mirror(Base):
         Index('idx_mirror_instance_pair', 'instance_pair_id'),
         Index('idx_mirror_last_update_status', 'last_update_status'),
         Index('idx_mirror_updated_at', 'updated_at'),
+        Index('idx_mirror_source_path', 'source_project_path'),  # For group filtering and search
+        Index('idx_mirror_target_path', 'target_project_path'),  # For group filtering and search
+        Index('idx_mirror_enabled', 'enabled'),  # For filtering by enabled status
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
