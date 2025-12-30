@@ -67,9 +67,11 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **View Mirrors**: See all configured mirrors and their current status at a glance
 - **Create Mirrors**: Quickly set up new mirrors between projects with dropdown selection
 - **Sync Mirrors**: Force immediate mirror synchronization with a single click
+- **Batch Sync**: Sync all mirrors in an instance pair with one click - perfect for resuming after outages
 - **Edit/Remove Mirrors**: Modify safe mirror settings (and revert overrides back to "inherit"), or delete mirror configurations as needed
-- **Import/Export**: Bulk import and export mirror settings for specified groups
+- **Import/Export**: Bulk import and export mirror settings with automatic rate limiting for large operations
 - **Backup & Restore**: Create complete backups of your database and encryption key; restore from backups to recover or migrate
+- **Rate Limiting**: Intelligent API rate limiting prevents overwhelming GitLab instances during batch operations
 
 ### Modern Web Interface
 - **Comprehensive Dashboard**: Live statistics cards, health distribution charts (Chart.js), recent activity timeline, and quick actions
@@ -106,7 +108,8 @@ mirror-maestro/
 │   ├── core/             # Core functionality
 │   │   ├── auth.py       # Authentication
 │   │   ├── encryption.py # Token encryption
-│   │   └── gitlab_client.py # GitLab API wrapper
+│   │   ├── gitlab_client.py # GitLab API wrapper
+│   │   └── rate_limiter.py # Rate limiting for batch operations
 │   ├── static/           # Frontend assets
 │   │   ├── css/          # Modern CSS with design tokens
 │   │   └── js/           # Vanilla JS with D3.js & Chart.js
@@ -231,6 +234,11 @@ SSL_KEY_PATH=/etc/nginx/ssl/key.pem
 # Optional: Customize ports
 HTTP_PORT=80
 HTTPS_PORT=443
+
+# Rate Limiting (for batch operations and imports)
+# Delay between GitLab API operations to avoid overwhelming instances
+GITLAB_API_DELAY_MS=200  # 200ms = ~300 ops/min (well under 600/min limit)
+GITLAB_API_MAX_RETRIES=3  # Retries on rate limit errors
 ```
 
 ### GitLab Access Tokens
@@ -451,7 +459,35 @@ Create and manage mirrors between projects:
    - **Rotate Token**: Create a new access token for the mirror (revokes the old one)
    - **Delete**: Remove the mirror configuration (also deletes the access token)
 
-### 4. Import/Export
+### 4. Batch Mirror Sync
+
+Sync all mirrors in an instance pair with one click - particularly useful after GitLab outages or maintenance.
+
+#### When to Use Batch Sync
+
+- **After outages**: When a GitLab instance goes down temporarily, all mirrors may stop syncing
+- **Post-maintenance**: After scheduled maintenance or upgrades
+- **Large-scale updates**: When you need to sync hundreds of mirrors at once
+
+#### How to Use
+
+1. Go to the **Instance Pairs** tab
+2. Click the **Sync All** button for the desired pair
+3. Confirm the operation (shows mirror count and estimated duration)
+4. View detailed results with success/failure counts and timing metrics
+
+#### Rate Limiting Protection
+
+To prevent overwhelming GitLab instances with too many API requests, batch sync uses intelligent rate limiting:
+
+- **Configurable delay**: Default 200ms between operations (~300 requests/minute, well under GitLab's typical 600/min limit)
+- **Automatic retry**: If GitLab returns a 429 "Too Many Requests" error, operations are retried with exponential backoff
+- **Progress tracking**: Real-time progress with detailed reporting
+- **Continue on failure**: Processing continues even if some mirrors fail
+
+**Example**: Syncing 100 mirrors with default settings takes ~20 seconds and processes at a safe rate of ~300 operations/minute.
+
+### 5. Import/Export
 
 Bulk manage mirror configurations with portable JSON files.
 
@@ -498,12 +534,15 @@ Example export structure:
 
 When you import mirrors, Mirror Maestro:
 
-1. **Looks up project IDs** from paths via GitLab API
-2. **Creates project access tokens** in GitLab
-3. **Creates actual mirrors** in GitLab (push or pull)
+1. **Looks up project IDs** from paths via GitLab API (2 API calls per mirror)
+2. **Creates project access tokens** in GitLab (1 API call per mirror)
+3. **Creates actual mirrors** in GitLab - push or pull (1 API call per mirror)
 4. **Stores mirror records** in the database
+5. **Applies rate limiting** - Waits 200ms before processing the next mirror
 
 The result is **identical to creating mirrors via the UI**.
+
+**Rate Limiting**: Each mirror import requires ~4 GitLab API calls. With default settings (200ms delay), importing 100 mirrors takes approximately 40-60 seconds and processes at a safe rate of ~200-300 API requests/minute. This prevents overwhelming your GitLab instances while ensuring reliable imports.
 
 #### Import Results
 
@@ -600,6 +639,7 @@ The application provides a RESTful API. Once running, visit:
 - `GET /api/pairs/{id}` - Get pair details
 - `PUT /api/pairs/{id}` - Update pair
 - `DELETE /api/pairs/{id}` - Delete pair
+- `POST /api/pairs/{id}/sync-mirrors` - Batch sync all enabled mirrors in a pair (with rate limiting)
 
 #### Mirrors
 - `GET /api/mirrors` - List all mirrors
