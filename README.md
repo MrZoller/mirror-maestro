@@ -419,10 +419,25 @@ You can rotate the stored instance access token without changing the instance UR
 > The token value is **never displayed** in the UI (only a masked placeholder is shown).
 
 #### Deletion behavior (important)
-To prevent broken configurations, the app performs **cascading deletes**:
+To prevent broken configurations, the app performs **cascading deletes with GitLab cleanup**:
+
 - Deleting a **GitLab instance** also deletes any **instance pairs** that reference it and any **mirrors** belonging to those pairs.
+  - **GitLab cleanup**: Before database deletion, the app removes all mirrors and project access tokens from GitLab using rate-limited API calls
+  - **Rate limiting**: For instances with many mirrors, cleanup operations are throttled to avoid overwhelming GitLab (configurable delay between operations)
+  - **Best-effort**: If GitLab cleanup fails for some mirrors (e.g., network errors, token expired), the database deletion still proceeds, and warnings are returned
+
 - Deleting an **instance pair** also deletes any **mirrors** belonging to that pair.
-- Deleting a **mirror** also deletes its automatically-created project access token.
+  - **GitLab cleanup**: Removes all mirrors and tokens from GitLab before database deletion
+  - **Rate limiting**: Applied when deleting pairs with multiple mirrors
+  - **Progress tracking**: The operation returns detailed metrics including success/failure counts and operation duration
+
+- Deleting a **mirror** also deletes its automatically-created project access token from GitLab.
+  - **Best-effort**: If token deletion fails, the mirror is still removed from the database with a warning
+
+**Rate Limiting Configuration:**
+- Default: 200ms delay between GitLab API operations (~300 operations/minute)
+- Configurable via `GITLAB_API_DELAY_MS` environment variable
+- Automatic retry with exponential backoff on rate limit errors (429 responses)
 
 The UI shows a warning and requires confirmation before performing these actions.
 
