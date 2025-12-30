@@ -1,4 +1,5 @@
 from typing import List
+import logging
 from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, delete, or_
@@ -10,7 +11,10 @@ from app.models import GitLabInstance, InstancePair, Mirror
 from app.core.auth import verify_credentials
 from app.core.encryption import encryption
 from app.core.gitlab_client import GitLabClient
+from app.core.rate_limiter import RateLimiter, BatchOperationTracker
+from app.config import settings
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/instances", tags=["instances"])
 
@@ -324,7 +328,13 @@ async def delete_instance(
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
-    """Delete a GitLab instance."""
+    """
+    Delete a GitLab instance.
+
+    This performs cascade deletion with proper GitLab cleanup:
+    1. Cleans up all mirrors from GitLab (with rate limiting)
+    2. Deletes mirrors, pairs, and instance from database
+    """
     result = await db.execute(
         select(GitLabInstance).where(GitLabInstance.id == instance_id)
     )
@@ -333,27 +343,79 @@ async def delete_instance(
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
 
-    # Cascade-delete related entities:
-    # - Mirrors that belong to pairs that reference this instance
-    # - Group defaults for those pairs
-    # - The pairs themselves
-    # - Group access tokens attached to this instance
-    #
-    # NOTE: This is intentionally implemented at the application layer since the
-    # schema does not currently enforce FK relationships with ON DELETE CASCADE.
-    #
-    # CRITICAL: All delete operations must succeed atomically or be rolled back together
-    try:
-        pair_ids_res = await db.execute(
-            select(InstancePair.id).where(
-                or_(
-                    InstancePair.source_instance_id == instance_id,
-                    InstancePair.target_instance_id == instance_id,
-                )
+    # Find all pairs that reference this instance
+    pair_ids_res = await db.execute(
+        select(InstancePair.id).where(
+            or_(
+                InstancePair.source_instance_id == instance_id,
+                InstancePair.target_instance_id == instance_id,
             )
         )
-        pair_ids = list(pair_ids_res.scalars().all())
+    )
+    pair_ids = list(pair_ids_res.scalars().all())
 
+    # Fetch all mirrors for these pairs
+    mirrors_to_delete = []
+    if pair_ids:
+        mirrors_result = await db.execute(
+            select(Mirror).where(Mirror.instance_pair_id.in_(pair_ids))
+        )
+        mirrors_to_delete = list(mirrors_result.scalars().all())
+
+    # Import the cleanup helper from mirrors module
+    from app.api.mirrors import _cleanup_mirror_from_gitlab
+
+    # Clean up mirrors from GitLab with rate limiting (if any)
+    cleanup_warnings = []
+    if mirrors_to_delete:
+        logger.info(f"Cleaning up {len(mirrors_to_delete)} mirrors from GitLab before deleting instance {instance_id}")
+
+        rate_limiter = RateLimiter(
+            delay_ms=settings.gitlab_api_delay_ms,
+            max_retries=settings.gitlab_api_max_retries
+        )
+        tracker = BatchOperationTracker(total_items=len(mirrors_to_delete))
+        rate_limiter.start_tracking()
+
+        for idx, mirror in enumerate(mirrors_to_delete):
+            try:
+                # Clean up from GitLab (best effort)
+                gitlab_failed, gitlab_err, token_failed, token_err = await _cleanup_mirror_from_gitlab(mirror, db)
+
+                if gitlab_failed or token_failed:
+                    warning = f"Mirror {mirror.id} ({mirror.source_project_path}→{mirror.target_project_path}): "
+                    if gitlab_failed:
+                        warning += f"GitLab cleanup failed ({gitlab_err}); "
+                    if token_failed:
+                        warning += f"Token cleanup failed ({token_err})"
+                    cleanup_warnings.append(warning)
+                    tracker.record_failure(warning)
+                else:
+                    tracker.record_success()
+
+                logger.info(f"[{idx + 1}/{len(mirrors_to_delete)}] Cleaned up mirror {mirror.id}")
+
+            except Exception as e:
+                error_msg = f"Mirror {mirror.id}: {str(e)}"
+                cleanup_warnings.append(error_msg)
+                tracker.record_failure(error_msg)
+                logger.error(f"Failed to clean up mirror {mirror.id}: {str(e)}")
+
+            # Apply rate limiting delay (except after last mirror)
+            if idx < len(mirrors_to_delete) - 1:
+                await rate_limiter.delay()
+
+        summary = tracker.get_summary()
+        metrics = rate_limiter.get_metrics()
+        logger.info(
+            f"GitLab cleanup completed for instance {instance_id}: "
+            f"{summary['succeeded']} succeeded, {summary['failed']} failed "
+            f"in {summary['duration_seconds']}s ({metrics['operations_per_second']} ops/sec)"
+        )
+
+    # Now delete from database
+    # CRITICAL: All delete operations must succeed atomically or be rolled back together
+    try:
         if pair_ids:
             # Delete mirrors first (they reference pairs)
             await db.execute(delete(Mirror).where(Mirror.instance_pair_id.in_(pair_ids)))
@@ -368,14 +430,20 @@ async def delete_instance(
     except Exception as e:
         # Rollback all changes if any operation fails to maintain data integrity
         await db.rollback()
-        import logging
-        logging.error(f"Failed to delete instance {instance_id}: {str(e)}")
+        logger.error(f"Failed to delete instance {instance_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail="Failed to delete instance. Database changes have been rolled back to maintain data integrity."
         )
 
-    return {"status": "deleted"}
+    # Return status with warnings if GitLab cleanup had issues
+    response = {"status": "deleted"}
+    if cleanup_warnings:
+        response["warnings"] = cleanup_warnings
+        response["warning_count"] = len(cleanup_warnings)
+        logger.warning(f"Instance {instance_id} deleted with {len(cleanup_warnings)} cleanup warnings")
+
+    return response
 
 
 @router.get("/{instance_id}/projects")
