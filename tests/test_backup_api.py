@@ -437,5 +437,7 @@ async def test_restore_with_complex_data(client, session_maker, monkeypatch):
     pairs_resp = await client.get("/api/pairs")
     assert len(pairs_resp.json()) == 1
 
-    mirrors_resp = await client.get("/api/mirrors?pair_id=1")
-    assert len(mirrors_resp.json()) == 1
+    mirrors_resp = await client.get("/api/mirrors?instance_pair_id=1")
+    data = mirrors_resp.json()
+    assert data['total'] == 1
+    assert len(data['mirrors']) == 1

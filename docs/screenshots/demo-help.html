@@ -144,6 +144,73 @@
                 </ul>
             </div>
 
+            <!-- Mirror Management -->
+            <div class="card">
+                <h2>Mirror Management</h2>
+                <p class="text-muted">Create, view, and manage mirrors with powerful navigation and filtering tools.</p>
+
+                <h3>Viewing Mirrors</h3>
+                <p>Mirror Maestro provides flexible ways to view and navigate your mirrors, especially useful when managing large numbers of mirrors in nested group structures:</p>
+
+                <h4>Flat View (Default)</h4>
+                <ul>
+                    <li><strong>Smart Path Truncation</strong> - Long nested paths automatically show only the last few segments (e.g., <code>... / services / api-gateway</code>)</li>
+                    <li><strong>Full Path Tooltips</strong> - Hover over any path to see the complete path</li>
+                    <li><strong>Pagination</strong> - Navigate through pages of mirrors with configurable page size (25/50/100/200 per page)</li>
+                </ul>
+
+                <h4>Tree View</h4>
+                <ul>
+                    <li>Click the "Tree View" button to switch to hierarchical display</li>
+                    <li>Mirrors are grouped by their path structure (groups and subgroups)</li>
+                    <li>Expand/collapse group nodes to navigate the hierarchy</li>
+                    <li>Group headers show mirror count for that branch</li>
+                    <li>Perfect for organizing mirrors in deeply nested group structures</li>
+                </ul>
+
+                <h3>Filtering Mirrors</h3>
+                <p>Use the filter controls above the mirror table:</p>
+                <ul>
+                    <li><strong>Group Path Filter</strong> - Enter a group path prefix (e.g., <code>platform/core</code>) to show only mirrors within that group tree</li>
+                    <li><strong>Sort By</strong> - Sort mirrors by created date, updated date, source path, target path, or status</li>
+                    <li><strong>Order</strong> - Choose ascending or descending sort order</li>
+                </ul>
+
+                <h3>Creating Mirrors</h3>
+                <ol>
+                    <li>Select an instance pair from the dropdown</li>
+                    <li>Search for source and target projects (type at least 2 characters)</li>
+                    <li>Optionally configure per-mirror settings (or inherit from pair defaults)</li>
+                    <li>Click "Create Mirror"</li>
+                </ol>
+                <p><strong>Note:</strong> Project access tokens are automatically created and managed by Mirror Maestro - no manual token configuration needed!</p>
+
+                <h3>Mirror Actions</h3>
+                <ul>
+                    <li><strong>Edit</strong> - Modify mirror settings inline (project paths cannot be changed after creation)</li>
+                    <li><strong>Sync</strong> - Force an immediate mirror synchronization</li>
+                    <li><strong>Rotate Token</strong> - Create a new project access token and revoke the old one</li>
+                    <li><strong>Delete</strong> - Remove the mirror configuration (and associated tokens)</li>
+                </ul>
+
+                <h3>Pagination Controls</h3>
+                <p>At the bottom of the mirror table:</p>
+                <ul>
+                    <li><strong>Page Navigation</strong> - Jump to specific pages or use Previous/Next buttons</li>
+                    <li><strong>Page Size</strong> - Select how many mirrors to show per page (25/50/100/200)</li>
+                    <li><strong>Current Range</strong> - See which mirrors you're viewing (e.g., "Showing 1-50 of 237 mirrors")</li>
+                </ul>
+
+                <h3>Best Practices</h3>
+                <ul>
+                    <li>Use group path filters to focus on specific parts of your GitLab hierarchy</li>
+                    <li>Switch to tree view when working with deeply nested groups</li>
+                    <li>Sort by source path to group similar projects together</li>
+                    <li>Use larger page sizes (100-200) when doing bulk operations</li>
+                    <li>Monitor token status and rotate tokens before they expire</li>
+                </ul>
+            </div>
+
             <!-- System Health -->
             <div class="card">
                 <h2>System Health</h2>
