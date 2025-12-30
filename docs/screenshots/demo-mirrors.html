@@ -87,9 +87,9 @@
                             <input type="text" id="mirror-source-project-search" placeholder="Type to search (min 2 chars)…" value="platform/core">
                             <select id="mirror-source-project" required>
                                 <option value="">Select source project...</option>
-                                <option value="123" selected>platform/core/api-gateway</option>
-                                <option value="124">platform/core/user-service</option>
-                                <option value="125">platform/core/payment-processor</option>
+                                <option value="123" selected>platform/core/services/api-gateway</option>
+                                <option value="124">platform/core/services/user-service</option>
+                                <option value="125">platform/core/services/payment-processor</option>
                                 <option value="126">platform/edge/gateway-proxy</option>
                             </select>
                             <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
@@ -99,9 +99,9 @@
                             <input type="text" id="mirror-target-project-search" placeholder="Type to search (min 2 chars)…" value="platform/core">
                             <select id="mirror-target-project" required>
                                 <option value="">Select target project...</option>
-                                <option value="456" selected>platform/core/api-gateway</option>
-                                <option value="457">platform/core/user-service</option>
-                                <option value="458">platform/core/payment-processor</option>
+                                <option value="456" selected>platform/core/services/api-gateway</option>
+                                <option value="457">platform/core/services/user-service</option>
+                                <option value="458">platform/core/services/payment-processor</option>
                                 <option value="459">platform/edge/gateway-proxy</option>
                             </select>
                             <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
@@ -147,78 +147,82 @@
             </div>
 
             <div class="card">
-                <h3>Configured Mirrors</h3>
-                <table>
+                <div class="flex-between">
+                    <h3>Configured Mirrors</h3>
+                    <div class="flex" style="gap:10px;">
+                        <button class="btn btn-secondary btn-small" title="Toggle between flat list and tree view">
+                            <span id="view-mode-icon">🌳</span> Tree View
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filter and sort controls -->
+                <div class="mirror-controls mt-20 mb-10" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="mirror-group-filter" class="text-muted" style="margin-bottom:6px">Filter by group path</label>
+                        <input type="text" id="mirror-group-filter" placeholder="e.g., platform/core">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="mirror-sort-by" class="text-muted" style="margin-bottom:6px">Sort by</label>
+                        <select id="mirror-sort-by">
+                            <option value="created_at" selected>Created Date</option>
+                            <option value="updated_at">Updated Date</option>
+                            <option value="source_project_path">Source Path</option>
+                            <option value="target_project_path">Target Path</option>
+                            <option value="last_update_status">Status</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="mirror-sort-dir" class="text-muted" style="margin-bottom:6px">Order</label>
+                        <select id="mirror-sort-dir">
+                            <option value="desc" selected>Descending</option>
+                            <option value="asc">Ascending</option>
+                        </select>
+                    </div>
+                </div>
+
+                <table id="mirrors-table" class="enhanced-table">
                     <thead>
                         <tr>
                             <th>Source Project</th>
                             <th>Target Project</th>
                             <th>Effective Settings</th>
                             <th>Status</th>
-                            <th>Token</th>
                             <th>Sync Status</th>
                             <th>Last Sync</th>
+                            <th>Token</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="mirrors-list">
                         <tr>
-                            <td class="cell-locked" title="Project paths cannot be edited">platform/api-gateway</td>
-                            <td class="cell-locked" title="Project paths cannot be edited">platform/api-gateway</td>
+                            <td><span class="project-path-breadcrumb" title="platform/core/services/api-gateway">... / services / api-gateway</span></td>
+                            <td><span class="project-path-breadcrumb" title="backup/platform/core/services/api-gateway">... / services / api-gateway</span></td>
                             <td>
-                                <div style="display:grid; gap:10px">
-                                    <div>
-                                        <span class="text-muted">direction:</span>
-                                        <span class="badge badge-info">pull</span>
-                                    </div>
-                                    <div style="display:grid; gap:8px">
-                                        <label class="text-muted">overwrite</label>
-                                        <select class="table-select">
-                                            <option>Inherit</option>
-                                            <option selected>true</option>
-                                            <option>false</option>
-                                        </select>
-                                        <label class="text-muted">only_protected</label>
-                                        <select class="table-select">
-                                            <option>Inherit</option>
-                                            <option selected>true</option>
-                                            <option>false</option>
-                                        </select>
-                                        <label class="text-muted">trigger (pull only)</label>
-                                        <select class="table-select">
-                                            <option>Inherit</option>
-                                            <option selected>true</option>
-                                            <option>false</option>
-                                        </select>
-                                        <label class="text-muted">branch regex (pull only)</label>
-                                        <select class="table-select">
-                                            <option>Inherit</option>
-                                            <option selected>Override</option>
-                                        </select>
-                                        <input class="table-input" value="^main$">
-                                    </div>
+                                <div style="line-height:1.35">
+                                    <span class="badge badge-info">pull</span><br>
+                                    <span class="text-muted">overwrite:</span> true<br>
+                                    <span class="text-muted">only_protected:</span> true<br>
+                                    <span class="text-muted">trigger:</span> true<br>
+                                    <span class="text-muted">regex:</span> <code>^main$</code>
                                 </div>
                             </td>
-                            <td>
-                                <div class="checkbox-group">
-                                    <input type="checkbox" checked>
-                                    <label>Enabled</label>
-                                </div>
-                            </td>
+                            <td><span class="badge badge-success">Enabled</span></td>
+                            <td><span class="badge badge-info">finished</span></td>
+                            <td>2 hours ago</td>
                             <td><span class="badge badge-success">Active</span></td>
-                            <td class="cell-locked"><span class="badge badge-info">finished</span></td>
-                            <td class="cell-locked">2 hours ago</td>
                             <td>
                                 <div class="table-actions">
-                                    <button class="btn btn-primary btn-small">Save</button>
-                                    <button class="btn btn-secondary btn-small">Cancel</button>
+                                    <button class="btn btn-secondary btn-small">Edit</button>
+                                    <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
                             </td>
                         </tr>
                         <tr>
-                            <td>platform/user-service</td>
-                            <td>platform/user-service</td>
+                            <td><span class="project-path-breadcrumb" title="platform/core/services/user-service">... / services / user-service</span></td>
+                            <td><span class="project-path-breadcrumb" title="backup/platform/core/services/user-service">... / services / user-service</span></td>
                             <td>
                                 <div style="line-height:1.35">
                                     <span class="badge badge-info">pull</span><br>
@@ -229,21 +233,21 @@
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
-                            <td><span class="badge badge-success">Active</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>1 hour ago</td>
+                            <td><span class="badge badge-success">Active</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
-                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
                             </td>
                         </tr>
                         <tr>
-                            <td>platform/payment-processor</td>
-                            <td>platform/payment-processor</td>
+                            <td><span class="project-path-breadcrumb" title="platform/core/services/payment-processor">... / services / payment-processor</span></td>
+                            <td><span class="project-path-breadcrumb" title="backup/platform/core/services/payment-processor">... / services / payment-processor</span></td>
                             <td>
                                 <div style="line-height:1.35">
                                     <span class="badge badge-info">pull</span><br>
@@ -254,21 +258,21 @@
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
-                            <td><span class="badge badge-warning" title="Expires 2026-01-15">Expiring</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>30 minutes ago</td>
+                            <td><span class="badge badge-warning" title="Expires 2026-01-15">Expiring</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
-                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
                             </td>
                         </tr>
                         <tr>
-                            <td>frontend/web-dashboard</td>
-                            <td>frontend/web-dashboard</td>
+                            <td><span class="project-path-breadcrumb" title="platform/core/frontend/web-dashboard">... / frontend / web-dashboard</span></td>
+                            <td><span class="project-path-breadcrumb" title="backup/platform/core/frontend/web-dashboard">... / frontend / web-dashboard</span></td>
                             <td>
                                 <div style="line-height:1.35">
                                     <span class="badge badge-info">pull</span><br>
@@ -279,21 +283,21 @@
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
-                            <td><span class="badge badge-success">Active</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>3 hours ago</td>
+                            <td><span class="badge badge-success">Active</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
-                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
                             </td>
                         </tr>
                         <tr>
-                            <td>infrastructure/terraform-configs</td>
-                            <td>infrastructure/terraform-configs</td>
+                            <td><span class="project-path-breadcrumb" title="platform/infrastructure/terraform/configs">... / terraform / configs</span></td>
+                            <td><span class="project-path-breadcrumb" title="backup/platform/infrastructure/terraform/configs">... / terraform / configs</span></td>
                             <td>
                                 <div style="line-height:1.35">
                                     <span class="badge badge-info">pull</span><br>
@@ -304,21 +308,21 @@
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
-                            <td><span class="badge badge-success">Active</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>45 minutes ago</td>
+                            <td><span class="badge badge-success">Active</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
-                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
                             </td>
                         </tr>
                         <tr>
-                            <td>data/analytics-pipeline</td>
-                            <td>data/analytics-pipeline</td>
+                            <td><span class="project-path-breadcrumb" title="platform/data/analytics/pipeline">... / analytics / pipeline</span></td>
+                            <td><span class="project-path-breadcrumb" title="backup/platform/data/analytics/pipeline">... / analytics / pipeline</span></td>
                             <td>
                                 <div style="line-height:1.35">
                                     <span class="badge badge-info">pull</span><br>
@@ -329,21 +333,21 @@
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
-                            <td><span class="badge badge-danger">Expired</span></td>
                             <td><span class="badge badge-danger">failed</span></td>
                             <td>5 hours ago</td>
+                            <td><span class="badge badge-danger">Expired</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
-                                    <button class="btn btn-warning btn-small">Rotate</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-warning btn-small">Rotate</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
                             </td>
                         </tr>
                         <tr>
                             <td>mobile/ios-app</td>
-                            <td>mobile/ios-app</td>
+                            <td>backup/mobile/ios-app</td>
                             <td>
                                 <div style="line-height:1.35">
                                     <span class="badge badge-info">pull</span><br>
@@ -354,21 +358,21 @@
                                 </div>
                             </td>
                             <td><span class="badge badge-success">Enabled</span></td>
-                            <td><span class="badge badge-success">Active</span></td>
                             <td><span class="badge badge-info">finished</span></td>
                             <td>1 day ago</td>
+                            <td><span class="badge badge-success">Active</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
-                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
                             </td>
                         </tr>
                         <tr>
                             <td>mobile/android-app</td>
-                            <td>mobile/android-app</td>
+                            <td>backup/mobile/android-app</td>
                             <td>
                                 <div style="line-height:1.35">
                                     <span class="badge badge-info">pull</span><br>
@@ -379,20 +383,51 @@
                                 </div>
                             </td>
                             <td><span class="badge badge-warning">Disabled</span></td>
-                            <td><span class="badge badge-secondary">No token</span></td>
                             <td><span class="text-muted">N/A</span></td>
                             <td>Never</td>
+                            <td><span class="badge badge-secondary">No token</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
-                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
                             </td>
                         </tr>
                     </tbody>
                 </table>
+
+                <!-- Pagination controls -->
+                <div id="mirror-pagination" class="mt-20">
+                    <div class="pagination-controls">
+                        <div class="pagination-info">
+                            Showing 1-8 of 47 mirrors
+                        </div>
+                        <div class="pagination-buttons">
+                            <button class="btn btn-secondary btn-small" disabled>
+                                Previous
+                            </button>
+                            <button class="btn btn-primary btn-small" disabled>1</button>
+                            <button class="btn btn-secondary btn-small">2</button>
+                            <button class="btn btn-secondary btn-small">3</button>
+                            <button class="btn btn-secondary btn-small">4</button>
+                            <span class="pagination-ellipsis">...</span>
+                            <button class="btn btn-secondary btn-small">10</button>
+                            <button class="btn btn-secondary btn-small">
+                                Next
+                            </button>
+                        </div>
+                        <div class="pagination-size">
+                            <select id="mirror-page-size" class="table-select">
+                                <option value="25">25 per page</option>
+                                <option value="50" selected>50 per page</option>
+                                <option value="100">100 per page</option>
+                                <option value="200">200 per page</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
