@@ -147,12 +147,16 @@ async def test_sync_all_mirrors_skip_unconfigured(client: AsyncClient, db_sessio
     source_instance = GitLabInstance(
         name="Source GitLab",
         url="https://source.gitlab.com",
-        encrypted_token=encryption.encrypt("source-token")
+        encrypted_token="enc:token1",  # Use simple encrypted format instead of encryption.encrypt()
+        api_user_id=1,
+        api_username="source-user"
     )
     target_instance = GitLabInstance(
         name="Target GitLab",
         url="https://target.gitlab.com",
-        encrypted_token=encryption.encrypt("target-token")
+        encrypted_token="enc:token2",  # Use simple encrypted format instead of encryption.encrypt()
+        api_user_id=2,
+        api_username="target-user"
     )
     db_session.add(source_instance)
     db_session.add(target_instance)
@@ -184,15 +188,20 @@ async def test_sync_all_mirrors_skip_unconfigured(client: AsyncClient, db_sessio
     db_session.add(mirror)
     await db_session.commit()
 
-    # Trigger batch sync
-    response = await client.post(f"/api/pairs/{pair.id}/sync-mirrors")
+    # Mock GitLabClient (not actually called for unconfigured mirrors, but needed for safety)
+    with patch('app.api.pairs.GitLabClient') as MockClient:
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
 
-    assert response.status_code == 200
-    result = response.json()
-    assert result["status"] == "completed"
-    assert result["total"] == 1
-    assert result["succeeded"] == 1
-    assert result["skipped"] == 1  # Should skip unconfigured mirror
+        # Trigger batch sync
+        response = await client.post(f"/api/pairs/{pair.id}/sync-mirrors")
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "completed"
+        assert result["total"] == 1
+        assert result["succeeded"] == 1
+        assert result["skipped"] == 1  # Should skip unconfigured mirror
 
 
 @pytest.mark.asyncio
