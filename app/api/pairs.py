@@ -352,7 +352,13 @@ async def delete_pair(
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
-    """Delete an instance pair."""
+    """
+    Delete an instance pair.
+
+    This performs cascade deletion with proper GitLab cleanup:
+    1. Cleans up all mirrors from GitLab (with rate limiting)
+    2. Deletes mirrors and pair from database
+    """
     result = await db.execute(
         select(InstancePair).where(InstancePair.id == pair_id)
     )
@@ -361,9 +367,64 @@ async def delete_pair(
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
 
-    # Cascade-delete dependent entities (mirrors) to avoid leaving
-    # orphaned rows referencing this pair.
-    #
+    # Fetch all mirrors for this pair
+    mirrors_result = await db.execute(
+        select(Mirror).where(Mirror.instance_pair_id == pair_id)
+    )
+    mirrors_to_delete = list(mirrors_result.scalars().all())
+
+    # Import the cleanup helper from mirrors module
+    from app.api.mirrors import _cleanup_mirror_from_gitlab
+
+    # Clean up mirrors from GitLab with rate limiting (if any)
+    cleanup_warnings = []
+    if mirrors_to_delete:
+        logger.info(f"Cleaning up {len(mirrors_to_delete)} mirrors from GitLab before deleting pair {pair_id}")
+
+        rate_limiter = RateLimiter(
+            delay_ms=settings.gitlab_api_delay_ms,
+            max_retries=settings.gitlab_api_max_retries
+        )
+        tracker = BatchOperationTracker(total_items=len(mirrors_to_delete))
+        rate_limiter.start_tracking()
+
+        for idx, mirror in enumerate(mirrors_to_delete):
+            try:
+                # Clean up from GitLab (best effort)
+                gitlab_failed, gitlab_err, token_failed, token_err = await _cleanup_mirror_from_gitlab(mirror, db)
+
+                if gitlab_failed or token_failed:
+                    warning = f"Mirror {mirror.id} ({mirror.source_project_path}→{mirror.target_project_path}): "
+                    if gitlab_failed:
+                        warning += f"GitLab cleanup failed ({gitlab_err}); "
+                    if token_failed:
+                        warning += f"Token cleanup failed ({token_err})"
+                    cleanup_warnings.append(warning)
+                    tracker.record_failure(warning)
+                else:
+                    tracker.record_success()
+
+                logger.info(f"[{idx + 1}/{len(mirrors_to_delete)}] Cleaned up mirror {mirror.id}")
+
+            except Exception as e:
+                error_msg = f"Mirror {mirror.id}: {str(e)}"
+                cleanup_warnings.append(error_msg)
+                tracker.record_failure(error_msg)
+                logger.error(f"Failed to clean up mirror {mirror.id}: {str(e)}")
+
+            # Apply rate limiting delay (except after last mirror)
+            if idx < len(mirrors_to_delete) - 1:
+                await rate_limiter.delay()
+
+        summary = tracker.get_summary()
+        metrics = rate_limiter.get_metrics()
+        logger.info(
+            f"GitLab cleanup completed for pair {pair_id}: "
+            f"{summary['succeeded']} succeeded, {summary['failed']} failed "
+            f"in {summary['duration_seconds']}s ({metrics['operations_per_second']} ops/sec)"
+        )
+
+    # Now delete from database
     # CRITICAL: All delete operations must succeed atomically or be rolled back together
     try:
         # Delete mirrors first (they reference the pair)
@@ -377,14 +438,20 @@ async def delete_pair(
     except Exception as e:
         # Rollback all changes if any operation fails to maintain data integrity
         await db.rollback()
-        import logging
-        logging.error(f"Failed to delete instance pair {pair_id}: {str(e)}")
+        logger.error(f"Failed to delete instance pair {pair_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail="Failed to delete instance pair. Database changes have been rolled back to maintain data integrity."
         )
 
-    return {"status": "deleted"}
+    # Return status with warnings if GitLab cleanup had issues
+    response = {"status": "deleted"}
+    if cleanup_warnings:
+        response["warnings"] = cleanup_warnings
+        response["warning_count"] = len(cleanup_warnings)
+        logger.warning(f"Pair {pair_id} deleted with {len(cleanup_warnings)} cleanup warnings")
+
+    return response
 
 
 @router.post("/{pair_id}/sync-mirrors")

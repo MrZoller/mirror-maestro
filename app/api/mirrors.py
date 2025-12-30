@@ -1058,23 +1058,17 @@ async def update_mirror(
     )
 
 
-@router.delete("/{mirror_id}")
-async def delete_mirror(
-    mirror_id: int,
-    db: AsyncSession = Depends(get_db),
-    _: str = Depends(verify_credentials)
-):
-    """Delete a mirror."""
-    result = await db.execute(
-        select(Mirror).where(Mirror.id == mirror_id)
-    )
-    mirror = result.scalar_one_or_none()
+async def _cleanup_mirror_from_gitlab(
+    mirror: Mirror,
+    db: AsyncSession
+) -> tuple[bool, str | None, bool, str | None]:
+    """
+    Clean up a mirror from GitLab (delete mirror and token).
 
-    if not mirror:
-        raise HTTPException(status_code=404, detail="Mirror not found")
-
+    Returns:
+        Tuple of (gitlab_cleanup_failed, gitlab_error_msg, token_cleanup_failed, token_error_msg)
+    """
     # Try to delete from GitLab (best effort)
-    # If GitLab deletion fails, we still delete from database but warn the user
     gitlab_cleanup_failed = False
     gitlab_error_msg = None
 
@@ -1104,18 +1098,19 @@ async def delete_mirror(
                     logging.info(f"Successfully deleted GitLab mirror {mirror.mirror_id}")
                 else:
                     import logging
-                    logging.warning(f"GitLab instance not found for mirror {mirror_id}, skipping GitLab cleanup")
+                    logging.warning(f"GitLab instance not found for mirror {mirror.id}, skipping GitLab cleanup")
                     gitlab_cleanup_failed = True
                     gitlab_error_msg = "GitLab instance not found"
             else:
                 import logging
-                logging.warning(f"Instance pair not found for mirror {mirror_id}, skipping GitLab cleanup")
+                logging.warning(f"Instance pair not found for mirror {mirror.id}, skipping GitLab cleanup")
                 gitlab_cleanup_failed = True
                 gitlab_error_msg = "Instance pair not found"
     except Exception as e:
-        # Log the error but continue with database deletion
+        # Log the error but continue
         import logging
-        logging.error(f"Failed to delete mirror {mirror.mirror_id} from GitLab (project {project_id if 'project_id' in locals() else 'unknown'}): {str(e)}")
+        project_id_str = str(mirror.source_project_id if hasattr(mirror, 'source_project_id') else 'unknown')
+        logging.error(f"Failed to delete mirror {mirror.mirror_id} from GitLab (project {project_id_str}): {str(e)}")
         gitlab_cleanup_failed = True
         gitlab_error_msg = str(e)
 
@@ -1149,7 +1144,7 @@ async def delete_mirror(
                     logging.info(f"Successfully deleted project access token {mirror.gitlab_token_id}")
                 else:
                     import logging
-                    logging.warning(f"Token instance not found for mirror {mirror_id}, token may be orphaned")
+                    logging.warning(f"Token instance not found for mirror {mirror.id}, token may be orphaned")
                     token_cleanup_failed = True
                     token_error_msg = "Token instance not found"
         except Exception as e:
@@ -1157,6 +1152,27 @@ async def delete_mirror(
             logging.error(f"Failed to delete project access token {mirror.gitlab_token_id}: {str(e)}")
             token_cleanup_failed = True
             token_error_msg = str(e)
+
+    return gitlab_cleanup_failed, gitlab_error_msg, token_cleanup_failed, token_error_msg
+
+
+@router.delete("/{mirror_id}")
+async def delete_mirror(
+    mirror_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials)
+):
+    """Delete a mirror."""
+    result = await db.execute(
+        select(Mirror).where(Mirror.id == mirror_id)
+    )
+    mirror = result.scalar_one_or_none()
+
+    if not mirror:
+        raise HTTPException(status_code=404, detail="Mirror not found")
+
+    # Clean up from GitLab (best effort)
+    gitlab_cleanup_failed, gitlab_error_msg, token_cleanup_failed, token_error_msg = await _cleanup_mirror_from_gitlab(mirror, db)
 
     # Always delete from database
     await db.delete(mirror)
