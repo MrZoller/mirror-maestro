@@ -1,5 +1,6 @@
 from typing import List
 import re
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,11 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from app.database import get_db
 from app.models import InstancePair, GitLabInstance, Mirror
 from app.core.auth import verify_credentials
+from app.core.gitlab_client import GitLabClient
+from app.core.rate_limiter import RateLimiter, BatchOperationTracker
+from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/pairs", tags=["pairs"])
@@ -379,3 +385,142 @@ async def delete_pair(
         )
 
     return {"status": "deleted"}
+
+
+@router.post("/{pair_id}/sync-mirrors")
+async def sync_all_mirrors(
+    pair_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials)
+):
+    """
+    Trigger batch sync for all enabled mirrors in this instance pair.
+
+    This endpoint processes mirrors sequentially with rate limiting to avoid
+    overwhelming GitLab instances. Use this to resume all mirrors after a
+    GitLab instance outage or scheduled maintenance.
+
+    Returns:
+        Summary of sync operations including counts and any errors
+    """
+    # Verify pair exists
+    pair_result = await db.execute(
+        select(InstancePair).where(InstancePair.id == pair_id)
+    )
+    pair = pair_result.scalar_one_or_none()
+
+    if not pair:
+        raise HTTPException(status_code=404, detail="Instance pair not found")
+
+    # Get all enabled mirrors for this pair
+    mirrors_result = await db.execute(
+        select(Mirror).where(
+            Mirror.instance_pair_id == pair_id,
+            Mirror.enabled == True
+        )
+    )
+    mirrors = mirrors_result.scalars().all()
+
+    if not mirrors:
+        return {
+            "status": "completed",
+            "total": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "skipped": 0,
+            "errors": [],
+            "message": "No enabled mirrors found for this pair"
+        }
+
+    # Get source and target instances
+    source_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id)
+    )
+    source_instance = source_result.scalar_one_or_none()
+
+    target_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id)
+    )
+    target_instance = target_result.scalar_one_or_none()
+
+    if not source_instance or not target_instance:
+        raise HTTPException(status_code=404, detail="Source or target instance not found")
+
+    # Determine which instance owns the mirror configuration
+    direction = pair.mirror_direction
+    mirror_instance = source_instance if direction == "push" else target_instance
+
+    # Initialize rate limiter and tracker
+    rate_limiter = RateLimiter(
+        delay_ms=settings.gitlab_api_delay_ms,
+        max_retries=settings.gitlab_api_max_retries
+    )
+    tracker = BatchOperationTracker(total_items=len(mirrors))
+    rate_limiter.start_tracking()
+
+    # Create GitLab client
+    client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token)
+
+    # Process each mirror
+    skipped = 0
+    errors = []
+
+    for idx, mirror in enumerate(mirrors):
+        mirror_identifier = f"{mirror.source_project_path} → {mirror.target_project_path}"
+        project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
+
+        # Skip if mirror not configured in GitLab
+        if not mirror.mirror_id:
+            logger.warning(f"Skipping mirror {mirror.id}: not configured in GitLab")
+            skipped += 1
+            tracker.record_success()  # Count as processed but don't track as error
+            continue
+
+        try:
+            # Trigger mirror update with retry logic
+            def trigger_update():
+                return client.trigger_mirror_update(project_id, mirror.mirror_id)
+
+            await rate_limiter.execute_with_retry(
+                trigger_update,
+                operation_name=f"sync mirror {mirror.id}"
+            )
+
+            # Update mirror status in database
+            mirror.last_update_status = "updating"
+            await db.commit()
+
+            tracker.record_success()
+            logger.info(f"[{idx + 1}/{len(mirrors)}] Triggered sync for {mirror_identifier}")
+
+        except Exception as e:
+            error_msg = f"{mirror_identifier}: {str(e)}"
+            errors.append(error_msg)
+            tracker.record_failure(error_msg)
+            logger.error(f"Failed to trigger sync for mirror {mirror.id}: {str(e)}")
+            # Continue with next mirror instead of failing entirely
+
+        # Apply rate limiting delay (except after last mirror)
+        if idx < len(mirrors) - 1:
+            await rate_limiter.delay()
+
+    # Get final summary
+    summary = tracker.get_summary()
+    metrics = rate_limiter.get_metrics()
+
+    logger.info(
+        f"Batch sync completed for pair {pair_id}: "
+        f"{summary['succeeded']} succeeded, {summary['failed']} failed, {skipped} skipped "
+        f"in {summary['duration_seconds']}s ({metrics['operations_per_second']} ops/sec)"
+    )
+
+    return {
+        "status": "completed",
+        "total": len(mirrors),
+        "succeeded": summary["succeeded"],
+        "failed": summary["failed"],
+        "skipped": skipped,
+        "errors": errors,
+        "duration_seconds": summary["duration_seconds"],
+        "operations_per_second": metrics["operations_per_second"]
+    }
