@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
@@ -9,7 +10,11 @@ from app.database import get_db
 from app.models import Mirror, InstancePair, GitLabInstance
 from app.core.auth import verify_credentials
 from app.core.gitlab_client import GitLabClient
+from app.core.rate_limiter import RateLimiter, BatchOperationTracker
+from app.config import settings
 from app.api.mirrors import _create_mirror_internal, MirrorCreate
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_download_filename(name: str) -> str:
@@ -199,11 +204,21 @@ async def import_pair_mirrors(
     source_client = GitLabClient(source_instance.url, source_instance.encrypted_token)
     target_client = GitLabClient(target_instance.url, target_instance.encrypted_token)
 
+    # Initialize rate limiter and tracker for batch import
+    rate_limiter = RateLimiter(
+        delay_ms=settings.gitlab_api_delay_ms,
+        max_retries=settings.gitlab_api_max_retries
+    )
+    tracker = BatchOperationTracker(total_items=len(import_data.mirrors))
+    rate_limiter.start_tracking()
+
     imported_count = 0
     skipped_count = 0
     errors = []
     skipped = []  # Track which mirrors were skipped with details
     total_mirrors = len(import_data.mirrors)
+
+    logger.info(f"Starting import of {total_mirrors} mirrors for pair {pair_id}")
 
     for idx, mirror_data in enumerate(import_data.mirrors, start=1):
         mirror_identifier = f"[{idx}/{total_mirrors}] {mirror_data.source_project_path} → {mirror_data.target_project_path}"
@@ -221,6 +236,10 @@ async def import_pair_mirrors(
         if existing:
             skipped_count += 1
             skipped.append(f"{mirror_identifier}: Already exists in database")
+            tracker.record_success()  # Count as processed
+            # Apply rate limiting delay before next iteration (except on last item)
+            if idx < total_mirrors:
+                await rate_limiter.delay()
             continue
 
         try:
@@ -265,6 +284,8 @@ async def import_pair_mirrors(
                 skip_duplicate_check=True  # We already checked above
             )
             imported_count += 1
+            tracker.record_success()
+            logger.info(f"{mirror_identifier}: Successfully imported")
 
         except HTTPException as http_exc:
             # HTTP exceptions from the helper (like 409 conflicts for existing pull mirrors)
@@ -273,16 +294,38 @@ async def import_pair_mirrors(
             detail_msg = http_exc.detail
             if isinstance(detail_msg, dict):
                 detail_msg = detail_msg.get("message", str(detail_msg))
-            errors.append(f"{mirror_identifier}: {detail_msg}")
+            error_msg = f"{mirror_identifier}: {detail_msg}"
+            errors.append(error_msg)
+            tracker.record_failure(error_msg)
+            logger.error(error_msg)
         except Exception as e:
             # Any other error
             await db.rollback()
-            errors.append(f"{mirror_identifier}: {str(e)}")
+            error_msg = f"{mirror_identifier}: {str(e)}"
+            errors.append(error_msg)
+            tracker.record_failure(error_msg)
+            logger.error(error_msg)
+
+        # Apply rate limiting delay before next iteration (except on last item)
+        if idx < total_mirrors:
+            await rate_limiter.delay()
+
+    # Get final metrics
+    summary = tracker.get_summary()
+    metrics = rate_limiter.get_metrics()
+
+    logger.info(
+        f"Import completed for pair {pair_id}: "
+        f"{imported_count} imported, {skipped_count} skipped, {len(errors)} errors "
+        f"in {summary['duration_seconds']}s ({metrics['operations_per_second']} ops/sec)"
+    )
 
     return {
         "status": "completed",
         "imported": imported_count,
         "skipped": skipped_count,
         "skipped_details": skipped,
-        "errors": errors
+        "errors": errors,
+        "duration_seconds": summary["duration_seconds"],
+        "operations_per_second": metrics["operations_per_second"]
     }

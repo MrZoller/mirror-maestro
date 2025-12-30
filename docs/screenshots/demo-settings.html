@@ -10,11 +10,22 @@
     <header>
         <div class="container">
             <div class="header-content">
-                <div>
-                    <h1>Mirror Maestro</h1>
-                    <p>Orchestrate GitLab mirrors across multiple instance pairs with precision</p>
+                <div class="header-title-section">
+                    <img src="../../app/static/images/logo.svg" alt="Mirror Maestro Logo" class="header-logo">
+                    <div>
+                        <h1>Mirror Maestro</h1>
+                        <p>Orchestrate GitLab mirrors across multiple instance pairs with precision</p>
+                    </div>
                 </div>
-                <div style="display: flex; align-items: center; gap: 16px;">
+                <div class="header-controls">
+                    <div class="global-search-container">
+                        <input type="search" id="global-search" class="global-search-input" placeholder="Search instances, pairs, mirrors..." aria-label="Global search">
+                        <div id="global-search-results" class="global-search-results"></div>
+                    </div>
+                    <button id="dark-mode-toggle" class="dark-mode-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+                        <span class="theme-icon theme-icon-light">☀️</span>
+                        <span class="theme-icon theme-icon-dark">🌙</span>
+                    </button>
                     <div class="user-menu open" id="user-menu">
                         <button class="user-menu-toggle" id="user-menu-toggle" aria-label="User menu">
                             <span class="user-avatar">👤</span>

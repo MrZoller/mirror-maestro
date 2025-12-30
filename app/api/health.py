@@ -11,6 +11,8 @@ from app.database import get_db, engine
 from app.models import GitLabInstance, InstancePair, Mirror
 from app.core.auth import verify_credentials
 from app.core.gitlab_client import GitLabClient
+from app.core.rate_limiter import RateLimiter
+from app.config import settings
 
 
 router = APIRouter(prefix="/api/health", tags=["health"])
@@ -302,19 +304,48 @@ async def _get_token_health(db: AsyncSession) -> TokenHealthSummary:
 
 
 async def _check_instances(db: AsyncSession) -> List[InstanceHealthDetail]:
-    """Check connectivity to all GitLab instances."""
+    """
+    Check connectivity to all GitLab instances with rate limiting.
+
+    Uses configurable delays between instance checks to avoid overwhelming
+    multiple GitLab instances simultaneously.
+    """
     import time
+    import logging
+
+    logger = logging.getLogger(__name__)
 
     result = await db.execute(select(GitLabInstance))
-    instances = result.scalars().all()
+    instances = list(result.scalars().all())
 
     health_results: List[InstanceHealthDetail] = []
 
-    for instance in instances:
+    # Apply rate limiting if checking multiple instances
+    if len(instances) > 1:
+        rate_limiter = RateLimiter(
+            delay_ms=settings.gitlab_api_delay_ms,
+            max_retries=settings.gitlab_api_max_retries
+        )
+        logger.info(f"Checking {len(instances)} instances with rate limiting")
+    else:
+        rate_limiter = None
+
+    for idx, instance in enumerate(instances):
         start = time.perf_counter()
         try:
-            client = GitLabClient(instance.url, instance.encrypted_token)
-            client.test_connection()
+            def check_connection():
+                client = GitLabClient(instance.url, instance.encrypted_token)
+                return client.test_connection()
+
+            # Use retry logic if rate limiter is available
+            if rate_limiter:
+                await rate_limiter.execute_with_retry(
+                    check_connection,
+                    operation_name=f"check instance {instance.id}"
+                )
+            else:
+                check_connection()
+
             latency = (time.perf_counter() - start) * 1000
 
             health_results.append(InstanceHealthDetail(
@@ -340,5 +371,9 @@ async def _check_instances(db: AsyncSession) -> List[InstanceHealthDetail]:
                 status=status,
                 error=str(e)[:200]  # Truncate long errors
             ))
+
+        # Apply rate limiting delay (except after last instance)
+        if rate_limiter and idx < len(instances) - 1:
+            await rate_limiter.delay()
 
     return health_results

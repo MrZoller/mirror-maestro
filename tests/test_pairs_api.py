@@ -4,6 +4,31 @@ from sqlalchemy import select
 from app.models import GitLabInstance, InstancePair, Mirror
 
 
+class FakeGitLabClient:
+    """Mock GitLab client for tests."""
+    def __init__(self, url: str, encrypted_token: str):
+        pass
+
+    def delete_mirror(self, project_id: int, mirror_id: int):
+        """Mock delete_mirror for cleanup operations."""
+        pass
+
+    def delete_project_access_token(self, project_id: int, token_id: int):
+        """Mock delete_project_access_token for cleanup operations."""
+        pass
+
+
+def patch_gitlab_client(monkeypatch, client_class):
+    """Helper to patch GitLabClient in all modules that import it."""
+    import app.core.gitlab_client
+    import app.api.pairs
+    import app.api.mirrors
+
+    monkeypatch.setattr(app.core.gitlab_client, "GitLabClient", client_class)
+    monkeypatch.setattr(app.api.pairs, "GitLabClient", client_class)
+    monkeypatch.setattr(app.api.mirrors, "GitLabClient", client_class)
+
+
 async def seed_instance(session_maker, *, name: str, url: str = "https://x") -> int:
     async with session_maker() as s:
         inst = GitLabInstance(name=name, url=url, encrypted_token="enc:t", description="")
@@ -50,7 +75,14 @@ async def test_pairs_create_list_update_delete(client, session_maker):
 
 
 @pytest.mark.asyncio
-async def test_pairs_delete_cascades_mirrors_and_group_defaults(client, session_maker):
+async def test_pairs_delete_cascades_mirrors_and_group_defaults(client, session_maker, monkeypatch):
+    """
+    Test that deleting a pair also deletes associated mirrors from both
+    the database and GitLab with proper rate limiting.
+    """
+    # Patch GitLabClient so cleanup operations use mock instead of real client
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
+
     src_id = await seed_instance(session_maker, name="src")
     tgt_id = await seed_instance(session_maker, name="tgt")
 
