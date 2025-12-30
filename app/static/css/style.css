@@ -857,7 +857,7 @@ table tbody tr:hover {
 
 .topology-canvas {
     position: relative;
-    min-height: 520px;
+    height: 520px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     overflow: hidden;
