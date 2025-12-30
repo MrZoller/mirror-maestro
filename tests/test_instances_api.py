@@ -125,7 +125,7 @@ async def test_instances_delete_cascades_pairs_mirrors_group_settings_and_tokens
 
     # Mock the cleanup helper to verify GitLab cleanup is called
     cleanup_mock = AsyncMock(return_value=(False, None, False, None))
-    with patch('app.api.instances._cleanup_mirror_from_gitlab', cleanup_mock):
+    with patch('app.api.mirrors._cleanup_mirror_from_gitlab', cleanup_mock):
         # Delete source instance and assert cascade.
         resp = await client.delete(f"/api/instances/{src_id}")
         assert resp.status_code == 200, resp.text
@@ -209,7 +209,7 @@ async def test_instances_delete_with_gitlab_cleanup_failures(client, session_mak
 
     # Mock cleanup to fail for GitLab cleanup but succeed for token cleanup
     cleanup_mock = AsyncMock(return_value=(True, "GitLab API error", False, None))
-    with patch('app.api.instances._cleanup_mirror_from_gitlab', cleanup_mock):
+    with patch('app.api.mirrors._cleanup_mirror_from_gitlab', cleanup_mock):
         resp = await client.delete(f"/api/instances/{src_id}")
         assert resp.status_code == 200
         result = resp.json()

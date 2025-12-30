@@ -88,7 +88,7 @@ async def test_pairs_delete_cascades_mirrors_and_group_defaults(client, session_
 
     # Mock the cleanup helper to verify GitLab cleanup is called
     cleanup_mock = AsyncMock(return_value=(False, None, False, None))
-    with patch('app.api.pairs._cleanup_mirror_from_gitlab', cleanup_mock):
+    with patch('app.api.mirrors._cleanup_mirror_from_gitlab', cleanup_mock):
         resp = await client.delete(f"/api/pairs/{pair_id}")
         assert resp.status_code == 200
         assert resp.json() == {"status": "deleted"}
@@ -152,7 +152,7 @@ async def test_pairs_delete_with_gitlab_cleanup_failures(client, session_maker):
 
     # Mock cleanup to fail for token cleanup
     cleanup_mock = AsyncMock(return_value=(False, None, True, "Token deletion failed"))
-    with patch('app.api.pairs._cleanup_mirror_from_gitlab', cleanup_mock):
+    with patch('app.api.mirrors._cleanup_mirror_from_gitlab', cleanup_mock):
         resp = await client.delete(f"/api/pairs/{pair_id}")
         assert resp.status_code == 200
         result = resp.json()
