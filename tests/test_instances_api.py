@@ -26,6 +26,25 @@ class FakeGitLabClient:
     def get_current_user(self):
         return self.current_user
 
+    def delete_mirror(self, project_id: int, mirror_id: int):
+        """Mock delete_mirror for cleanup operations."""
+        pass
+
+    def delete_project_access_token(self, project_id: int, token_id: int):
+        """Mock delete_project_access_token for cleanup operations."""
+        pass
+
+
+def patch_gitlab_client(monkeypatch, client_class):
+    """Helper to patch GitLabClient in all modules that import it."""
+    import app.core.gitlab_client
+    import app.api.instances
+    import app.api.mirrors
+
+    monkeypatch.setattr(app.core.gitlab_client, "GitLabClient", client_class)
+    monkeypatch.setattr(app.api.instances, "GitLabClient", client_class)
+    monkeypatch.setattr(app.api.mirrors, "GitLabClient", client_class)
+
 
 @pytest.mark.asyncio
 async def test_instances_list_empty(client):
@@ -36,9 +55,7 @@ async def test_instances_list_empty(client):
 
 @pytest.mark.asyncio
 async def test_instances_create_and_get_and_delete(client, session_maker, monkeypatch):
-    from app.api import instances as mod
-
-    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
 
     payload = {
@@ -72,10 +89,9 @@ async def test_instances_delete_cascades_pairs_mirrors_group_settings_and_tokens
     """
     Deleting a GitLab instance should also delete any associated instance pairs and mirrors
     (and related group defaults), plus group access tokens for that instance.
+    This now includes GitLab cleanup with rate limiting before database deletion.
     """
-    from app.api import instances as inst_mod
-
-    monkeypatch.setattr(inst_mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
 
     # Create two instances via API (exercises encryption swap + token user fetch best-effort).
@@ -122,6 +138,7 @@ async def test_instances_delete_cascades_pairs_mirrors_group_settings_and_tokens
         await s.commit()
 
     # Delete source instance and assert cascade.
+    # FakeGitLabClient will handle the cleanup calls
     resp = await client.delete(f"/api/instances/{src_id}")
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"status": "deleted"}
@@ -141,9 +158,7 @@ async def test_instances_delete_cascades_pairs_mirrors_group_settings_and_tokens
 
 @pytest.mark.asyncio
 async def test_instances_create_rejects_bad_connection(client, monkeypatch):
-    from app.api import instances as mod
-
-    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = False
 
     resp = await client.post(
@@ -155,9 +170,7 @@ async def test_instances_create_rejects_bad_connection(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_instances_update_token(client, session_maker, monkeypatch):
-    from app.api import instances as mod
-
-    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
 
     resp = await client.post(
@@ -176,9 +189,7 @@ async def test_instances_update_token(client, session_maker, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_instances_projects_and_groups(client, session_maker, monkeypatch):
-    from app.api import instances as mod
-
-    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
     FakeGitLabClient.projects = [{"id": 123, "name": "proj"}]
     FakeGitLabClient.groups = [{"id": 456, "name": "grp"}]
@@ -200,9 +211,7 @@ async def test_instances_projects_and_groups(client, session_maker, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_instances_update_url_disallowed_when_used_by_pair(client, session_maker, monkeypatch):
-    from app.api import instances as inst_mod
-
-    monkeypatch.setattr(inst_mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
 
     resp = await client.post(
@@ -268,9 +277,7 @@ async def test_instances_groups_not_found(client):
 @pytest.mark.asyncio
 async def test_instances_projects_pagination_clamping(client, session_maker, monkeypatch):
     """Test that pagination parameters are clamped to safe values."""
-    from app.api import instances as mod
-
-    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
     FakeGitLabClient.projects = []
 
@@ -293,8 +300,6 @@ async def test_instances_projects_pagination_clamping(client, session_maker, mon
 @pytest.mark.asyncio
 async def test_instances_projects_gitlab_error(client, session_maker, monkeypatch):
     """Test error handling when GitLab API fails for projects."""
-    from app.api import instances as mod
-
     class FailingGitLabClient:
         def __init__(self, url: str, encrypted_token: str):
             pass
@@ -302,7 +307,7 @@ async def test_instances_projects_gitlab_error(client, session_maker, monkeypatc
         def get_projects(self, *args, **kwargs):
             raise Exception("GitLab API down")
 
-    monkeypatch.setattr(mod, "GitLabClient", FailingGitLabClient)
+    patch_gitlab_client(monkeypatch, FailingGitLabClient)
 
     # Create instance
     async with session_maker() as s:
@@ -322,8 +327,6 @@ async def test_instances_projects_gitlab_error(client, session_maker, monkeypatc
 @pytest.mark.asyncio
 async def test_instances_groups_gitlab_error(client, session_maker, monkeypatch):
     """Test error handling when GitLab API fails for groups."""
-    from app.api import instances as mod
-
     class FailingGitLabClient:
         def __init__(self, url: str, encrypted_token: str):
             pass
@@ -331,7 +334,7 @@ async def test_instances_groups_gitlab_error(client, session_maker, monkeypatch)
         def get_groups(self, *args, **kwargs):
             raise Exception("GitLab API error")
 
-    monkeypatch.setattr(mod, "GitLabClient", FailingGitLabClient)
+    patch_gitlab_client(monkeypatch, FailingGitLabClient)
 
     # Create instance
     async with session_maker() as s:
@@ -351,9 +354,7 @@ async def test_instances_groups_gitlab_error(client, session_maker, monkeypatch)
 @pytest.mark.asyncio
 async def test_instances_projects_with_search(client, session_maker, monkeypatch):
     """Test fetching projects with search parameter."""
-    from app.api import instances as mod
-
-    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
     FakeGitLabClient.projects = [
         {"id": 1, "name": "matching-project"},
@@ -376,9 +377,7 @@ async def test_instances_projects_with_search(client, session_maker, monkeypatch
 @pytest.mark.asyncio
 async def test_instances_groups_with_pagination(client, session_maker, monkeypatch):
     """Test fetching groups with pagination."""
-    from app.api import instances as mod
-
-    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
     FakeGitLabClient.groups = [
         {"id": 1, "name": "group1"},
@@ -401,9 +400,7 @@ async def test_instances_groups_with_pagination(client, session_maker, monkeypat
 @pytest.mark.asyncio
 async def test_instances_update_description_only(client, session_maker, monkeypatch):
     """Test updating only the description field."""
-    from app.api import instances as mod
-
-    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
 
     # Create instance
@@ -422,9 +419,7 @@ async def test_instances_update_description_only(client, session_maker, monkeypa
 @pytest.mark.asyncio
 async def test_instances_update_name_only(client, session_maker, monkeypatch):
     """Test updating only the name field."""
-    from app.api import instances as mod
-
-    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
 
     # Create instance
@@ -443,9 +438,7 @@ async def test_instances_update_name_only(client, session_maker, monkeypatch):
 @pytest.mark.asyncio
 async def test_instances_create_with_empty_description(client, monkeypatch):
     """Test creating instance with empty description."""
-    from app.api import instances as mod
-
-    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
 
     resp = await client.post(
