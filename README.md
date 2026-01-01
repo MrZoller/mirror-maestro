@@ -24,8 +24,8 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 *Configure pairs of GitLab instances for mirroring*
 
 ### Mirrors Management
-![Mirrors](docs/screenshots/04-mirrors.png?v=3)
-*View and manage mirrors with pagination, smart path truncation, tree view for nested groups, group filtering, sorting, token status, real-time sync status, and safe per-mirror edits*
+![Mirrors](docs/screenshots/04-mirrors.png?v=5)
+*View and manage mirrors with pagination, smart path truncation, tree view for nested groups, group filtering, sorting, token status, real-time sync status, safe per-mirror edits, and **issue sync configuration** with visual indicators*
 
 ### Topology
 ![Topology](docs/screenshots/05-topology.png?v=3)
