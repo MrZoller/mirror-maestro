@@ -113,7 +113,7 @@ async def test_create_duplicate_issue_mirror_config(client, sample_mirror, db_se
     })
 
     assert response.status_code == 409
-    assert "already has issue sync configured" in response.json()["detail"]
+    assert "already exists" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -261,7 +261,7 @@ async def test_trigger_sync_creates_job(client, sample_mirror, db_session):
     # Mock the GitLab clients to avoid actual API calls
     from unittest.mock import patch, AsyncMock
 
-    with patch('app.api.issue_mirrors.IssueSyncEngine') as MockEngine:
+    with patch('app.core.issue_sync.IssueSyncEngine') as MockEngine:
         mock_engine = AsyncMock()
         mock_engine.sync.return_value = {
             "issues_processed": 0,
