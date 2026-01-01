@@ -1,0 +1,810 @@
+"""Core issue mirroring sync engine."""
+
+import hashlib
+import logging
+import re
+from datetime import datetime
+from typing import Dict, List, Optional, Set, Tuple, Any
+from urllib.parse import urlparse
+import httpx
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.gitlab_client import GitLabClient
+from app.models import (
+    Mirror,
+    MirrorIssueConfig,
+    IssueMapping,
+    CommentMapping,
+    LabelMapping,
+    AttachmentMapping,
+    GitLabInstance,
+    InstancePair,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+# -------------------------------------------------------------------------
+# Constants
+# -------------------------------------------------------------------------
+
+MIRROR_FROM_LABEL_PREFIX = "Mirrored-From"
+MIRROR_FROM_LABEL_COLOR = "#0052CC"
+MIRROR_FOOTER_SEPARATOR = "\n\n---\n\n"
+MIRROR_FOOTER_MARKER = "<!-- MIRROR_MAESTRO_FOOTER -->"
+
+
+# -------------------------------------------------------------------------
+# Helper Functions
+# -------------------------------------------------------------------------
+
+def compute_content_hash(content: str) -> str:
+    """Compute SHA256 hash of content for change detection."""
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+
+def extract_footer(description: Optional[str]) -> Tuple[str, Optional[str]]:
+    """
+    Extract main content and footer from issue description.
+
+    Returns:
+        Tuple of (main_content, footer) where footer is None if not present.
+    """
+    if not description:
+        return "", None
+
+    if MIRROR_FOOTER_MARKER in description:
+        parts = description.split(MIRROR_FOOTER_MARKER, 1)
+        return parts[0].rstrip(), parts[1] if len(parts) > 1 else None
+
+    return description, None
+
+
+def build_footer(
+    source_instance_url: str,
+    source_project_path: str,
+    source_issue_iid: int,
+    source_web_url: str,
+    milestone: Optional[Dict[str, Any]],
+    iteration: Optional[Dict[str, Any]],
+    epic: Optional[Dict[str, Any]],
+    assignees: List[Dict[str, Any]],
+) -> str:
+    """
+    Build description footer with PM field information.
+
+    Returns:
+        Markdown footer content.
+    """
+    lines = [
+        MIRROR_FOOTER_MARKER,
+        "",
+        "### 📋 Mirror Information",
+        "",
+        f"🔗 **Source**: [{source_project_path}#{source_issue_iid}]({source_web_url})",
+        "",
+    ]
+
+    # Add PM fields if present
+    pm_fields = []
+
+    if milestone:
+        milestone_title = milestone.get("title", "Unknown")
+        lines.append(f"🎯 **Milestone**: {milestone_title}")
+        pm_fields.append(f"Milestone::{milestone_title}")
+
+    if iteration:
+        iteration_title = iteration.get("title", "Unknown")
+        lines.append(f"🔄 **Iteration**: {iteration_title}")
+        pm_fields.append(f"Iteration::{iteration_title}")
+
+    if epic:
+        epic_title = epic.get("title", "Unknown")
+        epic_iid = epic.get("iid", "?")
+        lines.append(f"🏔️ **Epic**: &{epic_iid} {epic_title}")
+        pm_fields.append(f"Epic::&{epic_iid}")
+
+    if assignees:
+        assignee_names = [a.get("name", a.get("username", "Unknown")) for a in assignees]
+        lines.append(f"👤 **Assignees**: {', '.join(assignee_names)}")
+        for assignee in assignees:
+            username = assignee.get("username", "Unknown")
+            pm_fields.append(f"Assignee::@{username}")
+
+    return "\n".join(lines)
+
+
+def convert_pm_fields_to_labels(
+    milestone: Optional[Dict[str, Any]],
+    iteration: Optional[Dict[str, Any]],
+    epic: Optional[Dict[str, Any]],
+    assignees: List[Dict[str, Any]],
+) -> List[str]:
+    """
+    Convert PM fields (milestone/iteration/epic/assignees) to label names.
+
+    Returns:
+        List of label names to apply.
+    """
+    labels = []
+
+    if milestone:
+        milestone_title = milestone.get("title", "").strip()
+        if milestone_title:
+            labels.append(f"Milestone::{milestone_title}")
+
+    if iteration:
+        iteration_title = iteration.get("title", "").strip()
+        if iteration_title:
+            labels.append(f"Iteration::{iteration_title}")
+
+    if epic:
+        epic_iid = epic.get("iid")
+        if epic_iid:
+            labels.append(f"Epic::&{epic_iid}")
+
+    for assignee in assignees:
+        username = assignee.get("username", "").strip()
+        if username:
+            labels.append(f"Assignee::@{username}")
+
+    return labels
+
+
+def get_mirror_from_label(instance_id: int) -> str:
+    """Get the Mirrored-From label name for an instance."""
+    return f"{MIRROR_FROM_LABEL_PREFIX}::instance-{instance_id}"
+
+
+def extract_mirror_urls_from_description(description: Optional[str]) -> Set[str]:
+    """
+    Extract attachment URLs from description markdown.
+
+    Returns:
+        Set of URLs found in markdown image/link syntax.
+    """
+    if not description:
+        return set()
+
+    urls = set()
+
+    # Match markdown images: ![alt](url)
+    image_pattern = r'!\[.*?\]\((https?://[^\)]+)\)'
+    urls.update(re.findall(image_pattern, description))
+
+    # Match markdown links: [text](url)
+    link_pattern = r'\[.*?\]\((https?://[^\)]+)\)'
+    urls.update(re.findall(link_pattern, description))
+
+    return urls
+
+
+async def download_file(url: str) -> Optional[bytes]:
+    """
+    Download a file from a URL.
+
+    Returns:
+        File content as bytes, or None if download failed.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, follow_redirects=True, timeout=30.0)
+            response.raise_for_status()
+            return response.content
+    except Exception as e:
+        logger.error(f"Failed to download file from {url}: {e}")
+        return None
+
+
+def extract_filename_from_url(url: str) -> str:
+    """Extract filename from URL."""
+    path = urlparse(url).path
+    filename = path.split('/')[-1] if '/' in path else ''
+    return filename if filename else 'attachment'
+
+
+def replace_urls_in_description(description: str, url_mapping: Dict[str, str]) -> str:
+    """
+    Replace source URLs with target URLs in description.
+
+    Args:
+        description: Original description with source URLs.
+        url_mapping: Dict mapping source URLs to target URLs.
+
+    Returns:
+        Description with replaced URLs.
+    """
+    result = description
+    for source_url, target_url in url_mapping.items():
+        result = result.replace(source_url, target_url)
+    return result
+
+
+# -------------------------------------------------------------------------
+# Issue Sync Engine
+# -------------------------------------------------------------------------
+
+class IssueSyncEngine:
+    """Engine for syncing issues from source to target GitLab instance."""
+
+    def __init__(
+        self,
+        db: AsyncSession,
+        config: MirrorIssueConfig,
+        mirror: Mirror,
+        source_instance: GitLabInstance,
+        target_instance: GitLabInstance,
+        instance_pair: InstancePair,
+    ):
+        """Initialize sync engine."""
+        self.db = db
+        self.config = config
+        self.mirror = mirror
+        self.source_instance = source_instance
+        self.target_instance = target_instance
+        self.instance_pair = instance_pair
+
+        # Initialize GitLab clients
+        self.source_client = GitLabClient(
+            source_instance.url,
+            source_instance.encrypted_token
+        )
+        self.target_client = GitLabClient(
+            target_instance.url,
+            target_instance.encrypted_token
+        )
+
+        # Cache for labels
+        self.target_labels_cache: Dict[str, Dict[str, Any]] = {}
+        self.mirror_from_label: str = get_mirror_from_label(source_instance.id)
+
+    async def sync(self) -> Dict[str, Any]:
+        """
+        Perform a full sync of issues.
+
+        Returns:
+            Dict with sync statistics.
+        """
+        logger.info(
+            f"Starting issue sync for mirror {self.mirror.id} "
+            f"({self.mirror.source_project_path} → {self.mirror.target_project_path})"
+        )
+
+        stats = {
+            "issues_processed": 0,
+            "issues_created": 0,
+            "issues_updated": 0,
+            "issues_skipped": 0,
+            "issues_failed": 0,
+            "errors": [],
+        }
+
+        try:
+            # Load target labels into cache
+            await self._load_target_labels_cache()
+
+            # Ensure Mirrored-From label exists on target
+            await self._ensure_mirror_from_label()
+
+            # Determine which issues to sync
+            if self.config.last_sync_at and not self.config.sync_existing_issues:
+                # Incremental sync: only issues updated after last sync
+                updated_after = self.config.last_sync_at.isoformat()
+                logger.info(f"Incremental sync: fetching issues updated after {updated_after}")
+            elif not self.config.sync_existing_issues:
+                # First sync without sync_existing_issues: use current time as baseline
+                # This means we won't sync any existing issues, only new ones going forward
+                updated_after = datetime.utcnow().isoformat()
+                logger.info("First sync without sync_existing_issues: only new issues will be synced")
+            else:
+                # Sync all issues (sync_existing_issues = True)
+                updated_after = None
+                logger.info("Full sync: fetching all issues")
+
+            # Determine state filter
+            state_filter = "all" if self.config.sync_closed_issues else "opened"
+
+            # Fetch issues from source
+            source_issues = self.source_client.get_issues(
+                self.mirror.source_project_id,
+                updated_after=updated_after,
+                state=state_filter,
+                per_page=100,
+            )
+
+            logger.info(f"Found {len(source_issues)} issues to process")
+
+            # Sync each issue
+            for source_issue in source_issues:
+                try:
+                    await self._sync_issue(source_issue, stats)
+                except Exception as e:
+                    logger.error(
+                        f"Failed to sync issue {source_issue.get('iid')}: {e}",
+                        exc_info=True
+                    )
+                    stats["issues_failed"] += 1
+                    stats["errors"].append({
+                        "issue_iid": source_issue.get("iid"),
+                        "error": str(e)
+                    })
+
+            logger.info(
+                f"Issue sync completed: {stats['issues_created']} created, "
+                f"{stats['issues_updated']} updated, {stats['issues_skipped']} skipped, "
+                f"{stats['issues_failed']} failed"
+            )
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Issue sync failed: {e}", exc_info=True)
+            stats["errors"].append({"error": str(e)})
+            raise
+
+    async def _sync_issue(
+        self,
+        source_issue: Dict[str, Any],
+        stats: Dict[str, Any]
+    ) -> None:
+        """Sync a single issue from source to target."""
+        source_issue_id = source_issue["id"]
+        source_issue_iid = source_issue["iid"]
+
+        stats["issues_processed"] += 1
+
+        # Check if issue is already mirrored
+        result = await self.db.execute(
+            select(IssueMapping).where(
+                IssueMapping.mirror_issue_config_id == self.config.id,
+                IssueMapping.source_issue_id == source_issue_id,
+            )
+        )
+        mapping = result.scalar_one_or_none()
+
+        # Compute content hash for change detection
+        content_to_hash = f"{source_issue['title']}|||{source_issue.get('description', '')}"
+        current_hash = compute_content_hash(content_to_hash)
+
+        if mapping:
+            # Issue already mirrored - check if update needed
+            if not self.config.update_existing:
+                logger.debug(f"Skipping issue {source_issue_iid}: update_existing is False")
+                stats["issues_skipped"] += 1
+                return
+
+            if mapping.source_content_hash == current_hash:
+                logger.debug(f"Skipping issue {source_issue_iid}: no changes detected")
+                stats["issues_skipped"] += 1
+                return
+
+            # Update existing issue
+            await self._update_target_issue(source_issue, mapping, current_hash)
+            stats["issues_updated"] += 1
+        else:
+            # Create new issue
+            await self._create_target_issue(source_issue, current_hash)
+            stats["issues_created"] += 1
+
+    async def _create_target_issue(
+        self,
+        source_issue: Dict[str, Any],
+        content_hash: str
+    ) -> None:
+        """Create a new issue on target instance."""
+        source_issue_id = source_issue["id"]
+        source_issue_iid = source_issue["iid"]
+
+        # Prepare labels
+        labels = self._prepare_labels(source_issue)
+
+        # Prepare description with footer
+        description = self._prepare_description(source_issue)
+
+        # Handle attachments if enabled
+        if self.config.sync_attachments:
+            description = await self._sync_attachments_in_description(
+                description,
+                source_issue_id,
+                None,  # No existing mapping yet
+            )
+
+        # Create issue on target
+        target_issue = self.target_client.create_issue(
+            self.mirror.target_project_id,
+            title=source_issue["title"],
+            description=description,
+            labels=labels,
+            weight=source_issue.get("weight") if self.config.sync_weight else None,
+        )
+
+        target_issue_id = target_issue["id"]
+        target_issue_iid = target_issue["iid"]
+
+        logger.info(
+            f"Created target issue {target_issue_iid} for source issue {source_issue_iid}"
+        )
+
+        # Sync time tracking if enabled
+        if self.config.sync_time_estimate or self.config.sync_time_spent:
+            await self._sync_time_tracking(source_issue, target_issue_iid)
+
+        # Close target issue if source is closed
+        if source_issue["state"] == "closed" and self.config.sync_closed_issues:
+            self.target_client.update_issue(
+                self.mirror.target_project_id,
+                target_issue_iid,
+                state_event="close"
+            )
+
+        # Create issue mapping
+        mapping = IssueMapping(
+            mirror_issue_config_id=self.config.id,
+            source_issue_id=source_issue_id,
+            source_issue_iid=source_issue_iid,
+            source_project_id=self.mirror.source_project_id,
+            target_issue_id=target_issue_id,
+            target_issue_iid=target_issue_iid,
+            target_project_id=self.mirror.target_project_id,
+            last_synced_at=datetime.utcnow(),
+            source_updated_at=self._parse_datetime(source_issue.get("updated_at")),
+            target_updated_at=datetime.utcnow(),
+            sync_status="synced",
+            source_content_hash=content_hash,
+        )
+        self.db.add(mapping)
+        await self.db.commit()
+
+        # Sync comments if enabled
+        if self.config.sync_comments:
+            await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+
+    async def _update_target_issue(
+        self,
+        source_issue: Dict[str, Any],
+        mapping: IssueMapping,
+        content_hash: str
+    ) -> None:
+        """Update an existing issue on target instance."""
+        source_issue_iid = source_issue["iid"]
+        target_issue_iid = mapping.target_issue_iid
+
+        # Prepare labels
+        labels = self._prepare_labels(source_issue)
+
+        # Prepare description with footer
+        description = self._prepare_description(source_issue)
+
+        # Handle attachments if enabled
+        if self.config.sync_attachments:
+            description = await self._sync_attachments_in_description(
+                description,
+                source_issue["id"],
+                mapping.id,
+            )
+
+        # Update issue on target
+        self.target_client.update_issue(
+            self.mirror.target_project_id,
+            target_issue_iid,
+            title=source_issue["title"],
+            description=description,
+            labels=labels,
+            weight=source_issue.get("weight") if self.config.sync_weight else None,
+        )
+
+        logger.info(
+            f"Updated target issue {target_issue_iid} for source issue {source_issue_iid}"
+        )
+
+        # Sync time tracking if enabled
+        if self.config.sync_time_estimate or self.config.sync_time_spent:
+            await self._sync_time_tracking(source_issue, target_issue_iid)
+
+        # Sync state (open/closed)
+        if source_issue["state"] == "closed" and self.config.sync_closed_issues:
+            self.target_client.update_issue(
+                self.mirror.target_project_id,
+                target_issue_iid,
+                state_event="close"
+            )
+        elif source_issue["state"] == "opened":
+            self.target_client.update_issue(
+                self.mirror.target_project_id,
+                target_issue_iid,
+                state_event="reopen"
+            )
+
+        # Update mapping
+        mapping.source_content_hash = content_hash
+        mapping.last_synced_at = datetime.utcnow()
+        mapping.source_updated_at = self._parse_datetime(source_issue.get("updated_at"))
+        mapping.target_updated_at = datetime.utcnow()
+        mapping.sync_status = "synced"
+        await self.db.commit()
+
+        # Sync comments if enabled
+        if self.config.sync_comments:
+            await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+
+    def _prepare_labels(self, source_issue: Dict[str, Any]) -> List[str]:
+        """Prepare labels for target issue, including PM field conversions."""
+        labels = []
+
+        # Add Mirrored-From label
+        labels.append(self.mirror_from_label)
+
+        # Add source labels if enabled
+        if self.config.sync_labels:
+            source_labels = source_issue.get("labels", [])
+            labels.extend(source_labels)
+
+        # Convert PM fields to labels
+        pm_labels = convert_pm_fields_to_labels(
+            milestone=source_issue.get("milestone"),
+            iteration=source_issue.get("iteration"),  # May not be present in all GitLab versions
+            epic=source_issue.get("epic"),
+            assignees=source_issue.get("assignees", []),
+        )
+        labels.extend(pm_labels)
+
+        return labels
+
+    def _prepare_description(self, source_issue: Dict[str, Any]) -> str:
+        """Prepare description with footer containing PM field information."""
+        original_description = source_issue.get("description") or ""
+
+        # Extract main content (remove old footer if present)
+        main_content, _ = extract_footer(original_description)
+
+        # Build new footer
+        footer = build_footer(
+            source_instance_url=self.source_instance.url,
+            source_project_path=self.mirror.source_project_path,
+            source_issue_iid=source_issue["iid"],
+            source_web_url=source_issue["web_url"],
+            milestone=source_issue.get("milestone"),
+            iteration=source_issue.get("iteration"),
+            epic=source_issue.get("epic"),
+            assignees=source_issue.get("assignees", []),
+        )
+
+        # Combine main content and footer
+        return f"{main_content}{MIRROR_FOOTER_SEPARATOR}{footer}"
+
+    async def _sync_time_tracking(
+        self,
+        source_issue: Dict[str, Any],
+        target_issue_iid: int
+    ) -> None:
+        """Sync time estimate and time spent from source to target issue."""
+        time_stats = source_issue.get("time_stats")
+        if not time_stats:
+            return
+
+        # Sync time estimate
+        if self.config.sync_time_estimate:
+            time_estimate = time_stats.get("time_estimate")
+            if time_estimate and time_estimate > 0:
+                # Convert seconds to human-readable format
+                duration = self._seconds_to_duration(time_estimate)
+                self.target_client.set_time_estimate(
+                    self.mirror.target_project_id,
+                    target_issue_iid,
+                    duration
+                )
+
+        # Sync time spent
+        if self.config.sync_time_spent:
+            total_time_spent = time_stats.get("total_time_spent")
+            if total_time_spent and total_time_spent > 0:
+                # Reset time spent first, then add
+                self.target_client.reset_time_spent(
+                    self.mirror.target_project_id,
+                    target_issue_iid
+                )
+                duration = self._seconds_to_duration(total_time_spent)
+                self.target_client.add_time_spent(
+                    self.mirror.target_project_id,
+                    target_issue_iid,
+                    duration
+                )
+
+    async def _sync_comments(
+        self,
+        source_issue_iid: int,
+        target_issue_iid: int,
+        issue_mapping_id: int
+    ) -> None:
+        """Sync comments from source to target issue."""
+        # Fetch source comments (excluding system notes)
+        source_notes = self.source_client.get_issue_notes(
+            self.mirror.source_project_id,
+            source_issue_iid
+        )
+
+        source_notes = [n for n in source_notes if not n.get("system", False)]
+
+        # Fetch existing comment mappings
+        result = await self.db.execute(
+            select(CommentMapping).where(
+                CommentMapping.issue_mapping_id == issue_mapping_id
+            )
+        )
+        existing_mappings = {m.source_note_id: m for m in result.scalars().all()}
+
+        for source_note in source_notes:
+            source_note_id = source_note["id"]
+            source_note_body = source_note.get("body", "")
+            content_hash = compute_content_hash(source_note_body)
+
+            if source_note_id in existing_mappings:
+                # Comment already synced - check if update needed
+                mapping = existing_mappings[source_note_id]
+
+                if mapping.source_content_hash == content_hash:
+                    # No changes
+                    continue
+
+                # Update target comment
+                self.target_client.update_issue_note(
+                    self.mirror.target_project_id,
+                    target_issue_iid,
+                    mapping.target_note_id,
+                    source_note_body
+                )
+
+                mapping.source_content_hash = content_hash
+                mapping.last_synced_at = datetime.utcnow()
+                await self.db.commit()
+            else:
+                # Create new comment on target
+                target_note = self.target_client.create_issue_note(
+                    self.mirror.target_project_id,
+                    target_issue_iid,
+                    source_note_body
+                )
+
+                # Create mapping
+                mapping = CommentMapping(
+                    issue_mapping_id=issue_mapping_id,
+                    source_note_id=source_note_id,
+                    target_note_id=target_note["id"],
+                    last_synced_at=datetime.utcnow(),
+                    source_content_hash=content_hash,
+                )
+                self.db.add(mapping)
+                await self.db.commit()
+
+    async def _sync_attachments_in_description(
+        self,
+        description: str,
+        source_issue_id: int,
+        issue_mapping_id: Optional[int]
+    ) -> str:
+        """
+        Sync attachments referenced in description.
+
+        Downloads files from source URLs and uploads to target,
+        then replaces URLs in description.
+
+        Returns:
+            Description with replaced URLs.
+        """
+        # Extract URLs from description
+        source_urls = extract_mirror_urls_from_description(description)
+
+        if not source_urls:
+            return description
+
+        url_mapping = {}
+
+        for source_url in source_urls:
+            # Check if this attachment was already synced
+            if issue_mapping_id:
+                result = await self.db.execute(
+                    select(AttachmentMapping).where(
+                        AttachmentMapping.issue_mapping_id == issue_mapping_id,
+                        AttachmentMapping.source_url == source_url,
+                    )
+                )
+                existing = result.scalar_one_or_none()
+
+                if existing:
+                    # Already synced - reuse target URL
+                    url_mapping[source_url] = existing.target_url
+                    continue
+
+            # Download file from source
+            file_content = await download_file(source_url)
+            if not file_content:
+                logger.warning(f"Failed to download attachment: {source_url}")
+                continue
+
+            # Extract filename
+            filename = extract_filename_from_url(source_url)
+
+            # Upload to target
+            try:
+                upload_result = self.target_client.upload_file(
+                    self.mirror.target_project_id,
+                    file_content,
+                    filename
+                )
+
+                # Get full URL (GitLab returns relative URL)
+                target_url = upload_result.get("url")
+                if target_url and not target_url.startswith("http"):
+                    target_url = f"{self.target_instance.url}{target_url}"
+
+                url_mapping[source_url] = target_url
+
+                # Create attachment mapping
+                if issue_mapping_id:
+                    attachment_mapping = AttachmentMapping(
+                        issue_mapping_id=issue_mapping_id,
+                        source_url=source_url,
+                        target_url=target_url,
+                        filename=filename,
+                        file_size=len(file_content),
+                        uploaded_at=datetime.utcnow(),
+                    )
+                    self.db.add(attachment_mapping)
+                    await self.db.commit()
+
+                logger.info(f"Synced attachment: {filename}")
+
+            except Exception as e:
+                logger.error(f"Failed to upload attachment {filename}: {e}")
+
+        # Replace URLs in description
+        return replace_urls_in_description(description, url_mapping)
+
+    async def _load_target_labels_cache(self) -> None:
+        """Load all target project labels into cache."""
+        labels = self.target_client.get_project_labels(self.mirror.target_project_id)
+        self.target_labels_cache = {label["name"]: label for label in labels}
+        logger.debug(f"Loaded {len(labels)} labels into cache")
+
+    async def _ensure_mirror_from_label(self) -> None:
+        """Ensure the Mirrored-From label exists on target project."""
+        if self.mirror_from_label not in self.target_labels_cache:
+            # Create the label
+            try:
+                label = self.target_client.create_label(
+                    self.mirror.target_project_id,
+                    name=self.mirror_from_label,
+                    color=MIRROR_FROM_LABEL_COLOR,
+                    description=f"Issue mirrored from {self.source_instance.url}"
+                )
+                self.target_labels_cache[self.mirror_from_label] = label
+                logger.info(f"Created Mirrored-From label: {self.mirror_from_label}")
+            except Exception as e:
+                logger.warning(f"Failed to create Mirrored-From label: {e}")
+
+    @staticmethod
+    def _seconds_to_duration(seconds: int) -> str:
+        """Convert seconds to GitLab duration string (e.g., '3h30m')."""
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+
+        parts = []
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+
+        return "".join(parts) if parts else "0m"
+
+    @staticmethod
+    def _parse_datetime(dt_str: Optional[str]) -> Optional[datetime]:
+        """Parse ISO 8601 datetime string."""
+        if not dt_str:
+            return None
+        try:
+            return datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+        except Exception:
+            return None
