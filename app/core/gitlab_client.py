@@ -946,3 +946,556 @@ class GitLabClient:
             raise
         except Exception as e:
             _handle_gitlab_error(e, f"Failed to rotate project access token {token_id} on project {project_id}")
+
+    # -------------------------------------------------------------------------
+    # Issue Operations (for issue mirroring)
+    # -------------------------------------------------------------------------
+
+    def get_issues(
+        self,
+        project_id: int,
+        *,
+        updated_after: Optional[str] = None,
+        state: Optional[str] = None,
+        per_page: int = 100,
+        page: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get issues from a project with optional filtering.
+
+        Args:
+            project_id: The project ID.
+            updated_after: ISO 8601 datetime string to filter issues updated after this time.
+            state: Filter by state ('opened', 'closed', 'all').
+            per_page: Number of issues per page.
+            page: Page number.
+
+        Returns:
+            List of issue dictionaries.
+        """
+        try:
+            params: Dict[str, Any] = {
+                "per_page": per_page,
+                "page": page,
+            }
+            if updated_after:
+                params["updated_after"] = updated_after
+            if state:
+                params["state"] = state
+
+            issues = self.gl.http_get(f"/projects/{project_id}/issues", query_data=params)
+            if not isinstance(issues, list):
+                return []
+
+            result = []
+            for issue in issues:
+                if not isinstance(issue, dict):
+                    continue
+                result.append({
+                    "id": issue.get("id"),
+                    "iid": issue.get("iid"),
+                    "title": issue.get("title"),
+                    "description": issue.get("description"),
+                    "state": issue.get("state"),
+                    "labels": issue.get("labels", []),
+                    "milestone": issue.get("milestone"),
+                    "assignees": issue.get("assignees", []),
+                    "author": issue.get("author"),
+                    "weight": issue.get("weight"),
+                    "time_stats": issue.get("time_stats"),
+                    "created_at": issue.get("created_at"),
+                    "updated_at": issue.get("updated_at"),
+                    "closed_at": issue.get("closed_at"),
+                    "web_url": issue.get("web_url"),
+                })
+            return result
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to fetch issues for project {project_id}")
+
+    def get_issue(self, project_id: int, issue_iid: int) -> Dict[str, Any]:
+        """
+        Get a specific issue by IID.
+
+        Args:
+            project_id: The project ID.
+            issue_iid: The issue IID (not ID).
+
+        Returns:
+            Issue dictionary.
+        """
+        try:
+            issue = self.gl.http_get(f"/projects/{project_id}/issues/{issue_iid}")
+            if not isinstance(issue, dict):
+                raise GitLabClientError(f"Failed to get issue {issue_iid} from project {project_id}: Unexpected response")
+
+            return {
+                "id": issue.get("id"),
+                "iid": issue.get("iid"),
+                "title": issue.get("title"),
+                "description": issue.get("description"),
+                "state": issue.get("state"),
+                "labels": issue.get("labels", []),
+                "milestone": issue.get("milestone"),
+                "assignees": issue.get("assignees", []),
+                "author": issue.get("author"),
+                "weight": issue.get("weight"),
+                "time_stats": issue.get("time_stats"),
+                "created_at": issue.get("created_at"),
+                "updated_at": issue.get("updated_at"),
+                "closed_at": issue.get("closed_at"),
+                "web_url": issue.get("web_url"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to get issue {issue_iid} from project {project_id}")
+
+    def create_issue(
+        self,
+        project_id: int,
+        title: str,
+        description: Optional[str] = None,
+        labels: Optional[List[str]] = None,
+        weight: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new issue.
+
+        Args:
+            project_id: The project ID.
+            title: Issue title.
+            description: Issue description (markdown).
+            labels: List of label names.
+            weight: Issue weight.
+
+        Returns:
+            Created issue dictionary.
+        """
+        try:
+            data: Dict[str, Any] = {"title": title}
+            if description is not None:
+                data["description"] = description
+            if labels:
+                data["labels"] = ",".join(labels)
+            if weight is not None:
+                data["weight"] = weight
+
+            issue = self.gl.http_post(f"/projects/{project_id}/issues", post_data=data)
+            if not isinstance(issue, dict):
+                raise GitLabClientError(f"Failed to create issue on project {project_id}: Unexpected response")
+
+            return {
+                "id": issue.get("id"),
+                "iid": issue.get("iid"),
+                "title": issue.get("title"),
+                "description": issue.get("description"),
+                "state": issue.get("state"),
+                "labels": issue.get("labels", []),
+                "weight": issue.get("weight"),
+                "web_url": issue.get("web_url"),
+                "created_at": issue.get("created_at"),
+                "updated_at": issue.get("updated_at"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to create issue on project {project_id}")
+
+    def update_issue(
+        self,
+        project_id: int,
+        issue_iid: int,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        labels: Optional[List[str]] = None,
+        state_event: Optional[str] = None,
+        weight: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update an existing issue.
+
+        Args:
+            project_id: The project ID.
+            issue_iid: The issue IID.
+            title: New title.
+            description: New description.
+            labels: New labels list.
+            state_event: State change ('close' or 'reopen').
+            weight: New weight.
+
+        Returns:
+            Updated issue dictionary.
+        """
+        try:
+            data: Dict[str, Any] = {}
+            if title is not None:
+                data["title"] = title
+            if description is not None:
+                data["description"] = description
+            if labels is not None:
+                data["labels"] = ",".join(labels)
+            if state_event is not None:
+                data["state_event"] = state_event
+            if weight is not None:
+                data["weight"] = weight
+
+            issue = self.gl.http_put(f"/projects/{project_id}/issues/{issue_iid}", post_data=data)
+            if not isinstance(issue, dict):
+                raise GitLabClientError(f"Failed to update issue {issue_iid} on project {project_id}: Unexpected response")
+
+            return {
+                "id": issue.get("id"),
+                "iid": issue.get("iid"),
+                "title": issue.get("title"),
+                "description": issue.get("description"),
+                "state": issue.get("state"),
+                "labels": issue.get("labels", []),
+                "weight": issue.get("weight"),
+                "updated_at": issue.get("updated_at"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to update issue {issue_iid} on project {project_id}")
+
+    # -------------------------------------------------------------------------
+    # Label Operations (for issue mirroring)
+    # -------------------------------------------------------------------------
+
+    def get_project_labels(self, project_id: int) -> List[Dict[str, Any]]:
+        """
+        Get all labels for a project.
+
+        Args:
+            project_id: The project ID.
+
+        Returns:
+            List of label dictionaries.
+        """
+        try:
+            labels = self.gl.http_get(f"/projects/{project_id}/labels")
+            if not isinstance(labels, list):
+                return []
+
+            return [
+                {
+                    "id": label.get("id"),
+                    "name": label.get("name"),
+                    "color": label.get("color"),
+                    "description": label.get("description"),
+                }
+                for label in labels
+                if isinstance(label, dict)
+            ]
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to fetch labels for project {project_id}")
+
+    def create_label(
+        self,
+        project_id: int,
+        name: str,
+        color: str = "#428BCA",
+        description: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new project label.
+
+        Args:
+            project_id: The project ID.
+            name: Label name.
+            color: Label color (hex format).
+            description: Label description.
+
+        Returns:
+            Created label dictionary.
+        """
+        try:
+            data: Dict[str, Any] = {"name": name, "color": color}
+            if description:
+                data["description"] = description
+
+            label = self.gl.http_post(f"/projects/{project_id}/labels", post_data=data)
+            if not isinstance(label, dict):
+                raise GitLabClientError(f"Failed to create label on project {project_id}: Unexpected response")
+
+            return {
+                "id": label.get("id"),
+                "name": label.get("name"),
+                "color": label.get("color"),
+                "description": label.get("description"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to create label '{name}' on project {project_id}")
+
+    # -------------------------------------------------------------------------
+    # Note/Comment Operations (for issue mirroring)
+    # -------------------------------------------------------------------------
+
+    def get_issue_notes(
+        self,
+        project_id: int,
+        issue_iid: int,
+        *,
+        per_page: int = 100,
+        page: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get comments/notes for an issue.
+
+        Args:
+            project_id: The project ID.
+            issue_iid: The issue IID.
+            per_page: Number of notes per page.
+            page: Page number.
+
+        Returns:
+            List of note dictionaries.
+        """
+        try:
+            params = {"per_page": per_page, "page": page}
+            notes = self.gl.http_get(
+                f"/projects/{project_id}/issues/{issue_iid}/notes",
+                query_data=params
+            )
+            if not isinstance(notes, list):
+                return []
+
+            return [
+                {
+                    "id": note.get("id"),
+                    "body": note.get("body"),
+                    "author": note.get("author"),
+                    "created_at": note.get("created_at"),
+                    "updated_at": note.get("updated_at"),
+                    "system": note.get("system", False),
+                }
+                for note in notes
+                if isinstance(note, dict)
+            ]
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to fetch notes for issue {issue_iid} on project {project_id}")
+
+    def create_issue_note(
+        self,
+        project_id: int,
+        issue_iid: int,
+        body: str,
+    ) -> Dict[str, Any]:
+        """
+        Create a comment on an issue.
+
+        Args:
+            project_id: The project ID.
+            issue_iid: The issue IID.
+            body: Comment body (markdown).
+
+        Returns:
+            Created note dictionary.
+        """
+        try:
+            data = {"body": body}
+            note = self.gl.http_post(
+                f"/projects/{project_id}/issues/{issue_iid}/notes",
+                post_data=data
+            )
+            if not isinstance(note, dict):
+                raise GitLabClientError(
+                    f"Failed to create note on issue {issue_iid} in project {project_id}: Unexpected response"
+                )
+
+            return {
+                "id": note.get("id"),
+                "body": note.get("body"),
+                "author": note.get("author"),
+                "created_at": note.get("created_at"),
+                "updated_at": note.get("updated_at"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to create note on issue {issue_iid} in project {project_id}")
+
+    def update_issue_note(
+        self,
+        project_id: int,
+        issue_iid: int,
+        note_id: int,
+        body: str,
+    ) -> Dict[str, Any]:
+        """
+        Update an existing comment on an issue.
+
+        Args:
+            project_id: The project ID.
+            issue_iid: The issue IID.
+            note_id: The note ID.
+            body: New comment body (markdown).
+
+        Returns:
+            Updated note dictionary.
+        """
+        try:
+            data = {"body": body}
+            note = self.gl.http_put(
+                f"/projects/{project_id}/issues/{issue_iid}/notes/{note_id}",
+                post_data=data
+            )
+            if not isinstance(note, dict):
+                raise GitLabClientError(
+                    f"Failed to update note {note_id} on issue {issue_iid} in project {project_id}: Unexpected response"
+                )
+
+            return {
+                "id": note.get("id"),
+                "body": note.get("body"),
+                "updated_at": note.get("updated_at"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(
+                e, f"Failed to update note {note_id} on issue {issue_iid} in project {project_id}"
+            )
+
+    # -------------------------------------------------------------------------
+    # Time Tracking Operations (for issue mirroring)
+    # -------------------------------------------------------------------------
+
+    def set_time_estimate(
+        self,
+        project_id: int,
+        issue_iid: int,
+        duration: str,
+    ) -> Dict[str, Any]:
+        """
+        Set time estimate on an issue.
+
+        Args:
+            project_id: The project ID.
+            issue_iid: The issue IID.
+            duration: Duration string (e.g., '3h30m', '1d', '2w').
+
+        Returns:
+            Updated time stats.
+        """
+        try:
+            data = {"duration": duration}
+            result = self.gl.http_post(
+                f"/projects/{project_id}/issues/{issue_iid}/time_estimate",
+                post_data=data
+            )
+            if not isinstance(result, dict):
+                raise GitLabClientError(
+                    f"Failed to set time estimate on issue {issue_iid} in project {project_id}: Unexpected response"
+                )
+
+            return {
+                "time_estimate": result.get("time_estimate"),
+                "total_time_spent": result.get("total_time_spent"),
+                "human_time_estimate": result.get("human_time_estimate"),
+                "human_total_time_spent": result.get("human_total_time_spent"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to set time estimate on issue {issue_iid} in project {project_id}")
+
+    def reset_time_spent(
+        self,
+        project_id: int,
+        issue_iid: int,
+    ) -> Dict[str, Any]:
+        """
+        Reset time spent on an issue to 0.
+
+        Args:
+            project_id: The project ID.
+            issue_iid: The issue IID.
+
+        Returns:
+            Updated time stats.
+        """
+        try:
+            result = self.gl.http_post(
+                f"/projects/{project_id}/issues/{issue_iid}/reset_time_spent"
+            )
+            if not isinstance(result, dict):
+                raise GitLabClientError(
+                    f"Failed to reset time spent on issue {issue_iid} in project {project_id}: Unexpected response"
+                )
+
+            return {
+                "time_estimate": result.get("time_estimate"),
+                "total_time_spent": result.get("total_time_spent"),
+                "human_time_estimate": result.get("human_time_estimate"),
+                "human_total_time_spent": result.get("human_total_time_spent"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to reset time spent on issue {issue_iid} in project {project_id}")
+
+    def add_time_spent(
+        self,
+        project_id: int,
+        issue_iid: int,
+        duration: str,
+    ) -> Dict[str, Any]:
+        """
+        Add time spent to an issue.
+
+        Args:
+            project_id: The project ID.
+            issue_iid: The issue IID.
+            duration: Duration string (e.g., '3h30m', '1d', '2w').
+
+        Returns:
+            Updated time stats.
+        """
+        try:
+            data = {"duration": duration}
+            result = self.gl.http_post(
+                f"/projects/{project_id}/issues/{issue_iid}/add_spent_time",
+                post_data=data
+            )
+            if not isinstance(result, dict):
+                raise GitLabClientError(
+                    f"Failed to add time spent on issue {issue_iid} in project {project_id}: Unexpected response"
+                )
+
+            return {
+                "time_estimate": result.get("time_estimate"),
+                "total_time_spent": result.get("total_time_spent"),
+                "human_time_estimate": result.get("human_time_estimate"),
+                "human_total_time_spent": result.get("human_total_time_spent"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to add time spent on issue {issue_iid} in project {project_id}")
+
+    # -------------------------------------------------------------------------
+    # File Upload Operations (for attachment mirroring)
+    # -------------------------------------------------------------------------
+
+    def upload_file(
+        self,
+        project_id: int,
+        file_content: bytes,
+        filename: str,
+    ) -> Dict[str, Any]:
+        """
+        Upload a file to a project's uploads directory.
+
+        Args:
+            project_id: The project ID.
+            file_content: File content as bytes.
+            filename: Filename.
+
+        Returns:
+            Dict with 'url' (absolute URL) and 'markdown' (markdown link).
+        """
+        try:
+            # GitLab expects multipart/form-data
+            files = {"file": (filename, file_content)}
+            result = self.gl.http_post(
+                f"/projects/{project_id}/uploads",
+                files=files
+            )
+            if not isinstance(result, dict):
+                raise GitLabClientError(
+                    f"Failed to upload file to project {project_id}: Unexpected response"
+                )
+
+            return {
+                "url": result.get("url"),  # Relative URL
+                "full_path": result.get("full_path"),
+                "markdown": result.get("markdown"),
+                "alt": result.get("alt"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to upload file to project {project_id}")
