@@ -32,6 +32,39 @@ Issue mirroring follows the same pattern as repository mirroring: always one-way
 - No cross-mirror conflict detection (user responsibility to avoid editing same issue on both sides)
 - Simpler architecture, easier to reason about and debug
 
+**Bidirectional Workflow Example:**
+
+Common use case: Two development environments where developers work in both, but agile planning happens in one.
+
+```
+Environment A (Primary - Agile Hub):
+- Issues created here
+- Sprint planning, iterations, milestones, epics managed here
+- Weight assigned during planning
+- Some developers work and log time here
+- All MRs and code merging happen here
+
+Environment B (Secondary - Work Environment):
+- Developers see mirrored issues
+- Set time estimates on issues
+- Log time spent working
+- Create MRs (that get mirrored to A for merging)
+
+Bidirectional Mirrors: A→B and B→A
+
+Field Flow:
+1. Issue created in A with weight=5
+2. A→B sync: Issue appears in B with weight=5
+3. Dev in B sets time_estimate=2h, logs time_spent=1h
+4. B→A sync: A now has time_estimate=2h, time_spent=1h
+5. Dev in A logs time_spent=30m more
+6. A→B sync: B now has time_spent=1.5h total
+
+Result: Fields naturally flow both ways through independent one-way syncs
+Risk: If both environments update same field simultaneously (within sync interval),
+      last sync wins (rare edge case, acceptable for most workflows)
+```
+
 ### 1.2 Sync Trigger Mechanisms
 
 **Option 1: Webhook-Based (Real-time)**
@@ -73,9 +106,11 @@ CREATE TABLE mirror_issue_configs (
     -- What to sync
     sync_comments BOOLEAN DEFAULT true,
     sync_labels BOOLEAN DEFAULT true,
-    sync_milestones BOOLEAN DEFAULT true,
     sync_assignees BOOLEAN DEFAULT true,
     sync_attachments BOOLEAN DEFAULT true,
+    sync_weight BOOLEAN DEFAULT true,
+    sync_time_estimate BOOLEAN DEFAULT true,
+    sync_time_spent BOOLEAN DEFAULT true,
     sync_closed_issues BOOLEAN DEFAULT false, -- Only sync open issues by default
 
     -- Sync behavior
@@ -156,7 +191,8 @@ CREATE INDEX idx_comment_mappings_issue ON comment_mappings(issue_mapping_id);
 ### 2.2 Reference Mapping Tables
 
 ```sql
--- Label mapping: how labels correspond across instances
+-- Label mapping: how labels correspond across instances (optional - for explicit overrides)
+-- Most labels use exact match with auto-create, but this allows custom mappings
 CREATE TABLE label_mappings (
     id SERIAL PRIMARY KEY,
     mirror_issue_config_id INTEGER NOT NULL REFERENCES mirror_issue_configs(id) ON DELETE CASCADE,
@@ -176,26 +212,10 @@ CREATE TABLE label_mappings (
     UNIQUE(mirror_issue_config_id, source_label_name)
 );
 
--- Milestone mapping: how milestones correspond across instances
-CREATE TABLE milestone_mappings (
-    id SERIAL PRIMARY KEY,
-    mirror_issue_config_id INTEGER NOT NULL REFERENCES mirror_issue_configs(id) ON DELETE CASCADE,
+-- NOTE: Milestones, iterations, and epics are converted to labels rather than being mapped
+-- This avoids complex group-level object mapping and permission requirements
 
-    source_milestone_id INTEGER NOT NULL,
-    source_milestone_title VARCHAR(255) NOT NULL,
-    target_milestone_id INTEGER,
-    target_milestone_title VARCHAR(255),
-
-    mapping_strategy VARCHAR(20) DEFAULT 'by_title', -- 'by_title', 'by_id', 'mapped', 'skip'
-    auto_create BOOLEAN DEFAULT false, -- Don't auto-create milestones by default
-
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    UNIQUE(mirror_issue_config_id, source_milestone_id)
-);
-
--- User mapping: how users/assignees correspond across instances
+-- User mapping: how users/assignees correspond across instances (optional - for explicit overrides)
 CREATE TABLE user_mappings (
     id SERIAL PRIMARY KEY,
     mirror_issue_config_id INTEGER NOT NULL REFERENCES mirror_issue_configs(id) ON DELETE CASCADE,
@@ -510,20 +530,99 @@ def extract_attachment_urls(content: str) -> List[str]:
 - Helps distinguish mirrored issues visually
 - Optional configuration per mirror
 
-### 5.2 Milestone Mapping
+### 5.2 Milestone, Iteration, and Epic Handling
 
-**Strategy 1: By Title (Default)**
-- Match milestones by title: "v1.0" → "v1.0"
-- Case-sensitive or case-insensitive (configurable)
-- If not found and `auto_create=false`: Skip milestone
+**Challenge:** Milestones, iterations, and epics can be group-level objects with complex hierarchies that may not exist or may differ between instances.
 
-**Strategy 2: Explicit Mapping**
-- User defines: Source milestone_id → Target milestone_id
-- Stored in `milestone_mappings` table
+**Recommended Strategy: Convert to Labels + Description Footer**
 
-**Strategy 3: Skip All**
-- Don't sync milestones at all
-- `sync_milestones=false` in config
+Instead of trying to sync or map these complex GitLab objects, convert them to informational labels on the target:
+
+```python
+def convert_pm_fields_to_labels(source_issue: dict) -> List[str]:
+    """Convert milestone/iteration/epic to labels for target."""
+    labels = []
+
+    # Milestone → Label
+    if source_issue.get('milestone'):
+        milestone_title = source_issue['milestone']['title']
+        labels.append(f"Milestone::{milestone_title}")
+
+    # Iteration → Label
+    if source_issue.get('iteration'):
+        iteration_title = source_issue['iteration']['title']
+        labels.append(f"Iteration::{iteration_title}")
+
+    # Epic → Label (simplified path)
+    if source_issue.get('epic'):
+        epic_title = simplify_epic_title(source_issue['epic']['title'])
+        labels.append(f"Epic::{epic_title}")
+
+    return labels
+
+def build_description_with_pm_context(source_issue: dict) -> str:
+    """Add PM context to issue description footer."""
+    footer = "\n\n---\n\n> **🔄 Mirrored Issue**\n>\n"
+    footer += f"> **Source:** [{source_issue['references']['full']}]({source_issue['web_url']})\n"
+
+    if source_issue.get('milestone'):
+        m = source_issue['milestone']
+        footer += f">\n> **📅 Milestone:** {m['title']}"
+        if m.get('due_date'):
+            footer += f" (Due: {m['due_date']})"
+
+    if source_issue.get('iteration'):
+        it = source_issue['iteration']
+        footer += f">\n> **🏃 Iteration:** {it['title']}"
+        if it.get('start_date') and it.get('due_date'):
+            footer += f" ({it['start_date']} to {it['due_date']})"
+
+    if source_issue.get('epic'):
+        footer += f">\n> **🎯 Epic:** {source_issue['epic']['title']} ([view]({source_issue['epic']['web_url']}))"
+
+    footer += f">\n> Last synced: {datetime.utcnow().isoformat()} UTC"
+
+    return source_issue['description'] + footer
+```
+
+**Benefits:**
+- ✅ Works regardless of group structure differences
+- ✅ No group-level API permissions required
+- ✅ Developers in target can filter by iteration/milestone using labels
+- ✅ Full context preserved in description with links back to source
+- ✅ Developers in target can still manually assign to their local milestones/iterations if desired
+- ✅ Simple implementation, no complex mapping tables
+
+**Target Developers Can Still Use Local PM Fields:**
+
+The labels are informational only. Target developers can:
+1. See label `Iteration::Sprint-24` (from source Environment A)
+2. Manually assign issue to their local "Sprint 24" iteration in Environment B
+3. Manual assignments won't be overwritten (we don't sync these fields)
+
+**Example Synced Issue:**
+
+```markdown
+# Fix authentication timeout
+
+Users experiencing timeouts after 30 seconds...
+
+[original description]
+
+---
+
+> **🔄 Mirrored Issue**
+>
+> **Source:** [env-a/backend/api#123](https://gitlab-a.com/backend/api/-/issues/123)
+>
+> **📅 Milestone:** Q1 2024 (Due: 2024-03-31)
+> **🏃 Iteration:** Sprint 24 (2024-01-01 to 2024-01-14)
+> **🎯 Epic:** Platform → Authentication → SSO Implementation ([view](link))
+>
+> Last synced: 2024-01-15T10:30:00 UTC
+```
+
+**Labels on target:** `Milestone::Q1-2024`, `Iteration::Sprint-24`, `Epic::Platform-Auth`, `🔄 MIRRORED`
 
 ### 5.3 User/Assignee Mapping
 
@@ -550,20 +649,46 @@ def extract_attachment_urls(content: str) -> List[str]:
 > ⚠️ Original assignee: @alice (not found on target instance)
 ```
 
-### 5.4 Epic Mapping
+### 5.4 Weight and Time Tracking
 
-**Challenge:** Epics are Premium/Ultimate feature and group-level, not project-level.
+**Weight (Story Points):**
+```python
+# Simple field sync
+if source_issue.get('weight') is not None:
+    target_issue.weight = source_issue['weight']
+```
 
-**Strategy 1: Skip (Default)**
-- Don't sync epic associations
-- Add note in issue description: "Part of Epic: [Epic Title](link)"
+**Time Estimate:**
+```python
+# Estimated time to complete (in seconds)
+if source_issue.get('time_estimate') is not None:
+    target_issue.time_estimate = source_issue['time_estimate']
+```
 
-**Strategy 2: By Title**
-- Match epics by title within the same group
-- Requires both instances to be Premium/Ultimate
-- Complex to implement
+**Time Spent:**
+```python
+# Total time logged (in seconds)
+# Requires reset + set due to GitLab API design
+async def sync_time_spent(project_id: int, issue_iid: int, total_seconds: int):
+    """Reset and set time spent to match source."""
+    # Reset existing time tracking
+    await client.reset_time_tracking(project_id, issue_iid)
 
-**Recommendation:** Skip epic sync in initial implementation, add as advanced feature later.
+    # Set to new total
+    if total_seconds > 0:
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        duration = f"{hours}h{minutes}m"
+        await client.add_spent_time(project_id, issue_iid, duration)
+```
+
+**Bidirectional Flow:**
+
+With mirrors A→B and B→A, these fields flow naturally both ways:
+- Weight set in A → flows to B
+- Time estimate set in B → flows to A
+- Time logged in either → flows to other
+- Last sync wins (acceptable for rare simultaneous updates)
 
 ## 6. Handling Target-Side Modifications
 
@@ -897,9 +1022,14 @@ Add "Issue Sync" tab to mirror details page:
 │ What to sync:                                    │
 │ [✓] Comments                                    │
 │ [✓] Labels                                      │
-│ [✓] Milestones                                  │
 │ [✓] Assignees                                   │
 │ [✓] Attachments                                 │
+│ [✓] Weight (story points)                       │
+│ [✓] Time estimate                               │
+│ [✓] Time spent                                  │
+│     └─ ℹ️  With bidirectional mirrors (A→B +   │
+│        B→A), fields flow both ways using       │
+│        last-sync-wins strategy.                 │
 │ [ ] Closed issues                               │
 │                                                  │
 │ Sync Interval: [15] minutes                     │
@@ -1035,24 +1165,26 @@ Full sync workflows:
 
 ### Phase 1: Foundation (Week 1-2)
 - [ ] Database schema implementation (7 tables)
-- [ ] GitLab API client extensions (issue, note, upload endpoints)
-- [ ] Basic issue sync engine (no comments, no attachments)
-- [ ] Label mapping (exact match only)
+- [ ] GitLab API client extensions (issue, note, upload, time tracking endpoints)
+- [ ] Basic issue sync engine (title, description, state, labels)
+- [ ] Label auto-creation (exact match)
+- [ ] Milestone/iteration/epic → label conversion
 - [ ] Sync job scheduler (polling-based)
+- [ ] Weight and time tracking field sync
 
 ### Phase 2: Core Features (Week 3-4)
-- [ ] Comment syncing
-- [ ] Milestone mapping
+- [ ] Comment syncing with content hash tracking
 - [ ] User/assignee mapping with fallback strategies
 - [ ] Attachment download/upload/URL rewriting
+- [ ] Issue description footer with PM context and source link
 - [ ] Configuration API endpoints
 
 ### Phase 3: UI and UX (Week 5-6)
 - [ ] Frontend configuration UI with inline help
-- [ ] Sync status dashboard with metrics
+- [ ] Sync status dashboard with metrics and bidirectional flow visualization
 - [ ] Issue mapping list view with status indicators
-- [ ] Manual sync trigger
-- [ ] Label/milestone/user mapping management UI
+- [ ] Manual sync trigger ("Sync Now" button)
+- [ ] Optional: Label mapping management UI (for custom label overrides)
 
 ### Phase 4: Reliability & Testing (Week 7-8)
 - [ ] Error handling and retry logic
@@ -1084,29 +1216,38 @@ Full sync workflows:
 ## 14. Open Questions for Discussion
 
 1. **Closed Issues:** Should we sync closed/resolved issues by default, or only open ones?
+   - Current default: `sync_closed_issues=false` (only open issues)
 
 2. **Existing Issues:** When enabling issue sync on a mirror with existing issues on both sides, how to handle initial mapping? Options:
-   - Only sync new issues going forward
-   - Try to match by title and link existing issues
-   - Let user manually map existing issues
+   - Only sync new issues going forward (safest)
+   - Try to match by title and link existing issues (risky - false matches)
+   - Let user manually map existing issues first (most control)
 
-3. **Epic Handling:** Skip entirely, or add basic note in description about epic association?
+3. **Label Auto-Create:** Default to true or false?
+   - Creating labels automatically is convenient but may clutter target
+   - Current recommendation: `auto_create=true` for simplicity
 
-4. **Label Auto-Create:** Default to true or false? Creating labels automatically might clutter target.
+4. **Attachment Size Limit:** What's reasonable?
+   - 10MB? 50MB? 100MB? Configurable per mirror?
+   - Consider memory usage during download/upload
 
-5. **Milestone Auto-Create:** Should we allow this, or always require manual milestone creation?
+5. **Sync Frequency:** Default to 15 minutes? Allow faster polling?
+   - 1 minute for "near real-time"
+   - 5 minutes for good balance
+   - 15 minutes for lower server load
+   - Configurable per mirror
 
-6. **Attachment Size Limit:** What's reasonable? 10MB? 50MB? Configurable?
+6. **Performance Target:** What's acceptable sync time?
+   - 100 issues in < 1 minute?
+   - 1000 issues in < 10 minutes?
 
-7. **Sync Frequency:** Default to 15 minutes? Allow real-time (1 minute) polling?
+7. **Webhook Support:** Priority for Phase 1, or defer to later phase?
+   - Polling is simpler, webhooks are faster
+   - Recommend defer to Phase 5
 
-8. **Performance Target:** What's acceptable sync time? 100 issues in < 1 minute?
-
-9. **Webhook Support:** Priority for Phase 1, or defer to later phase?
-
-10. **Issue Types:** Should we sync all issue types (issue, incident, test case) or filter?
-
-11. **Time Tracking:** Should we sync time estimates, time spent?
+8. **Issue Types:** Should we sync all issue types (issue, incident, test case) or allow filtering?
+   - Default: sync all types
+   - Add filter option later if needed
 
 ## 15. Conclusion
 
