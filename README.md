@@ -62,6 +62,15 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **Flexible Configuration**: Define default mirror settings at the instance pair level, optionally override per mirror
 - **Safe Inline Editing**: Edit instances/pairs/mirrors in-table; fields that could break existing mirrors are locked/greyed out
 - **Token Rotation**: Rotate instance access tokens or individual mirror tokens without deleting configuration
+- **🆕 Issue Mirroring**: Automatically sync issues, comments, labels, attachments, and PM fields between GitLab instances
+  - One-way sync with bidirectional support via dual mirrors
+  - Configurable sync intervals (5-1440 minutes) with automatic scheduling
+  - Smart change detection using content hashing
+  - PM field conversion (milestones/iterations/epics/assignees → labels)
+  - Attachment download/upload with URL rewriting
+  - Time tracking sync (estimates and time spent)
+  - Loop prevention and incremental syncing
+  - See [Issue Mirroring Guide](docs/ISSUE_MIRRORING.md) for details
 
 ### Mirror Management
 - **View Mirrors**: See all configured mirrors and their current status at a glance
