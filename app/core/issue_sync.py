@@ -1,5 +1,6 @@
 """Core issue mirroring sync engine."""
 
+import asyncio
 import hashlib
 import logging
 import re
@@ -182,21 +183,35 @@ def extract_mirror_urls_from_description(description: Optional[str]) -> Set[str]
     return urls
 
 
-async def download_file(url: str) -> Optional[bytes]:
+async def download_file(url: str, max_retries: int = 3) -> Optional[bytes]:
     """
-    Download a file from a URL.
+    Download a file from a URL with retry logic.
+
+    Args:
+        url: URL to download from.
+        max_retries: Maximum number of retry attempts (default: 3).
 
     Returns:
-        File content as bytes, or None if download failed.
+        File content as bytes, or None if download failed after all retries.
     """
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, follow_redirects=True, timeout=30.0)
-            response.raise_for_status()
-            return response.content
-    except Exception as e:
-        logger.error(f"Failed to download file from {url}: {e}")
-        return None
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, follow_redirects=True, timeout=30.0)
+                response.raise_for_status()
+                return response.content
+        except Exception as e:
+            if attempt < max_retries - 1:
+                # Calculate exponential backoff delay: 1s, 2s, 4s
+                delay = 2 ** attempt
+                logger.warning(
+                    f"Failed to download file from {url} (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {delay}s..."
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.error(f"Failed to download file from {url} after {max_retries} attempts: {e}")
+                return None
 
 
 def extract_filename_from_url(url: str) -> str:
@@ -308,11 +323,13 @@ class IssueSyncEngine:
             state_filter = "all" if self.config.sync_closed_issues else "opened"
 
             # Fetch issues from source
-            source_issues = self.source_client.get_issues(
+            source_issues = await asyncio.to_thread(
+                self.source_client.get_issues,
                 self.mirror.source_project_id,
                 updated_after=updated_after,
                 state=state_filter,
                 per_page=100,
+                get_all=True,
             )
 
             logger.info(f"Found {len(source_issues)} issues to process")
@@ -413,7 +430,8 @@ class IssueSyncEngine:
             )
 
         # Create issue on target
-        target_issue = self.target_client.create_issue(
+        target_issue = await asyncio.to_thread(
+            self.target_client.create_issue,
             self.mirror.target_project_id,
             title=source_issue["title"],
             description=description,
@@ -434,7 +452,8 @@ class IssueSyncEngine:
 
         # Close target issue if source is closed
         if source_issue["state"] == "closed" and self.config.sync_closed_issues:
-            self.target_client.update_issue(
+            await asyncio.to_thread(
+                self.target_client.update_issue,
                 self.mirror.target_project_id,
                 target_issue_iid,
                 state_event="close"
@@ -487,7 +506,8 @@ class IssueSyncEngine:
             )
 
         # Update issue on target
-        self.target_client.update_issue(
+        await asyncio.to_thread(
+            self.target_client.update_issue,
             self.mirror.target_project_id,
             target_issue_iid,
             title=source_issue["title"],
@@ -506,13 +526,15 @@ class IssueSyncEngine:
 
         # Sync state (open/closed)
         if source_issue["state"] == "closed" and self.config.sync_closed_issues:
-            self.target_client.update_issue(
+            await asyncio.to_thread(
+                self.target_client.update_issue,
                 self.mirror.target_project_id,
                 target_issue_iid,
                 state_event="close"
             )
         elif source_issue["state"] == "opened":
-            self.target_client.update_issue(
+            await asyncio.to_thread(
+                self.target_client.update_issue,
                 self.mirror.target_project_id,
                 target_issue_iid,
                 state_event="reopen"
@@ -591,7 +613,8 @@ class IssueSyncEngine:
             if time_estimate and time_estimate > 0:
                 # Convert seconds to human-readable format
                 duration = self._seconds_to_duration(time_estimate)
-                self.target_client.set_time_estimate(
+                await asyncio.to_thread(
+                    self.target_client.set_time_estimate,
                     self.mirror.target_project_id,
                     target_issue_iid,
                     duration
@@ -602,12 +625,14 @@ class IssueSyncEngine:
             total_time_spent = time_stats.get("total_time_spent")
             if total_time_spent and total_time_spent > 0:
                 # Reset time spent first, then add
-                self.target_client.reset_time_spent(
+                await asyncio.to_thread(
+                    self.target_client.reset_time_spent,
                     self.mirror.target_project_id,
                     target_issue_iid
                 )
                 duration = self._seconds_to_duration(total_time_spent)
-                self.target_client.add_time_spent(
+                await asyncio.to_thread(
+                    self.target_client.add_time_spent,
                     self.mirror.target_project_id,
                     target_issue_iid,
                     duration
@@ -621,7 +646,8 @@ class IssueSyncEngine:
     ) -> None:
         """Sync comments from source to target issue."""
         # Fetch source comments (excluding system notes)
-        source_notes = self.source_client.get_issue_notes(
+        source_notes = await asyncio.to_thread(
+            self.source_client.get_issue_notes,
             self.mirror.source_project_id,
             source_issue_iid
         )
@@ -650,7 +676,8 @@ class IssueSyncEngine:
                     continue
 
                 # Update target comment
-                self.target_client.update_issue_note(
+                await asyncio.to_thread(
+                    self.target_client.update_issue_note,
                     self.mirror.target_project_id,
                     target_issue_iid,
                     mapping.target_note_id,
@@ -662,7 +689,8 @@ class IssueSyncEngine:
                 await self.db.commit()
             else:
                 # Create new comment on target
-                target_note = self.target_client.create_issue_note(
+                target_note = await asyncio.to_thread(
+                    self.target_client.create_issue_note,
                     self.mirror.target_project_id,
                     target_issue_iid,
                     source_note_body
@@ -729,7 +757,8 @@ class IssueSyncEngine:
 
             # Upload to target
             try:
-                upload_result = self.target_client.upload_file(
+                upload_result = await asyncio.to_thread(
+                    self.target_client.upload_file,
                     self.mirror.target_project_id,
                     file_content,
                     filename
@@ -765,7 +794,10 @@ class IssueSyncEngine:
 
     async def _load_target_labels_cache(self) -> None:
         """Load all target project labels into cache."""
-        labels = self.target_client.get_project_labels(self.mirror.target_project_id)
+        labels = await asyncio.to_thread(
+            self.target_client.get_project_labels,
+            self.mirror.target_project_id
+        )
         self.target_labels_cache = {label["name"]: label for label in labels}
         logger.debug(f"Loaded {len(labels)} labels into cache")
 
@@ -774,7 +806,8 @@ class IssueSyncEngine:
         if self.mirror_from_label not in self.target_labels_cache:
             # Create the label
             try:
-                label = self.target_client.create_label(
+                label = await asyncio.to_thread(
+                    self.target_client.create_label,
                     self.mirror.target_project_id,
                     name=self.mirror_from_label,
                     color=MIRROR_FROM_LABEL_COLOR,
