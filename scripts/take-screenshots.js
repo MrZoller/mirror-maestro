@@ -18,6 +18,7 @@ const DEMO_FILES = [
   { file: 'demo-instances.html', output: '02-instances.png', name: 'GitLab Instances' },
   { file: 'demo-pairs.html', output: '03-pairs.png', name: 'Instance Pairs' },
   { file: 'demo-mirrors.html', output: '04-mirrors.png', name: 'Mirrors' },
+  { file: 'demo-issue-config-bottom.html', output: '04b-issue-config.png', name: 'Issue Configuration' },
   { file: 'demo-topology.html', output: '05-topology.png', name: 'Topology' },
   { file: 'demo-backup.html', output: '06-backup.png', name: 'Backup' },
   { file: 'demo-settings.html', output: '07-settings.png', name: 'Settings' },
