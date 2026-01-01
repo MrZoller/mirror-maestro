@@ -1994,6 +1994,7 @@ function renderMirrors(mirrors) {
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
                         <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
+                        <button class="btn btn-primary btn-small" onclick="showIssueMirrorConfig(${mirror.id})" title="Configure issue mirroring">Issue Sync</button>
                         <button class="btn btn-info btn-small" data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id})" title="Check if mirror exists and settings match GitLab">Verify</button>
                         <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate Token</button>
                         <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
@@ -3979,3 +3980,154 @@ document.addEventListener('DOMContentLoaded', () => {
         await createUser();
     });
 });
+
+// ==========================================
+// Issue Mirroring Functions
+// ==========================================
+
+async function showIssueMirrorConfig(mirrorId) {
+    const modal = document.getElementById('issue-mirror-config-modal');
+    if (!modal) return;
+
+    // Store mirror ID
+    document.getElementById('issue-config-mirror-id').value = mirrorId;
+
+    // Try to load existing configuration
+    try {
+        const config = await apiRequest(`/api/issue-mirrors/by-mirror/${mirrorId}`);
+
+        // Populate form with existing config
+        document.getElementById('issue-config-id').value = config.id;
+        document.getElementById('issue-sync-enabled').checked = config.enabled;
+        document.getElementById('issue-sync-comments').checked = config.sync_comments;
+        document.getElementById('issue-sync-labels').checked = config.sync_labels;
+        document.getElementById('issue-sync-attachments').checked = config.sync_attachments;
+        document.getElementById('issue-sync-weight').checked = config.sync_weight;
+        document.getElementById('issue-sync-time-estimate').checked = config.sync_time_estimate;
+        document.getElementById('issue-sync-time-spent').checked = config.sync_time_spent;
+        document.getElementById('issue-sync-closed').checked = config.sync_closed_issues;
+        document.getElementById('issue-update-existing').checked = config.update_existing;
+        document.getElementById('issue-sync-interval').value = config.sync_interval_minutes;
+
+        // Show status
+        const statusEl = document.getElementById('issue-config-status');
+        if (statusEl && config.last_sync_at) {
+            const lastSync = new Date(config.last_sync_at).toLocaleString();
+            const status = config.last_sync_status || 'unknown';
+            statusEl.innerHTML = `
+                <p class="text-muted">
+                    <strong>Last Sync:</strong> ${lastSync}<br>
+                    <strong>Status:</strong> <span class="badge badge-${status === 'success' ? 'success' : 'warning'}">${status}</span>
+                </p>
+            `;
+        }
+    } catch (error) {
+        // No existing config - use defaults (form already has default values)
+        document.getElementById('issue-config-id').value = '';
+        document.getElementById('issue-config-status').innerHTML = '<p class="text-muted">No issue sync configured for this mirror</p>';
+    }
+
+    // Show modal
+    modal.style.display = 'flex';
+}
+
+function closeIssueMirrorConfigModal() {
+    const modal = document.getElementById('issue-mirror-config-modal');
+    if (modal) modal.style.display = 'none';
+
+    // Clear form
+    document.getElementById('issue-mirror-config-form')?.reset();
+    document.getElementById('issue-config-id').value = '';
+    document.getElementById('issue-config-mirror-id').value = '';
+    document.getElementById('issue-config-status').innerHTML = '';
+
+    const errorEl = document.getElementById('issue-config-error');
+    if (errorEl) errorEl.style.display = 'none';
+}
+
+async function handleIssueMirrorConfig(event) {
+    event.preventDefault();
+
+    const submitBtn = document.getElementById('issue-config-submit-btn');
+    const errorEl = document.getElementById('issue-config-error');
+
+    try {
+        showButtonLoading(submitBtn, true);
+        if (errorEl) errorEl.style.display = 'none';
+
+        const mirrorId = document.getElementById('issue-config-mirror-id').value;
+        const configId = document.getElementById('issue-config-id').value;
+
+        const data = {
+            mirror_id: parseInt(mirrorId),
+            enabled: document.getElementById('issue-sync-enabled').checked,
+            sync_comments: document.getElementById('issue-sync-comments').checked,
+            sync_labels: document.getElementById('issue-sync-labels').checked,
+            sync_attachments: document.getElementById('issue-sync-attachments').checked,
+            sync_weight: document.getElementById('issue-sync-weight').checked,
+            sync_time_estimate: document.getElementById('issue-sync-time-estimate').checked,
+            sync_time_spent: document.getElementById('issue-sync-time-spent').checked,
+            sync_closed_issues: document.getElementById('issue-sync-closed').checked,
+            update_existing: document.getElementById('issue-update-existing').checked,
+            sync_interval_minutes: parseInt(document.getElementById('issue-sync-interval').value)
+        };
+
+        let result;
+        if (configId) {
+            // Update existing config
+            result = await apiRequest(`/api/issue-mirrors/${configId}`, {
+                method: 'PUT',
+                body: JSON.stringify(data)
+            });
+            showMessage('Issue sync configuration updated', 'success');
+        } else {
+            // Create new config
+            result = await apiRequest('/api/issue-mirrors', {
+                method: 'POST',
+                body: JSON.stringify(data)
+            });
+            showMessage('Issue sync configuration created', 'success');
+        }
+
+        closeIssueMirrorConfigModal();
+        await loadMirrors(); // Refresh mirrors list to show issue sync status
+
+    } catch (error) {
+        console.error('Failed to save issue mirror config:', error);
+        if (errorEl) {
+            errorEl.textContent = error.message || 'Failed to save configuration';
+            errorEl.style.display = 'block';
+        }
+    } finally {
+        showButtonLoading(submitBtn, false);
+    }
+}
+
+async function deleteIssueMirrorConfig(mirrorId) {
+    if (!confirm('Are you sure you want to disable issue synchronization for this mirror?')) return;
+
+    try {
+        // Get config ID first
+        const config = await apiRequest(`/api/issue-mirrors/by-mirror/${mirrorId}`);
+
+        await apiRequest(`/api/issue-mirrors/${config.id}`, { method: 'DELETE' });
+        showMessage('Issue synchronization disabled', 'success');
+        await loadMirrors();
+    } catch (error) {
+        console.error('Failed to delete issue mirror config:', error);
+        showMessage(error.message || 'Failed to disable issue sync', 'error');
+    }
+}
+
+async function triggerIssueSync(mirrorId) {
+    try {
+        // Get config ID first
+        const config = await apiRequest(`/api/issue-mirrors/by-mirror/${mirrorId}`);
+
+        await apiRequest(`/api/issue-mirrors/${config.id}/trigger-sync`, { method: 'POST' });
+        showMessage('Issue sync triggered (will be implemented in Phase 2)', 'info');
+    } catch (error) {
+        console.error('Failed to trigger issue sync:', error);
+        showMessage(error.message || 'Failed to trigger issue sync', 'error');
+    }
+}

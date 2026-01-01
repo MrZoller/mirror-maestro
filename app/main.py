@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.database import init_db, migrate_mirrors_to_auto_tokens, drop_legacy_group_tables, AsyncSessionLocal
-from app.api import instances, pairs, mirrors, export, topology, dashboard, backup, search, health, auth, users
+from app.api import instances, pairs, mirrors, export, topology, dashboard, backup, search, health, auth, users, issue_mirrors
 from app.core.auth import verify_credentials, get_password_hash
 
 
@@ -93,6 +93,7 @@ app.include_router(dashboard.router)
 app.include_router(instances.router)
 app.include_router(pairs.router)
 app.include_router(mirrors.router)
+app.include_router(issue_mirrors.router)
 app.include_router(topology.router)
 app.include_router(export.router)
 app.include_router(backup.router)
