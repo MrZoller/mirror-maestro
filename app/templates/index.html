@@ -1304,6 +1304,15 @@ Safe and controlled cleanup</code></pre>
                     <li><code>trigger_builds</code> - CI trigger setting (pull mirrors only)</li>
                     <li><code>mirror_branch_regex</code> - Branch regex filter (pull mirrors only)</li>
                 </ul>
+
+                <h3>External Mirror Indicator</h3>
+                <p>When creating a new mirror, Mirror Maestro checks if the selected projects already have mirrors configured on GitLab:</p>
+                <ul>
+                    <li>Select a source or target project in the Create Mirror form</li>
+                    <li>If mirrors exist, a warning badge appears: <span class="badge badge-warning">⚠ 2 push, 1 pull</span></li>
+                    <li>This helps you understand the current state before creating a new mirror</li>
+                </ul>
+                <p class="alert alert-info"><strong>Note:</strong> This checks GitLab directly, showing all mirrors on the project - including those created outside of Mirror Maestro.</p>
             </div>
 
             <!-- System Health -->
