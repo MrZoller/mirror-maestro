@@ -1665,6 +1665,16 @@ Safe and controlled cleanup</code></pre>
                 </div>
 
                 <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="issue-sync-existing" name="sync_existing_issues">
+                        Sync Existing Issues
+                    </label>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.9em;">
+                        When first enabling sync, also sync issues that already exist. If disabled, only issues created after enabling sync will be synced.
+                    </p>
+                </div>
+
+                <div class="form-group">
                     <label for="issue-sync-interval">Sync Interval (minutes)</label>
                     <input type="number" id="issue-sync-interval" name="sync_interval_minutes" value="15" min="5" max="1440">
                     <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.9em;">

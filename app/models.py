@@ -138,6 +138,7 @@ class MirrorIssueConfig(Base):
 
     # Sync behavior
     update_existing: Mapped[bool] = mapped_column(Boolean, default=True)
+    sync_existing_issues: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Sync state
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime)

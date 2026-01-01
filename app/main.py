@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import init_db, migrate_mirrors_to_auto_tokens, drop_legacy_group_tables, AsyncSessionLocal
 from app.api import instances, pairs, mirrors, export, topology, dashboard, backup, search, health, auth, users, issue_mirrors
 from app.core.auth import verify_credentials, get_password_hash
+from app.core.issue_scheduler import scheduler
 
 
 # Get version from package metadata (pyproject.toml)
@@ -69,8 +70,21 @@ async def lifespan(app: FastAPI):
         # Don't fail startup - mirrors without tokens can still work if
         # they were configured manually or use SSH
 
+    # Start issue sync scheduler
+    try:
+        await scheduler.start()
+        logging.info("Issue sync scheduler started successfully")
+    except Exception as e:
+        logging.error(f"Failed to start issue sync scheduler: {e}", exc_info=True)
+
     yield
-    # Shutdown (if needed)
+
+    # Shutdown
+    try:
+        await scheduler.stop()
+        logging.info("Issue sync scheduler stopped")
+    except Exception as e:
+        logging.error(f"Failed to stop issue sync scheduler: {e}", exc_info=True)
 
 
 app = FastAPI(
