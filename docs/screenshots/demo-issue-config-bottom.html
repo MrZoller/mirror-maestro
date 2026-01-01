@@ -229,6 +229,7 @@
                                     <button class="btn btn-success btn-small">Sync</button>
                                     <button class="btn btn-info btn-small">Verify</button>
                                     <button class="btn btn-primary btn-small">⚙️ Issue Sync</button>
+                                    <button class="btn btn-primary btn-small">⚙️ Issue Sync</button>
                                     <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
@@ -257,6 +258,7 @@
                                     <button class="btn btn-success btn-small">Sync</button>
                                     <button class="btn btn-info btn-small">Verify</button>
                                     <button class="btn btn-primary btn-small">⚙️ Issue Sync</button>
+                                    <button class="btn btn-primary btn-small">⚙️ Issue Sync</button>
                                     <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
@@ -284,6 +286,7 @@
                                     <button class="btn btn-secondary btn-small">Edit</button>
                                     <button class="btn btn-success btn-small">Sync</button>
                                     <button class="btn btn-info btn-small">Verify</button>
+                                    <button class="btn btn-primary btn-small">⚙️ Issue Sync</button>
                                     <button class="btn btn-primary btn-small">⚙️ Issue Sync</button>
                                     <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
@@ -464,6 +467,76 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Issue Mirroring Configuration Modal -->
+    <div id="issue-mirror-config-modal" class="modal" style="display: block;">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content" style="max-height: 90vh; overflow-y: auto; margin-top: 2vh;">
+            <div class="modal-header">
+                <h2>Issue Mirroring Configuration</h2>
+                <button class="modal-close" aria-label="Close">&times;</button>
+            </div>
+            <form id="issue-mirror-config-form">
+                <p class="text-muted" style="margin-bottom: 1.5rem;">
+                    Mirror: <strong>platform/core/services/api-gateway</strong> → <strong>backup/platform/core/services/api-gateway</strong>
+                </p>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="issue-sync-enabled" name="enabled" checked>
+                        Enable Issue Synchronization
+                    </label>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.9em;">
+                        Sync issues from source to target project (one-way). For bidirectional sync, create reverse mirror.
+                    </p>
+                </div>
+
+                <details style="margin-top: 1.5rem;">
+                    <summary style="cursor: pointer; font-weight: bold; margin-bottom: 1rem;">Sync Options (collapsed)</summary>
+                    <p class="text-muted">Sync Comments, Labels, Attachments, Weight, Time Estimate, Time Spent, Closed Issues - all enabled ✓</p>
+                </details>
+
+                <h3 style="margin-top: 1.5rem; margin-bottom: 1rem; background: #fffacd; padding: 0.5rem; border-left: 4px solid #ffa500;">Sync Behavior</h3>
+
+                <div class="form-group" style="background: #fffacd; padding: 1rem; border-radius: 0.25rem;">
+                    <label>
+                        <input type="checkbox" id="issue-update-existing" name="update_existing" checked>
+                        <strong>Update Existing Issues</strong>
+                    </label>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.9em;">
+                        If disabled, only new issues will be created
+                    </p>
+                </div>
+
+                <div class="form-group" style="background: #fffacd; padding: 1rem; border-radius: 0.25rem; border: 2px solid #ffa500;">
+                    <label>
+                        <input type="checkbox" id="issue-sync-existing" name="sync_existing_issues">
+                        <strong>Sync Existing Issues</strong>
+                    </label>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.9em;">
+                        ⭐ When first enabling sync, also sync issues that already exist. If disabled (default), only issues created after enabling sync will be synced.
+                    </p>
+                </div>
+
+                <div class="form-group">
+                    <label for="issue-sync-interval">Sync Interval (minutes)</label>
+                    <input type="number" id="issue-sync-interval" name="sync_interval_minutes" value="15" min="5" max="1440">
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.9em;">
+                        How often to check for issue changes (5-1440 minutes)
+                    </p>
+                </div>
+
+                <div style="display: flex; gap: 0.5rem; margin-top: 1.5rem;">
+                    <button type="submit" class="btn btn-primary" id="issue-config-submit-btn" style="flex: 1;">
+                        Save Configuration
+                    </button>
+                    <button type="button" class="btn btn-secondary" style="flex: 1;">
+                        Cancel
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 </body>
