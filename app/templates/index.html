@@ -1243,6 +1243,67 @@ Safe and controlled cleanup</code></pre>
                 </ol>
             </div>
 
+            <!-- Mirror Verification -->
+            <div class="card">
+                <h2>Mirror Verification</h2>
+                <p class="text-muted">Detect externally modified or deleted mirrors.</p>
+
+                <h3>Why Verify Mirrors?</h3>
+                <p>Mirrors created through Mirror Maestro may be modified or deleted directly in GitLab by other users. Verification helps you detect:</p>
+                <ul>
+                    <li><strong>Orphan mirrors</strong> - Mirror was deleted from GitLab but still exists in Mirror Maestro's database</li>
+                    <li><strong>Drifted mirrors</strong> - Mirror settings on GitLab no longer match what Mirror Maestro expects</li>
+                </ul>
+
+                <h3>How to Verify</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a> tab</li>
+                    <li>Select an instance pair from the dropdown</li>
+                    <li>Click <strong>Verify All</strong> to check all visible mirrors, or click <strong>Verify</strong> on individual rows</li>
+                </ol>
+
+                <h3>Verification Status</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Meaning</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="badge badge-success">✓</span></td>
+                            <td>Healthy - Mirror exists on GitLab with matching settings</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-danger">Orphan</span></td>
+                            <td>Mirror was deleted from GitLab externally. Consider deleting from Mirror Maestro.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-warning">Drift</span></td>
+                            <td>Settings mismatch. Hover for details. You may want to re-sync the settings.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-secondary">N/C</span></td>
+                            <td>Not Created - Mirror record exists but was never created on GitLab</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-danger">Err</span></td>
+                            <td>Verification error - Could not contact GitLab. Check instance connectivity.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Settings Checked for Drift</h3>
+                <ul>
+                    <li><code>enabled</code> - Whether the mirror is active</li>
+                    <li><code>only_protected_branches</code> - Branch filtering</li>
+                    <li><code>keep_divergent_refs</code> - How to handle diverged branches</li>
+                    <li><code>trigger_builds</code> - CI trigger setting (pull mirrors only)</li>
+                    <li><code>mirror_branch_regex</code> - Branch regex filter (pull mirrors only)</li>
+                </ul>
+            </div>
+
             <!-- System Health -->
             <div class="card">
                 <h2>System Health</h2>

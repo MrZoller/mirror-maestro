@@ -74,6 +74,7 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **Sync Mirrors**: Force immediate mirror synchronization with a single click
 - **Batch Sync**: Sync all mirrors in an instance pair with one click - perfect for resuming after outages
 - **Edit/Remove Mirrors**: Modify safe mirror settings (and revert overrides back to "inherit"), or delete mirror configurations as needed
+- **Orphan & Drift Detection**: Verify mirrors against GitLab to detect external deletions (orphans) or settings changes (drift)
 - **Import/Export**: Bulk import and export mirror settings with automatic rate limiting for large operations
 - **Backup & Restore**: Create complete backups of your database and encryption key; restore from backups to recover or migrate
 - **Rate Limiting**: Intelligent API rate limiting prevents overwhelming GitLab instances during batch operations
@@ -669,6 +670,8 @@ The application provides a RESTful API. Once running, visit:
 - `DELETE /api/mirrors/{id}` - Delete mirror
 - `POST /api/mirrors/{id}/update` - Trigger mirror update
 - `POST /api/mirrors/{id}/rotate-token` - Rotate the mirror's access token
+- `GET /api/mirrors/{id}/verify` - Verify mirror for orphan/drift status
+- `POST /api/mirrors/verify` - Batch verify multiple mirrors
 
 #### Import/Export
 - `GET /api/export/pair/{id}` - Export mirrors for a pair
