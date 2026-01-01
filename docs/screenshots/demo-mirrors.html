@@ -92,6 +92,7 @@
                                 <option value="125">platform/core/services/payment-processor</option>
                                 <option value="126">platform/edge/gateway-proxy</option>
                             </select>
+                            <div class="project-mirrors-badge"><span class="badge badge-warning" title="This project has 1 existing mirror(s) on GitLab">⚠ 1 push</span></div>
                             <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
                         </div>
                         <div class="form-group">
@@ -104,6 +105,7 @@
                                 <option value="458">platform/core/services/payment-processor</option>
                                 <option value="459">platform/edge/gateway-proxy</option>
                             </select>
+                            <div class="project-mirrors-badge"></div>
                             <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
                         </div>
                     </div>
@@ -153,6 +155,9 @@
                         <button class="btn btn-secondary btn-small" title="Toggle between flat list and tree view">
                             <span id="view-mode-icon">🌳</span> Tree View
                         </button>
+                        <button class="btn btn-info btn-small" title="Check all mirrors for orphan/drift issues">
+                            Verify All
+                        </button>
                     </div>
                 </div>
 
@@ -191,6 +196,7 @@
                             <th>Sync Status</th>
                             <th>Last Sync</th>
                             <th>Token</th>
+                            <th title="Orphan/drift detection status">Health</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -211,10 +217,12 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>2 hours ago</td>
                             <td><span class="badge badge-success">Active</span></td>
+                            <td><span class="badge badge-success" title="Mirror verified: healthy">✓</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-info btn-small">Verify</button>
                                     <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
@@ -236,10 +244,12 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>1 hour ago</td>
                             <td><span class="badge badge-success">Active</span></td>
+                            <td><span class="badge badge-success" title="Mirror verified: healthy">✓</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-info btn-small">Verify</button>
                                     <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
@@ -261,10 +271,12 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>30 minutes ago</td>
                             <td><span class="badge badge-warning" title="Expires 2026-01-15">Expiring</span></td>
+                            <td><span class="badge badge-warning" title="Settings mismatch: enabled: expected true, got false">Drift</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-info btn-small">Verify</button>
                                     <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
@@ -286,10 +298,12 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>3 hours ago</td>
                             <td><span class="badge badge-success">Active</span></td>
+                            <td><span class="badge badge-success" title="Mirror verified: healthy">✓</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-info btn-small">Verify</button>
                                     <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
@@ -311,10 +325,12 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>45 minutes ago</td>
                             <td><span class="badge badge-success">Active</span></td>
+                            <td><span class="badge badge-success" title="Mirror verified: healthy">✓</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-info btn-small">Verify</button>
                                     <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
@@ -336,10 +352,12 @@
                             <td><span class="badge badge-danger">failed</span></td>
                             <td>5 hours ago</td>
                             <td><span class="badge badge-danger">Expired</span></td>
+                            <td><span class="badge badge-danger" title="Mirror no longer exists on GitLab">Orphan</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-info btn-small">Verify</button>
                                     <button class="btn btn-warning btn-small">Rotate</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
@@ -361,10 +379,12 @@
                             <td><span class="badge badge-info">finished</span></td>
                             <td>1 day ago</td>
                             <td><span class="badge badge-success">Active</span></td>
+                            <td><span class="badge badge-success" title="Mirror verified: healthy">✓</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-info btn-small">Verify</button>
                                     <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>
@@ -386,10 +406,12 @@
                             <td><span class="text-muted">N/A</span></td>
                             <td>Never</td>
                             <td><span class="badge badge-secondary">No token</span></td>
+                            <td><span class="badge badge-secondary" title="Mirror not yet created on GitLab">—</span></td>
                             <td>
                                 <div class="table-actions">
                                     <button class="btn btn-secondary btn-small">Edit</button>
                                     <button class="btn btn-success btn-small">Sync</button>
+                                    <button class="btn btn-info btn-small">Verify</button>
                                     <button class="btn btn-warning btn-small">Rotate Token</button>
                                     <button class="btn btn-danger btn-small">Delete</button>
                                 </div>

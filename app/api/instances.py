@@ -513,3 +513,55 @@ async def get_instance_groups(
             status_code=500,
             detail="Failed to fetch groups from GitLab. Check server logs for details."
         )
+
+
+class ProjectMirrorsResponse(BaseModel):
+    """Response for project mirrors check."""
+    project_id: int
+    mirrors: list[dict]
+    push_count: int
+    pull_count: int
+    total_count: int
+
+
+@router.get("/{instance_id}/projects/{project_id}/mirrors", response_model=ProjectMirrorsResponse)
+async def get_project_mirrors(
+    instance_id: int,
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials)
+):
+    """
+    Get existing mirrors for a specific project on a GitLab instance.
+
+    This checks GitLab directly (not the local database) to show mirrors
+    that may have been created externally or through other tools.
+    """
+    result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == instance_id)
+    )
+    instance = result.scalar_one_or_none()
+
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    try:
+        client = GitLabClient(instance.url, instance.encrypted_token)
+        mirrors = client.get_project_mirrors(project_id) or []
+
+        push_count = sum(1 for m in mirrors if (m.get("mirror_direction") or "").lower() == "push")
+        pull_count = sum(1 for m in mirrors if (m.get("mirror_direction") or "").lower() == "pull")
+
+        return ProjectMirrorsResponse(
+            project_id=project_id,
+            mirrors=mirrors,
+            push_count=push_count,
+            pull_count=pull_count,
+            total_count=len(mirrors),
+        )
+    except Exception as e:
+        logger.error(f"Failed to fetch project mirrors: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch project mirrors from GitLab. Check server logs for details."
+        )

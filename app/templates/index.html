@@ -372,17 +372,19 @@
                         <div class="form-group">
                             <label for="mirror-source-project">Source Project *</label>
                             <input type="text" id="mirror-source-project-search" placeholder="Type to search (min 2 chars)…">
-                            <select id="mirror-source-project" required>
+                            <select id="mirror-source-project" required onchange="checkProjectMirrors('source')">
                                 <option value="">Select source project...</option>
                             </select>
+                            <div id="source-project-mirrors-badge" class="project-mirrors-badge"></div>
                             <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
                         </div>
                         <div class="form-group">
                             <label for="mirror-target-project">Target Project *</label>
                             <input type="text" id="mirror-target-project-search" placeholder="Type to search (min 2 chars)…">
-                            <select id="mirror-target-project" required>
+                            <select id="mirror-target-project" required onchange="checkProjectMirrors('target')">
                                 <option value="">Select target project...</option>
                             </select>
+                            <div id="target-project-mirrors-badge" class="project-mirrors-badge"></div>
                             <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
                         </div>
                     </div>
@@ -432,6 +434,9 @@
                         <button class="btn btn-secondary btn-small" onclick="toggleMirrorViewMode()" title="Toggle between flat list and tree view">
                             <span id="view-mode-icon">🌳</span> Tree View
                         </button>
+                        <button id="verify-all-btn" class="btn btn-info btn-small" onclick="verifyAllMirrors()" title="Check all mirrors for orphan/drift issues">
+                            Verify All
+                        </button>
                     </div>
                 </div>
 
@@ -470,11 +475,12 @@
                             <th>Sync Status</th>
                             <th>Last Sync</th>
                             <th>Token</th>
+                            <th title="Orphan/drift detection status">Health</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="mirrors-list">
-                        <tr><td colspan="8" class="text-center text-muted">Select an instance pair to view mirrors</td></tr>
+                        <tr><td colspan="9" class="text-center text-muted">Select an instance pair to view mirrors</td></tr>
                     </tbody>
                 </table>
 
@@ -1237,6 +1243,76 @@ Safe and controlled cleanup</code></pre>
                     <li>Upload and restore the backup on the new server</li>
                     <li>All instances, pairs, and mirrors will be migrated</li>
                 </ol>
+            </div>
+
+            <!-- Mirror Verification -->
+            <div class="card">
+                <h2>Mirror Verification</h2>
+                <p class="text-muted">Detect externally modified or deleted mirrors.</p>
+
+                <h3>Why Verify Mirrors?</h3>
+                <p>Mirrors created through Mirror Maestro may be modified or deleted directly in GitLab by other users. Verification helps you detect:</p>
+                <ul>
+                    <li><strong>Orphan mirrors</strong> - Mirror was deleted from GitLab but still exists in Mirror Maestro's database</li>
+                    <li><strong>Drifted mirrors</strong> - Mirror settings on GitLab no longer match what Mirror Maestro expects</li>
+                </ul>
+
+                <h3>How to Verify</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a> tab</li>
+                    <li>Select an instance pair from the dropdown</li>
+                    <li>Click <strong>Verify All</strong> to check all visible mirrors, or click <strong>Verify</strong> on individual rows</li>
+                </ol>
+
+                <h3>Verification Status</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Meaning</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="badge badge-success">✓</span></td>
+                            <td>Healthy - Mirror exists on GitLab with matching settings</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-danger">Orphan</span></td>
+                            <td>Mirror was deleted from GitLab externally. Consider deleting from Mirror Maestro.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-warning">Drift</span></td>
+                            <td>Settings mismatch. Hover for details. You may want to re-sync the settings.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-secondary">N/C</span></td>
+                            <td>Not Created - Mirror record exists but was never created on GitLab</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-danger">Err</span></td>
+                            <td>Verification error - Could not contact GitLab. Check instance connectivity.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Settings Checked for Drift</h3>
+                <ul>
+                    <li><code>enabled</code> - Whether the mirror is active</li>
+                    <li><code>only_protected_branches</code> - Branch filtering</li>
+                    <li><code>keep_divergent_refs</code> - How to handle diverged branches</li>
+                    <li><code>trigger_builds</code> - CI trigger setting (pull mirrors only)</li>
+                    <li><code>mirror_branch_regex</code> - Branch regex filter (pull mirrors only)</li>
+                </ul>
+
+                <h3>External Mirror Indicator</h3>
+                <p>When creating a new mirror, Mirror Maestro checks if the selected projects already have mirrors configured on GitLab:</p>
+                <ul>
+                    <li>Select a source or target project in the Create Mirror form</li>
+                    <li>If mirrors exist, a warning badge appears: <span class="badge badge-warning">⚠ 2 push, 1 pull</span></li>
+                    <li>This helps you understand the current state before creating a new mirror</li>
+                </ul>
+                <p class="alert alert-info"><strong>Note:</strong> This checks GitLab directly, showing all mirrors on the project - including those created outside of Mirror Maestro.</p>
             </div>
 
             <!-- System Health -->

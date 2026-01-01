@@ -211,6 +211,73 @@
                 </ul>
             </div>
 
+            <!-- Mirror Verification -->
+            <div class="card">
+                <h2>Mirror Verification</h2>
+                <p class="text-muted">Detect orphaned mirrors and configuration drift between your database and GitLab.</p>
+
+                <h3>Understanding Mirror Health</h3>
+                <p>Mirror Maestro can verify that mirrors configured in its database actually exist on GitLab and have matching settings. This helps detect:</p>
+
+                <h4>Orphaned Mirrors</h4>
+                <p>A mirror is <strong>orphaned</strong> when it exists in Mirror Maestro's database but the corresponding mirror no longer exists on GitLab (e.g., someone deleted it directly in GitLab).</p>
+                <ul>
+                    <li><span class="badge badge-danger">Orphan</span> - Mirror record exists but GitLab mirror was deleted</li>
+                    <li><strong>Resolution:</strong> Delete the orphaned record from Mirror Maestro, or recreate the mirror on GitLab</li>
+                </ul>
+
+                <h4>Configuration Drift</h4>
+                <p>A mirror has <strong>drift</strong> when its settings in Mirror Maestro's database don't match the actual settings on GitLab.</p>
+                <ul>
+                    <li><span class="badge badge-warning">Drift</span> - Settings mismatch detected</li>
+                    <li>Checked settings: enabled status, protected branches only, keep divergent refs, trigger builds, branch regex</li>
+                    <li><strong>Resolution:</strong> Edit the mirror to resync settings, or accept the GitLab-side changes</li>
+                </ul>
+
+                <h3>Health Status Badges</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Badge</th>
+                            <th>Meaning</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="badge badge-success">✓</span></td>
+                            <td>Mirror is healthy - exists on GitLab with matching settings</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-warning">Drift</span></td>
+                            <td>Settings mismatch between database and GitLab</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-danger">Orphan</span></td>
+                            <td>Mirror no longer exists on GitLab</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-secondary">—</span></td>
+                            <td>Mirror not yet created on GitLab (no mirror_id)</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Verification Actions</h3>
+                <ul>
+                    <li><strong>Verify (per-row)</strong> - Check a single mirror's health status</li>
+                    <li><strong>Verify All</strong> - Check all visible mirrors in batch</li>
+                </ul>
+                <p>Results are cached during the session to avoid repeated API calls.</p>
+
+                <h3>External Mirror Indicator</h3>
+                <p>When selecting projects for a new mirror, Mirror Maestro checks if the selected project already has existing mirrors configured directly on GitLab:</p>
+                <ul>
+                    <li><span class="badge badge-warning">⚠ 1 push</span> - Shows count and type of existing mirrors</li>
+                    <li>This helps avoid conflicts when creating new mirrors</li>
+                    <li>Existing mirrors may prevent new mirror creation (use preflight check)</li>
+                </ul>
+            </div>
+
             <!-- System Health -->
             <div class="card">
                 <h2>System Health</h2>
