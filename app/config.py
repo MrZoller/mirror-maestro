@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     # Delay between GitLab API operations to avoid overwhelming instances
     gitlab_api_delay_ms: int = 200  # Delay in milliseconds (200ms = ~300 ops/min, well under 600/min limit)
     gitlab_api_max_retries: int = 3  # Number of retries on rate limit errors
+    gitlab_api_timeout: int = 60  # Timeout for GitLab API requests in seconds
 
 
 settings = Settings()

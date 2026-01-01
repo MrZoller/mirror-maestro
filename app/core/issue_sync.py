@@ -12,7 +12,9 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.gitlab_client import GitLabClient
+from app.core.rate_limiter import RateLimiter
 from app.models import (
     Mirror,
     MirrorIssueConfig,
@@ -262,19 +264,60 @@ class IssueSyncEngine:
         self.target_instance = target_instance
         self.instance_pair = instance_pair
 
-        # Initialize GitLab clients
+        # Initialize GitLab clients with timeout
         self.source_client = GitLabClient(
             source_instance.url,
-            source_instance.encrypted_token
+            source_instance.encrypted_token,
+            timeout=settings.gitlab_api_timeout
         )
         self.target_client = GitLabClient(
             target_instance.url,
-            target_instance.encrypted_token
+            target_instance.encrypted_token,
+            timeout=settings.gitlab_api_timeout
+        )
+
+        # Initialize rate limiter for GitLab API calls
+        self.rate_limiter = RateLimiter(
+            delay_ms=settings.gitlab_api_delay_ms,
+            max_retries=settings.gitlab_api_max_retries
         )
 
         # Cache for labels
         self.target_labels_cache: Dict[str, Dict[str, Any]] = {}
         self.mirror_from_label: str = get_mirror_from_label(source_instance.id)
+
+    async def _execute_gitlab_api_call(
+        self,
+        operation_func,
+        operation_name: str,
+        *args,
+        **kwargs
+    ):
+        """
+        Execute a GitLab API call with retry logic and rate limiting.
+
+        Args:
+            operation_func: The GitLab client method to call
+            operation_name: Name of the operation for logging
+            *args, **kwargs: Arguments to pass to the operation
+
+        Returns:
+            The result from the GitLab API call
+        """
+        async def _execute():
+            # Apply rate limiting delay
+            await self.rate_limiter.delay()
+
+            # Execute the operation with retry logic
+            result = await asyncio.to_thread(
+                lambda: self.rate_limiter.execute_with_retry(
+                    lambda: operation_func(*args, **kwargs),
+                    operation_name=operation_name
+                )
+            )
+            return result
+
+        return await _execute()
 
     async def sync(self) -> Dict[str, Any]:
         """
@@ -322,22 +365,30 @@ class IssueSyncEngine:
             # Determine state filter
             state_filter = "all" if self.config.sync_closed_issues else "opened"
 
-            # Fetch issues from source
-            source_issues = await asyncio.to_thread(
+            # Fetch issues from source with pagination limit (max 10,000 issues)
+            # This prevents memory issues and excessive API calls
+            source_issues = await self._execute_gitlab_api_call(
                 self.source_client.get_issues,
+                "fetch_source_issues",
                 self.mirror.source_project_id,
                 updated_after=updated_after,
                 state=state_filter,
                 per_page=100,
                 get_all=True,
+                max_pages=100,  # Limit to 100 pages = 10,000 issues max
             )
 
             logger.info(f"Found {len(source_issues)} issues to process")
 
-            # Sync each issue
-            for source_issue in source_issues:
+            # Sync each issue with rate limiting between operations
+            for idx, source_issue in enumerate(source_issues):
                 try:
                     await self._sync_issue(source_issue, stats)
+
+                    # Apply rate limiting delay between issues (except after last one)
+                    if idx < len(source_issues) - 1:
+                        await self.rate_limiter.delay()
+
                 except Exception as e:
                     logger.error(
                         f"Failed to sync issue {source_issue.get('iid')}: {e}",
@@ -411,40 +462,58 @@ class IssueSyncEngine:
         source_issue: Dict[str, Any],
         content_hash: str
     ) -> None:
-        """Create a new issue on target instance."""
+        """
+        Create a new issue on target instance with idempotency protection.
+
+        Checks if the issue already exists on target (orphaned from previous failed sync)
+        before creating a new one.
+        """
         source_issue_id = source_issue["id"]
         source_issue_iid = source_issue["iid"]
 
-        # Prepare labels
-        labels = self._prepare_labels(source_issue)
+        # Idempotency check: search for existing issue with same source reference
+        # This prevents creating duplicates if DB commit failed but GitLab creation succeeded
+        existing_target_issue = await self._find_existing_target_issue(source_issue_id, source_issue_iid)
+        if existing_target_issue:
+            logger.info(
+                f"Found orphaned issue {existing_target_issue['iid']} for source issue {source_issue_iid}. "
+                "Reusing it instead of creating duplicate."
+            )
+            target_issue = existing_target_issue
+            target_issue_id = target_issue["id"]
+            target_issue_iid = target_issue["iid"]
+        else:
+            # Prepare labels
+            labels = self._prepare_labels(source_issue)
 
-        # Prepare description with footer
-        description = self._prepare_description(source_issue)
+            # Prepare description with footer
+            description = self._prepare_description(source_issue)
 
-        # Handle attachments if enabled
-        if self.config.sync_attachments:
-            description = await self._sync_attachments_in_description(
-                description,
-                source_issue_id,
-                None,  # No existing mapping yet
+            # Handle attachments if enabled
+            if self.config.sync_attachments:
+                description = await self._sync_attachments_in_description(
+                    description,
+                    source_issue_id,
+                    None,  # No existing mapping yet
+                )
+
+            # Create issue on target with retry logic
+            target_issue = await self._execute_gitlab_api_call(
+                self.target_client.create_issue,
+                f"create_issue_{source_issue_iid}",
+                self.mirror.target_project_id,
+                title=source_issue["title"],
+                description=description,
+                labels=labels,
+                weight=source_issue.get("weight") if self.config.sync_weight else None,
             )
 
-        # Create issue on target
-        target_issue = await asyncio.to_thread(
-            self.target_client.create_issue,
-            self.mirror.target_project_id,
-            title=source_issue["title"],
-            description=description,
-            labels=labels,
-            weight=source_issue.get("weight") if self.config.sync_weight else None,
-        )
+            target_issue_id = target_issue["id"]
+            target_issue_iid = target_issue["iid"]
 
-        target_issue_id = target_issue["id"]
-        target_issue_iid = target_issue["iid"]
-
-        logger.info(
-            f"Created target issue {target_issue_iid} for source issue {source_issue_iid}"
-        )
+            logger.info(
+                f"Created target issue {target_issue_iid} for source issue {source_issue_iid}"
+            )
 
         # Sync time tracking if enabled
         if self.config.sync_time_estimate or self.config.sync_time_spent:
@@ -452,8 +521,9 @@ class IssueSyncEngine:
 
         # Close target issue if source is closed
         if source_issue["state"] == "closed" and self.config.sync_closed_issues:
-            await asyncio.to_thread(
+            await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
+                f"close_issue_{target_issue_iid}",
                 self.mirror.target_project_id,
                 target_issue_iid,
                 state_event="close"
@@ -505,9 +575,10 @@ class IssueSyncEngine:
                 mapping.id,
             )
 
-        # Update issue on target
-        await asyncio.to_thread(
+        # Update issue on target with retry logic
+        await self._execute_gitlab_api_call(
             self.target_client.update_issue,
+            f"update_issue_{target_issue_iid}",
             self.mirror.target_project_id,
             target_issue_iid,
             title=source_issue["title"],
@@ -524,17 +595,19 @@ class IssueSyncEngine:
         if self.config.sync_time_estimate or self.config.sync_time_spent:
             await self._sync_time_tracking(source_issue, target_issue_iid)
 
-        # Sync state (open/closed)
+        # Sync state (open/closed) with retry logic
         if source_issue["state"] == "closed" and self.config.sync_closed_issues:
-            await asyncio.to_thread(
+            await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
+                f"close_issue_{target_issue_iid}",
                 self.mirror.target_project_id,
                 target_issue_iid,
                 state_event="close"
             )
         elif source_issue["state"] == "opened":
-            await asyncio.to_thread(
+            await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
+                f"reopen_issue_{target_issue_iid}",
                 self.mirror.target_project_id,
                 target_issue_iid,
                 state_event="reopen"
@@ -607,32 +680,35 @@ class IssueSyncEngine:
         if not time_stats:
             return
 
-        # Sync time estimate
+        # Sync time estimate with retry logic
         if self.config.sync_time_estimate:
             time_estimate = time_stats.get("time_estimate")
             if time_estimate and time_estimate > 0:
                 # Convert seconds to human-readable format
                 duration = self._seconds_to_duration(time_estimate)
-                await asyncio.to_thread(
+                await self._execute_gitlab_api_call(
                     self.target_client.set_time_estimate,
+                    f"set_time_estimate_{target_issue_iid}",
                     self.mirror.target_project_id,
                     target_issue_iid,
                     duration
                 )
 
-        # Sync time spent
+        # Sync time spent with retry logic
         if self.config.sync_time_spent:
             total_time_spent = time_stats.get("total_time_spent")
             if total_time_spent and total_time_spent > 0:
                 # Reset time spent first, then add
-                await asyncio.to_thread(
+                await self._execute_gitlab_api_call(
                     self.target_client.reset_time_spent,
+                    f"reset_time_spent_{target_issue_iid}",
                     self.mirror.target_project_id,
                     target_issue_iid
                 )
                 duration = self._seconds_to_duration(total_time_spent)
-                await asyncio.to_thread(
+                await self._execute_gitlab_api_call(
                     self.target_client.add_time_spent,
+                    f"add_time_spent_{target_issue_iid}",
                     self.mirror.target_project_id,
                     target_issue_iid,
                     duration
@@ -645,9 +721,10 @@ class IssueSyncEngine:
         issue_mapping_id: int
     ) -> None:
         """Sync comments from source to target issue."""
-        # Fetch source comments (excluding system notes)
-        source_notes = await asyncio.to_thread(
+        # Fetch source comments (excluding system notes) with retry logic
+        source_notes = await self._execute_gitlab_api_call(
             self.source_client.get_issue_notes,
+            f"get_issue_notes_{source_issue_iid}",
             self.mirror.source_project_id,
             source_issue_iid
         )
@@ -675,9 +752,10 @@ class IssueSyncEngine:
                     # No changes
                     continue
 
-                # Update target comment
-                await asyncio.to_thread(
+                # Update target comment with retry logic
+                await self._execute_gitlab_api_call(
                     self.target_client.update_issue_note,
+                    f"update_note_{mapping.target_note_id}",
                     self.mirror.target_project_id,
                     target_issue_iid,
                     mapping.target_note_id,
@@ -688,9 +766,10 @@ class IssueSyncEngine:
                 mapping.last_synced_at = datetime.utcnow()
                 await self.db.commit()
             else:
-                # Create new comment on target
-                target_note = await asyncio.to_thread(
+                # Create new comment on target with retry logic
+                target_note = await self._execute_gitlab_api_call(
                     self.target_client.create_issue_note,
+                    f"create_note_{source_note_id}",
                     self.mirror.target_project_id,
                     target_issue_iid,
                     source_note_body
@@ -755,10 +834,11 @@ class IssueSyncEngine:
             # Extract filename
             filename = extract_filename_from_url(source_url)
 
-            # Upload to target
+            # Upload to target with retry logic
             try:
-                upload_result = await asyncio.to_thread(
+                upload_result = await self._execute_gitlab_api_call(
                     self.target_client.upload_file,
+                    f"upload_file_{filename}",
                     self.mirror.target_project_id,
                     file_content,
                     filename
@@ -792,10 +872,56 @@ class IssueSyncEngine:
         # Replace URLs in description
         return replace_urls_in_description(description, url_mapping)
 
+    async def _find_existing_target_issue(
+        self,
+        source_issue_id: int,
+        source_issue_iid: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Search for an existing issue on target that matches the source issue.
+
+        This provides idempotency by finding orphaned issues (created but not mapped in DB).
+        Searches for issues with the Mirrored-From label and matching source reference in footer.
+
+        Args:
+            source_issue_id: Source issue ID
+            source_issue_iid: Source issue IID
+
+        Returns:
+            Existing issue dict if found, None otherwise
+        """
+        try:
+            # Search for issues with our Mirrored-From label
+            # Note: This is a simple search - in production you might want to cache these
+            target_issues = await self._execute_gitlab_api_call(
+                self.target_client.get_issues,
+                f"search_existing_issue_{source_issue_iid}",
+                self.mirror.target_project_id,
+                labels=self.mirror_from_label,
+                state="all",
+                per_page=100,
+                get_all=False,  # Only search first page for performance
+            )
+
+            # Look for issue with matching source reference in description
+            source_ref = f"{self.mirror.source_project_path}#{source_issue_iid}"
+            for issue in target_issues:
+                description = issue.get("description", "")
+                if source_ref in description and MIRROR_FOOTER_MARKER in description:
+                    logger.debug(f"Found existing target issue {issue['iid']} for source {source_issue_iid}")
+                    return issue
+
+            return None
+        except Exception as e:
+            # If search fails, log warning and continue (will create new issue)
+            logger.warning(f"Failed to search for existing target issue: {e}")
+            return None
+
     async def _load_target_labels_cache(self) -> None:
-        """Load all target project labels into cache."""
-        labels = await asyncio.to_thread(
+        """Load all target project labels into cache with retry logic."""
+        labels = await self._execute_gitlab_api_call(
             self.target_client.get_project_labels,
+            "load_target_labels",
             self.mirror.target_project_id
         )
         self.target_labels_cache = {label["name"]: label for label in labels}
@@ -804,10 +930,11 @@ class IssueSyncEngine:
     async def _ensure_mirror_from_label(self) -> None:
         """Ensure the Mirrored-From label exists on target project."""
         if self.mirror_from_label not in self.target_labels_cache:
-            # Create the label
+            # Create the label with retry logic
             try:
-                label = await asyncio.to_thread(
+                label = await self._execute_gitlab_api_call(
                     self.target_client.create_label,
+                    f"create_label_{self.mirror_from_label}",
                     self.mirror.target_project_id,
                     name=self.mirror_from_label,
                     color=MIRROR_FROM_LABEL_COLOR,
