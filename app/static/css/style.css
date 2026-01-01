@@ -758,6 +758,16 @@ table tbody tr:hover {
     color: var(--info-color);
 }
 
+/* Project mirrors badge (shown when selecting projects in create mirror form) */
+.project-mirrors-badge {
+    min-height: 24px;
+    margin-top: 6px;
+}
+
+.project-mirrors-badge .badge {
+    font-size: 0.75rem;
+}
+
 /* Messages */
 .message {
     padding: 12px 16px;

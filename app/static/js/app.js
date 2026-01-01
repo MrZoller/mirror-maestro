@@ -2655,6 +2655,64 @@ function resetMirrorOverrides() {
 
     // Update the inherit option texts to show pair defaults
     updateMirrorFormPairDefaults();
+
+    // Clear any project mirror badges
+    clearProjectMirrorBadges();
+}
+
+// Clear project mirror badges
+function clearProjectMirrorBadges() {
+    const sourceBadge = document.getElementById('source-project-mirrors-badge');
+    const targetBadge = document.getElementById('target-project-mirrors-badge');
+    if (sourceBadge) sourceBadge.innerHTML = '';
+    if (targetBadge) targetBadge.innerHTML = '';
+}
+
+// Check for existing mirrors on a selected project
+async function checkProjectMirrors(side) {
+    const instanceId = side === 'source' ? state.mirrorProjectInstances.source : state.mirrorProjectInstances.target;
+    const selectId = side === 'source' ? 'mirror-source-project' : 'mirror-target-project';
+    const badgeId = side === 'source' ? 'source-project-mirrors-badge' : 'target-project-mirrors-badge';
+
+    const select = document.getElementById(selectId);
+    const badge = document.getElementById(badgeId);
+
+    if (!badge) return;
+
+    const projectId = select?.value;
+    if (!projectId || !instanceId) {
+        badge.innerHTML = '';
+        return;
+    }
+
+    // Show loading state
+    badge.innerHTML = '<span class="badge badge-secondary">Checking...</span>';
+
+    try {
+        const result = await apiRequest(`/api/instances/${instanceId}/projects/${projectId}/mirrors`);
+
+        if (result.total_count === 0) {
+            badge.innerHTML = '';
+            return;
+        }
+
+        // Build badge content
+        const parts = [];
+        if (result.push_count > 0) {
+            parts.push(`${result.push_count} push`);
+        }
+        if (result.pull_count > 0) {
+            parts.push(`${result.pull_count} pull`);
+        }
+
+        const badgeText = parts.length > 0 ? parts.join(', ') : `${result.total_count} mirror(s)`;
+        const tooltip = `This project has ${result.total_count} existing mirror(s) on GitLab`;
+
+        badge.innerHTML = `<span class="badge badge-warning" title="${escapeHtml(tooltip)}">⚠ ${escapeHtml(badgeText)}</span>`;
+    } catch (error) {
+        console.error('Failed to check project mirrors:', error);
+        badge.innerHTML = '';
+    }
 }
 
 function updateMirrorFormPairDefaults() {
