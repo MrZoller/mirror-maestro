@@ -186,6 +186,28 @@ class MirrorRemoveExisting(BaseModel):
         return v
 
 
+class DriftDetail(BaseModel):
+    """Details about a drifted setting."""
+    field: str
+    expected: bool | str | None
+    actual: bool | str | None
+
+
+class MirrorVerifyResponse(BaseModel):
+    """Response for mirror verification (orphan/drift detection)."""
+    mirror_id: int
+    status: str  # "healthy", "orphan", "drift", "error", "not_created"
+    orphan: bool = False
+    drift: list[DriftDetail] = []
+    gitlab_mirror: dict | None = None
+    error: str | None = None
+
+
+class MirrorVerifyRequest(BaseModel):
+    """Request to verify multiple mirrors."""
+    mirror_ids: list[int]
+
+
 class MirrorUpdate(BaseModel):
     # Direction cannot be changed - it's determined by the instance pair
     mirror_overwrite_diverged: bool | None = None
@@ -1550,3 +1572,236 @@ async def rotate_mirror_token(
         "token_expires_at": expires_at,
         "token_status": _compute_token_status(mirror.mirror_token_expires_at),
     }
+
+
+async def _verify_single_mirror(
+    db: AsyncSession,
+    mirror: Mirror,
+) -> MirrorVerifyResponse:
+    """
+    Verify a single mirror for orphan/drift status.
+
+    Orphan: mirror_id exists in DB but the GitLab remote mirror doesn't exist.
+    Drift: Settings in DB don't match settings on GitLab.
+    """
+    # If mirror was never created on GitLab, return early
+    if mirror.mirror_id is None:
+        return MirrorVerifyResponse(
+            mirror_id=mirror.id,
+            status="not_created",
+            orphan=False,
+            drift=[],
+            gitlab_mirror=None,
+            error=None,
+        )
+
+    # Get pair and instances
+    pair_result = await db.execute(
+        select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+    )
+    pair = pair_result.scalar_one_or_none()
+    if not pair:
+        return MirrorVerifyResponse(
+            mirror_id=mirror.id,
+            status="error",
+            orphan=False,
+            drift=[],
+            gitlab_mirror=None,
+            error="Instance pair not found",
+        )
+
+    src_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id)
+    )
+    tgt_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id)
+    )
+    source_instance = src_result.scalar_one_or_none()
+    target_instance = tgt_result.scalar_one_or_none()
+
+    if not source_instance or not target_instance:
+        return MirrorVerifyResponse(
+            mirror_id=mirror.id,
+            status="error",
+            orphan=False,
+            drift=[],
+            gitlab_mirror=None,
+            error="Source or target instance not found",
+        )
+
+    # Direction comes from pair
+    direction = (pair.mirror_direction or "pull").lower()
+
+    # Determine owner project (where the mirror config lives on GitLab)
+    # Push: mirror config on source, Pull: mirror config on target
+    if direction == "push":
+        owner_project_id = mirror.source_project_id
+        owner_instance = source_instance
+    else:
+        owner_project_id = mirror.target_project_id
+        owner_instance = target_instance
+
+    # Get mirrors from GitLab
+    try:
+        client = GitLabClient(owner_instance.url, owner_instance.encrypted_token)
+        gitlab_mirrors = client.get_project_mirrors(owner_project_id) or []
+    except Exception as e:
+        return MirrorVerifyResponse(
+            mirror_id=mirror.id,
+            status="error",
+            orphan=False,
+            drift=[],
+            gitlab_mirror=None,
+            error=f"Failed to fetch GitLab mirrors: {str(e)}",
+        )
+
+    # Find our mirror by ID
+    gitlab_mirror = None
+    for gm in gitlab_mirrors:
+        if gm.get("id") == mirror.mirror_id:
+            gitlab_mirror = gm
+            break
+
+    # Check for orphan
+    if gitlab_mirror is None:
+        return MirrorVerifyResponse(
+            mirror_id=mirror.id,
+            status="orphan",
+            orphan=True,
+            drift=[],
+            gitlab_mirror=None,
+            error=None,
+        )
+
+    # Calculate effective settings
+    effective = await _resolve_effective_settings(
+        db,
+        mirror=mirror,
+        pair=pair,
+        source_instance=source_instance,
+        target_instance=target_instance,
+    )
+
+    # Check for drift
+    drift_list: list[DriftDetail] = []
+
+    # enabled
+    expected_enabled = mirror.enabled
+    actual_enabled = gitlab_mirror.get("enabled")
+    if expected_enabled != actual_enabled:
+        drift_list.append(DriftDetail(
+            field="enabled",
+            expected=expected_enabled,
+            actual=actual_enabled,
+        ))
+
+    # only_protected_branches
+    expected_protected = effective.get("effective_only_mirror_protected_branches")
+    actual_protected = gitlab_mirror.get("only_protected_branches")
+    if expected_protected != actual_protected:
+        drift_list.append(DriftDetail(
+            field="only_protected_branches",
+            expected=expected_protected,
+            actual=actual_protected,
+        ))
+
+    # keep_divergent_refs (inverse of mirror_overwrite_diverged)
+    expected_overwrite = effective.get("effective_mirror_overwrite_diverged")
+    if expected_overwrite is not None:
+        expected_keep_divergent = not expected_overwrite
+        actual_keep_divergent = gitlab_mirror.get("keep_divergent_refs")
+        if expected_keep_divergent != actual_keep_divergent:
+            drift_list.append(DriftDetail(
+                field="keep_divergent_refs",
+                expected=expected_keep_divergent,
+                actual=actual_keep_divergent,
+            ))
+
+    # Pull-only settings
+    if direction == "pull":
+        # trigger_builds
+        expected_trigger = effective.get("effective_mirror_trigger_builds")
+        actual_trigger = gitlab_mirror.get("trigger_builds")
+        if expected_trigger is not None and expected_trigger != actual_trigger:
+            drift_list.append(DriftDetail(
+                field="trigger_builds",
+                expected=expected_trigger,
+                actual=actual_trigger,
+            ))
+
+        # mirror_branch_regex
+        expected_regex = effective.get("effective_mirror_branch_regex")
+        actual_regex = gitlab_mirror.get("mirror_branch_regex")
+        # Normalize empty strings to None for comparison
+        if expected_regex == "":
+            expected_regex = None
+        if actual_regex == "":
+            actual_regex = None
+        if expected_regex != actual_regex:
+            drift_list.append(DriftDetail(
+                field="mirror_branch_regex",
+                expected=expected_regex,
+                actual=actual_regex,
+            ))
+
+    status = "healthy" if not drift_list else "drift"
+
+    return MirrorVerifyResponse(
+        mirror_id=mirror.id,
+        status=status,
+        orphan=False,
+        drift=drift_list,
+        gitlab_mirror=gitlab_mirror,
+        error=None,
+    )
+
+
+@router.get("/{mirror_id}/verify", response_model=MirrorVerifyResponse)
+async def verify_mirror(
+    mirror_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials),
+):
+    """
+    Verify a single mirror for orphan/drift status.
+
+    - **orphan**: Mirror exists in DB but not on GitLab (was deleted externally)
+    - **drift**: Mirror settings in DB don't match GitLab (was modified externally)
+    """
+    result = await db.execute(select(Mirror).where(Mirror.id == mirror_id))
+    mirror = result.scalar_one_or_none()
+
+    if not mirror:
+        raise HTTPException(status_code=404, detail="Mirror not found")
+
+    return await _verify_single_mirror(db, mirror)
+
+
+@router.post("/verify", response_model=list[MirrorVerifyResponse])
+async def verify_mirrors(
+    req: MirrorVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials),
+):
+    """
+    Verify multiple mirrors for orphan/drift status.
+
+    Returns verification results for each requested mirror ID.
+    Mirrors that don't exist will be omitted from the response.
+    """
+    if not req.mirror_ids:
+        return []
+
+    # Fetch all requested mirrors
+    result = await db.execute(
+        select(Mirror).where(Mirror.id.in_(req.mirror_ids))
+    )
+    mirrors = result.scalars().all()
+
+    # Verify each mirror
+    results: list[MirrorVerifyResponse] = []
+    for mirror in mirrors:
+        verification = await _verify_single_mirror(db, mirror)
+        results.append(verification)
+
+    return results
