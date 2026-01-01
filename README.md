@@ -24,8 +24,12 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 *Configure pairs of GitLab instances for mirroring*
 
 ### Mirrors Management
-![Mirrors](docs/screenshots/04-mirrors.png?v=3)
-*View and manage mirrors with pagination, smart path truncation, tree view for nested groups, group filtering, sorting, token status, real-time sync status, and safe per-mirror edits*
+![Mirrors](docs/screenshots/04-mirrors.png?v=5)
+*View and manage mirrors with pagination, smart path truncation, tree view for nested groups, group filtering, sorting, token status, real-time sync status, safe per-mirror edits, and **issue sync configuration** with visual indicators*
+
+### Issue Mirroring Configuration
+![Issue Configuration](docs/screenshots/04b-issue-config.png?v=1)
+*Configure issue syncing: enable/disable synchronization, choose what to sync (comments, labels, attachments, time tracking), and control behavior including the important **Sync Existing Issues** option (disabled by default - only syncs new issues created after enabling)*
 
 ### Topology
 ![Topology](docs/screenshots/05-topology.png?v=3)
@@ -62,6 +66,15 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **Flexible Configuration**: Define default mirror settings at the instance pair level, optionally override per mirror
 - **Safe Inline Editing**: Edit instances/pairs/mirrors in-table; fields that could break existing mirrors are locked/greyed out
 - **Token Rotation**: Rotate instance access tokens or individual mirror tokens without deleting configuration
+- **🆕 Issue Mirroring**: Automatically sync issues, comments, labels, attachments, and PM fields between GitLab instances
+  - One-way sync with bidirectional support via dual mirrors
+  - Configurable sync intervals (5-1440 minutes) with automatic scheduling
+  - Smart change detection using content hashing
+  - PM field conversion (milestones/iterations/epics/assignees → labels)
+  - Attachment download/upload with URL rewriting
+  - Time tracking sync (estimates and time spent)
+  - Loop prevention and incremental syncing
+  - See [Issue Mirroring Guide](docs/ISSUE_MIRRORING.md) for details
 
 ### Mirror Management
 - **View Mirrors**: See all configured mirrors and their current status at a glance

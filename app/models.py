@@ -111,3 +111,182 @@ class Mirror(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MirrorIssueConfig(Base):
+    """Configuration for issue mirroring on a repository mirror."""
+    __tablename__ = "mirror_issue_configs"
+    __table_args__ = (
+        Index('idx_mirror_issue_config_mirror', 'mirror_id'),
+        Index('idx_mirror_issue_config_next_sync', 'next_sync_at'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mirror_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+
+    # Issue sync settings
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # What to sync
+    sync_comments: Mapped[bool] = mapped_column(Boolean, default=True)
+    sync_labels: Mapped[bool] = mapped_column(Boolean, default=True)
+    sync_attachments: Mapped[bool] = mapped_column(Boolean, default=True)
+    sync_weight: Mapped[bool] = mapped_column(Boolean, default=True)
+    sync_time_estimate: Mapped[bool] = mapped_column(Boolean, default=True)
+    sync_time_spent: Mapped[bool] = mapped_column(Boolean, default=True)
+    sync_closed_issues: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Sync behavior
+    update_existing: Mapped[bool] = mapped_column(Boolean, default=True)
+    sync_existing_issues: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Sync state
+    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_sync_status: Mapped[Optional[str]] = mapped_column(String(50))
+    last_sync_error: Mapped[Optional[str]] = mapped_column(Text)
+    next_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Polling interval (minutes)
+    sync_interval_minutes: Mapped[int] = mapped_column(Integer, default=15)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class IssueMapping(Base):
+    """Tracks which issues correspond across instances."""
+    __tablename__ = "issue_mappings"
+    __table_args__ = (
+        Index('idx_issue_mappings_source', 'source_project_id', 'source_issue_iid'),
+        Index('idx_issue_mappings_target', 'target_project_id', 'target_issue_iid'),
+        Index('idx_issue_mappings_sync_status', 'sync_status'),
+        UniqueConstraint('mirror_issue_config_id', 'source_issue_id', name='uq_issue_mapping_source'),
+        UniqueConstraint('mirror_issue_config_id', 'target_issue_id', name='uq_issue_mapping_target'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mirror_issue_config_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Source issue info
+    source_issue_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_issue_iid: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_project_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Target issue info
+    target_issue_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_issue_iid: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_project_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Sync tracking
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    target_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    sync_status: Mapped[str] = mapped_column(String(50), default='synced')
+    sync_error: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Hash of source content for change detection
+    source_content_hash: Mapped[Optional[str]] = mapped_column(String(64))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CommentMapping(Base):
+    """Tracks comment correspondence across instances."""
+    __tablename__ = "comment_mappings"
+    __table_args__ = (
+        Index('idx_comment_mappings_issue', 'issue_mapping_id'),
+        UniqueConstraint('issue_mapping_id', 'source_note_id', name='uq_comment_mapping_source'),
+        UniqueConstraint('issue_mapping_id', 'target_note_id', name='uq_comment_mapping_target'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    issue_mapping_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    source_note_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_note_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    source_content_hash: Mapped[Optional[str]] = mapped_column(String(64))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class LabelMapping(Base):
+    """Custom label mappings across instances."""
+    __tablename__ = "label_mappings"
+    __table_args__ = (
+        UniqueConstraint('mirror_issue_config_id', 'source_label_name', name='uq_label_mapping_source'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mirror_issue_config_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    source_label_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_label_name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Strategy: 'exact' (same name), 'mapped' (explicit mapping), 'skip' (don't sync this label)
+    mapping_strategy: Mapped[str] = mapped_column(String(20), default='exact')
+
+    # If target label doesn't exist, should we create it?
+    auto_create: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AttachmentMapping(Base):
+    """Tracks uploaded file correspondence."""
+    __tablename__ = "attachment_mappings"
+    __table_args__ = (
+        Index('idx_attachment_mappings_issue', 'issue_mapping_id'),
+        Index('idx_attachment_mappings_comment', 'comment_mapping_id'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    issue_mapping_id: Mapped[Optional[int]] = mapped_column(Integer)
+    comment_mapping_id: Mapped[Optional[int]] = mapped_column(Integer)
+
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    target_url: Mapped[str] = mapped_column(Text, nullable=False)
+
+    filename: Mapped[Optional[str]] = mapped_column(String(500))
+    content_type: Mapped[Optional[str]] = mapped_column(String(100))
+    file_size: Mapped[Optional[int]] = mapped_column(Integer)
+
+    uploaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class IssueSyncJob(Base):
+    """Track sync jobs for async processing."""
+    __tablename__ = "issue_sync_jobs"
+    __table_args__ = (
+        Index('idx_sync_jobs_status', 'status'),
+        Index('idx_sync_jobs_config', 'mirror_issue_config_id', 'created_at'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mirror_issue_config_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    job_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default='pending')
+
+    # Job parameters (JSON)
+    parameters: Mapped[Optional[dict]] = mapped_column(JSON)
+
+    # Results
+    issues_processed: Mapped[int] = mapped_column(Integer, default=0)
+    issues_created: Mapped[int] = mapped_column(Integer, default=0)
+    issues_updated: Mapped[int] = mapped_column(Integer, default=0)
+    issues_failed: Mapped[int] = mapped_column(Integer, default=0)
+    error_details: Mapped[Optional[dict]] = mapped_column(JSON)
+
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # For idempotency
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(255), unique=True)

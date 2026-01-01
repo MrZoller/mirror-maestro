@@ -97,7 +97,7 @@ async def test_create_backup_empty_database(client):
             metadata = json.loads(metadata_file.read().decode())
             assert "timestamp" in metadata
             assert "version" in metadata
-            assert metadata["version"] == "2.0"
+            assert metadata["version"] == "2.1"
             assert metadata["format"] == "json"
 
             # Check database.json structure
