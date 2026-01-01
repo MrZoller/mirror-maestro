@@ -959,6 +959,7 @@ class GitLabClient:
         state: Optional[str] = None,
         per_page: int = 100,
         page: int = 1,
+        get_all: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get issues from a project with optional filtering.
@@ -968,7 +969,8 @@ class GitLabClient:
             updated_after: ISO 8601 datetime string to filter issues updated after this time.
             state: Filter by state ('opened', 'closed', 'all').
             per_page: Number of issues per page.
-            page: Page number.
+            page: Page number (only used when get_all=False).
+            get_all: If True, fetch all pages of issues. If False, fetch only one page.
 
         Returns:
             List of issue dictionaries.
@@ -976,38 +978,83 @@ class GitLabClient:
         try:
             params: Dict[str, Any] = {
                 "per_page": per_page,
-                "page": page,
             }
             if updated_after:
                 params["updated_after"] = updated_after
             if state:
                 params["state"] = state
 
-            issues = self.gl.http_get(f"/projects/{project_id}/issues", query_data=params)
-            if not isinstance(issues, list):
-                return []
-
             result = []
-            for issue in issues:
-                if not isinstance(issue, dict):
-                    continue
-                result.append({
-                    "id": issue.get("id"),
-                    "iid": issue.get("iid"),
-                    "title": issue.get("title"),
-                    "description": issue.get("description"),
-                    "state": issue.get("state"),
-                    "labels": issue.get("labels", []),
-                    "milestone": issue.get("milestone"),
-                    "assignees": issue.get("assignees", []),
-                    "author": issue.get("author"),
-                    "weight": issue.get("weight"),
-                    "time_stats": issue.get("time_stats"),
-                    "created_at": issue.get("created_at"),
-                    "updated_at": issue.get("updated_at"),
-                    "closed_at": issue.get("closed_at"),
-                    "web_url": issue.get("web_url"),
-                })
+
+            if get_all:
+                # Fetch all pages
+                current_page = 1
+                while True:
+                    params["page"] = current_page
+                    issues = self.gl.http_get(f"/projects/{project_id}/issues", query_data=params)
+
+                    if not isinstance(issues, list) or len(issues) == 0:
+                        break
+
+                    for issue in issues:
+                        if not isinstance(issue, dict):
+                            continue
+                        result.append({
+                            "id": issue.get("id"),
+                            "iid": issue.get("iid"),
+                            "title": issue.get("title"),
+                            "description": issue.get("description"),
+                            "state": issue.get("state"),
+                            "labels": issue.get("labels", []),
+                            "milestone": issue.get("milestone"),
+                            "iteration": issue.get("iteration"),
+                            "epic": issue.get("epic"),
+                            "assignees": issue.get("assignees", []),
+                            "author": issue.get("author"),
+                            "weight": issue.get("weight"),
+                            "time_stats": issue.get("time_stats"),
+                            "created_at": issue.get("created_at"),
+                            "updated_at": issue.get("updated_at"),
+                            "closed_at": issue.get("closed_at"),
+                            "web_url": issue.get("web_url"),
+                        })
+
+                    # If we got fewer issues than per_page, we've reached the last page
+                    if len(issues) < per_page:
+                        break
+
+                    current_page += 1
+            else:
+                # Fetch single page
+                params["page"] = page
+                issues = self.gl.http_get(f"/projects/{project_id}/issues", query_data=params)
+
+                if not isinstance(issues, list):
+                    return []
+
+                for issue in issues:
+                    if not isinstance(issue, dict):
+                        continue
+                    result.append({
+                        "id": issue.get("id"),
+                        "iid": issue.get("iid"),
+                        "title": issue.get("title"),
+                        "description": issue.get("description"),
+                        "state": issue.get("state"),
+                        "labels": issue.get("labels", []),
+                        "milestone": issue.get("milestone"),
+                        "iteration": issue.get("iteration"),
+                        "epic": issue.get("epic"),
+                        "assignees": issue.get("assignees", []),
+                        "author": issue.get("author"),
+                        "weight": issue.get("weight"),
+                        "time_stats": issue.get("time_stats"),
+                        "created_at": issue.get("created_at"),
+                        "updated_at": issue.get("updated_at"),
+                        "closed_at": issue.get("closed_at"),
+                        "web_url": issue.get("web_url"),
+                    })
+
             return result
         except Exception as e:
             _handle_gitlab_error(e, f"Failed to fetch issues for project {project_id}")
