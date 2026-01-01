@@ -29,6 +29,7 @@ class MirrorIssueConfigCreate(BaseModel):
     sync_time_spent: bool = True
     sync_closed_issues: bool = False
     update_existing: bool = True
+    sync_existing_issues: bool = False
     sync_interval_minutes: int = 15
 
 
@@ -43,6 +44,7 @@ class MirrorIssueConfigUpdate(BaseModel):
     sync_time_spent: Optional[bool] = None
     sync_closed_issues: Optional[bool] = None
     update_existing: Optional[bool] = None
+    sync_existing_issues: Optional[bool] = None
     sync_interval_minutes: Optional[int] = None
 
 
@@ -61,6 +63,7 @@ class MirrorIssueConfigResponse(BaseModel):
     sync_time_spent: bool
     sync_closed_issues: bool
     update_existing: bool
+    sync_existing_issues: bool
     last_sync_at: Optional[datetime]
     last_sync_status: Optional[str]
     last_sync_error: Optional[str]
@@ -214,6 +217,11 @@ async def trigger_sync(
     _: str = Depends(verify_credentials)
 ):
     """Manually trigger an issue sync for a configuration."""
+    from datetime import datetime, timedelta
+    from app.models import IssueSyncJob, GitLabInstance, InstancePair
+    from app.core.issue_sync import IssueSyncEngine
+    import asyncio
+
     result = await db.execute(
         select(MirrorIssueConfig).where(MirrorIssueConfig.id == config_id)
     )
@@ -230,9 +238,140 @@ async def trigger_sync(
             detail="Cannot trigger sync for disabled configuration"
         )
 
-    # TODO: Phase 2 - Create sync job and process
-    # For now, just return accepted status
+    # Load related entities
+    mirror_result = await db.execute(
+        select(Mirror).where(Mirror.id == config.mirror_id)
+    )
+    mirror = mirror_result.scalar_one_or_none()
+    if not mirror:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Mirror {config.mirror_id} not found"
+        )
+
+    pair_result = await db.execute(
+        select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+    )
+    pair = pair_result.scalar_one_or_none()
+    if not pair:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Instance pair {mirror.instance_pair_id} not found"
+        )
+
+    # Determine source and target based on mirror direction
+    if pair.mirror_direction == "pull":
+        source_instance_id = pair.source_instance_id
+        target_instance_id = pair.target_instance_id
+    else:  # push
+        source_instance_id = pair.target_instance_id
+        target_instance_id = pair.source_instance_id
+
+    source_instance_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == source_instance_id)
+    )
+    source_instance = source_instance_result.scalar_one_or_none()
+
+    target_instance_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == target_instance_id)
+    )
+    target_instance = target_instance_result.scalar_one_or_none()
+
+    if not source_instance or not target_instance:
+        raise HTTPException(
+            status_code=404,
+            detail="Source or target instance not found"
+        )
+
+    # Create sync job
+    job = IssueSyncJob(
+        mirror_issue_config_id=config.id,
+        job_type="manual",
+        status="pending",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    # Trigger sync in background
+    async def run_sync():
+        async with AsyncSessionLocal() as sync_db:
+            try:
+                # Update job status
+                job_result = await sync_db.execute(
+                    select(IssueSyncJob).where(IssueSyncJob.id == job.id)
+                )
+                sync_job = job_result.scalar_one()
+                sync_job.status = "running"
+                sync_job.started_at = datetime.utcnow()
+                await sync_db.commit()
+
+                # Reload config with new session
+                config_result = await sync_db.execute(
+                    select(MirrorIssueConfig).where(MirrorIssueConfig.id == config_id)
+                )
+                sync_config = config_result.scalar_one()
+
+                # Reload mirror
+                mirror_result = await sync_db.execute(
+                    select(Mirror).where(Mirror.id == sync_config.mirror_id)
+                )
+                sync_mirror = mirror_result.scalar_one()
+
+                # Run sync
+                engine = IssueSyncEngine(
+                    db=sync_db,
+                    config=sync_config,
+                    mirror=sync_mirror,
+                    source_instance=source_instance,
+                    target_instance=target_instance,
+                    instance_pair=pair,
+                )
+
+                stats = await engine.sync()
+
+                # Update job with results
+                sync_job.status = "completed"
+                sync_job.completed_at = datetime.utcnow()
+                sync_job.issues_processed = stats["issues_processed"]
+                sync_job.issues_created = stats["issues_created"]
+                sync_job.issues_updated = stats["issues_updated"]
+                sync_job.issues_failed = stats["issues_failed"]
+                if stats["errors"]:
+                    sync_job.error_details = {"errors": stats["errors"]}
+
+                # Update config status
+                sync_config.last_sync_at = datetime.utcnow()
+                sync_config.last_sync_status = "success"
+                sync_config.last_sync_error = None
+                sync_config.next_sync_at = datetime.utcnow() + timedelta(
+                    minutes=sync_config.sync_interval_minutes
+                )
+
+                await sync_db.commit()
+
+            except Exception as e:
+                # Update job as failed
+                sync_job.status = "failed"
+                sync_job.completed_at = datetime.utcnow()
+                sync_job.error_details = {"error": str(e)}
+
+                # Update config status
+                config_result = await sync_db.execute(
+                    select(MirrorIssueConfig).where(MirrorIssueConfig.id == config_id)
+                )
+                sync_config = config_result.scalar_one()
+                sync_config.last_sync_at = datetime.utcnow()
+                sync_config.last_sync_status = "failed"
+                sync_config.last_sync_error = str(e)
+
+                await sync_db.commit()
+
+    # Start background task
+    asyncio.create_task(run_sync())
+
     return {
-        "message": "Sync triggered (will be implemented in Phase 2)",
-        "config_id": config_id
+        "message": "Sync triggered",
+        "config_id": config_id,
+        "job_id": job.id
     }

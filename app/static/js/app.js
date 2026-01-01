@@ -4007,6 +4007,7 @@ async function showIssueMirrorConfig(mirrorId) {
         document.getElementById('issue-sync-time-spent').checked = config.sync_time_spent;
         document.getElementById('issue-sync-closed').checked = config.sync_closed_issues;
         document.getElementById('issue-update-existing').checked = config.update_existing;
+        document.getElementById('issue-sync-existing').checked = config.sync_existing_issues;
         document.getElementById('issue-sync-interval').value = config.sync_interval_minutes;
 
         // Show status
@@ -4069,6 +4070,7 @@ async function handleIssueMirrorConfig(event) {
             sync_time_spent: document.getElementById('issue-sync-time-spent').checked,
             sync_closed_issues: document.getElementById('issue-sync-closed').checked,
             update_existing: document.getElementById('issue-update-existing').checked,
+            sync_existing_issues: document.getElementById('issue-sync-existing').checked,
             sync_interval_minutes: parseInt(document.getElementById('issue-sync-interval').value)
         };
 
