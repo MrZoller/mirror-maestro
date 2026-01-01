@@ -1082,3 +1082,270 @@ async def test_mirrors_remove_existing_invalid_pair(client):
     assert resp.status_code == 404
     assert "pair" in resp.json()["detail"].lower()
 
+
+# =============================================================================
+# Mirror Verification Tests (Orphan/Drift Detection)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_verify_mirror_healthy(client, session_maker, monkeypatch):
+    """Test verification returns healthy when mirror exists with matching settings."""
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.inits.clear()
+    FakeGitLabClient.project_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src-verify-healthy", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt-verify-healthy", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair-verify-healthy", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="group/project",
+            target_project_id=2,
+            target_project_path="group/project-mirror",
+            mirror_id=100,
+            enabled=True,
+            only_mirror_protected_branches=False,
+            mirror_overwrite_diverged=False,
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        mirror_id = m.id
+
+    # Mock GitLab to return a matching mirror
+    FakeGitLabClient.project_mirrors[2] = [
+        {
+            "id": 100,
+            "enabled": True,
+            "only_protected_branches": False,
+            "keep_divergent_refs": True,  # opposite of mirror_overwrite_diverged=False
+            "trigger_builds": False,
+            "mirror_branch_regex": None,
+        }
+    ]
+
+    resp = await client.get(f"/api/mirrors/{mirror_id}/verify")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "healthy"
+    assert data["orphan"] is False
+    assert data["drift"] == []
+    assert data["gitlab_mirror"] is not None
+
+
+@pytest.mark.asyncio
+async def test_verify_mirror_orphan(client, session_maker, monkeypatch):
+    """Test verification detects orphan when mirror is deleted from GitLab."""
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.inits.clear()
+    FakeGitLabClient.project_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src-verify-orphan", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt-verify-orphan", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair-verify-orphan", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="group/project",
+            target_project_id=2,
+            target_project_path="group/project-mirror",
+            mirror_id=200,  # This ID won't exist on GitLab
+            enabled=True,
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        mirror_id = m.id
+
+    # GitLab returns empty list (mirror was deleted)
+    FakeGitLabClient.project_mirrors[2] = []
+
+    resp = await client.get(f"/api/mirrors/{mirror_id}/verify")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "orphan"
+    assert data["orphan"] is True
+    assert data["gitlab_mirror"] is None
+
+
+@pytest.mark.asyncio
+async def test_verify_mirror_drift(client, session_maker, monkeypatch):
+    """Test verification detects drift when settings mismatch."""
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.inits.clear()
+    FakeGitLabClient.project_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src-verify-drift", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt-verify-drift", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair-verify-drift", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="group/project",
+            target_project_id=2,
+            target_project_path="group/project-mirror",
+            mirror_id=300,
+            enabled=True,  # We expect enabled=True
+            only_mirror_protected_branches=True,  # We expect True
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        mirror_id = m.id
+
+    # GitLab has different settings
+    FakeGitLabClient.project_mirrors[2] = [
+        {
+            "id": 300,
+            "enabled": False,  # Drifted from True
+            "only_protected_branches": False,  # Drifted from True
+            "keep_divergent_refs": True,
+            "trigger_builds": False,
+            "mirror_branch_regex": None,
+        }
+    ]
+
+    resp = await client.get(f"/api/mirrors/{mirror_id}/verify")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "drift"
+    assert data["orphan"] is False
+    assert len(data["drift"]) >= 2
+
+    # Check that enabled and only_protected_branches are in the drift list
+    drift_fields = [d["field"] for d in data["drift"]]
+    assert "enabled" in drift_fields
+    assert "only_protected_branches" in drift_fields
+
+
+@pytest.mark.asyncio
+async def test_verify_mirror_not_created(client, session_maker, monkeypatch):
+    """Test verification returns not_created when mirror has no mirror_id."""
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.inits.clear()
+    FakeGitLabClient.project_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src-verify-nc", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt-verify-nc", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair-verify-nc", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="group/project",
+            target_project_id=2,
+            target_project_path="group/project-mirror",
+            mirror_id=None,  # Not created on GitLab yet
+            enabled=True,
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        mirror_id = m.id
+
+    resp = await client.get(f"/api/mirrors/{mirror_id}/verify")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "not_created"
+    assert data["orphan"] is False
+
+
+@pytest.mark.asyncio
+async def test_verify_mirror_not_found(client):
+    """Test verification returns 404 for non-existent mirror."""
+    resp = await client.get("/api/mirrors/99999/verify")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_verify_mirrors_batch(client, session_maker, monkeypatch):
+    """Test batch verification of multiple mirrors."""
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.inits.clear()
+    FakeGitLabClient.project_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src-verify-batch", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt-verify-batch", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair-verify-batch", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    mirror_ids = []
+    async with session_maker() as s:
+        # Create a healthy mirror
+        m1 = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="group/project1",
+            target_project_id=10,
+            target_project_path="group/project1-mirror",
+            mirror_id=401,
+            enabled=True,
+        )
+        s.add(m1)
+
+        # Create an orphan mirror
+        m2 = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=2,
+            source_project_path="group/project2",
+            target_project_id=20,
+            target_project_path="group/project2-mirror",
+            mirror_id=402,
+            enabled=True,
+        )
+        s.add(m2)
+
+        await s.commit()
+        await s.refresh(m1)
+        await s.refresh(m2)
+        mirror_ids = [m1.id, m2.id]
+
+    # Set up GitLab mock - only m1's mirror exists
+    FakeGitLabClient.project_mirrors[10] = [
+        {
+            "id": 401,
+            "enabled": True,
+            "only_protected_branches": False,
+            "keep_divergent_refs": True,
+            "trigger_builds": False,
+            "mirror_branch_regex": None,
+        }
+    ]
+    FakeGitLabClient.project_mirrors[20] = []  # m2's mirror is gone (orphan)
+
+    resp = await client.post("/api/mirrors/verify", json={"mirror_ids": mirror_ids})
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) == 2
+
+    # Find each result by mirror_id
+    result_by_id = {r["mirror_id"]: r for r in results}
+    assert result_by_id[mirror_ids[0]]["status"] == "healthy"
+    assert result_by_id[mirror_ids[1]]["status"] == "orphan"
+
+
+@pytest.mark.asyncio
+async def test_verify_mirrors_batch_empty(client):
+    """Test batch verification with empty list returns empty result."""
+    resp = await client.post("/api/mirrors/verify", json={"mirror_ids": []})
+    assert resp.status_code == 200
+    assert resp.json() == []
+
