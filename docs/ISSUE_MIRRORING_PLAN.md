@@ -106,12 +106,13 @@ CREATE TABLE mirror_issue_configs (
     -- What to sync
     sync_comments BOOLEAN DEFAULT true,
     sync_labels BOOLEAN DEFAULT true,
-    sync_assignees BOOLEAN DEFAULT true,
     sync_attachments BOOLEAN DEFAULT true,
     sync_weight BOOLEAN DEFAULT true,
     sync_time_estimate BOOLEAN DEFAULT true,
     sync_time_spent BOOLEAN DEFAULT true,
     sync_closed_issues BOOLEAN DEFAULT false, -- Only sync open issues by default
+
+    -- Note: Milestones, iterations, epics, and assignees are converted to labels (not synced as fields)
 
     -- Sync behavior
     update_existing BOOLEAN DEFAULT true, -- Update already-synced issues on subsequent syncs
@@ -212,29 +213,9 @@ CREATE TABLE label_mappings (
     UNIQUE(mirror_issue_config_id, source_label_name)
 );
 
--- NOTE: Milestones, iterations, and epics are converted to labels rather than being mapped
--- This avoids complex group-level object mapping and permission requirements
-
--- User mapping: how users/assignees correspond across instances (optional - for explicit overrides)
-CREATE TABLE user_mappings (
-    id SERIAL PRIMARY KEY,
-    mirror_issue_config_id INTEGER NOT NULL REFERENCES mirror_issue_configs(id) ON DELETE CASCADE,
-
-    source_user_id INTEGER NOT NULL,
-    source_username VARCHAR(255) NOT NULL,
-    target_user_id INTEGER,
-    target_username VARCHAR(255),
-
-    mapping_strategy VARCHAR(20) DEFAULT 'by_username', -- 'by_username', 'by_email', 'mapped', 'skip'
-
-    -- If user doesn't exist, what to do?
-    fallback_strategy VARCHAR(20) DEFAULT 'unassign', -- 'unassign', 'assign_to_bot', 'assign_to_creator'
-
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    UNIQUE(mirror_issue_config_id, source_user_id)
-);
+-- NOTE: Milestones, iterations, epics, and assignees are converted to labels rather than being mapped
+-- This avoids complex cross-instance object mapping and permission requirements
+-- Target users can manually assign issues to themselves based on the informational labels
 
 -- Attachment mapping: track uploaded files
 CREATE TABLE attachment_mappings (
@@ -530,17 +511,17 @@ def extract_attachment_urls(content: str) -> List[str]:
 - Helps distinguish mirrored issues visually
 - Optional configuration per mirror
 
-### 5.2 Milestone, Iteration, and Epic Handling
+### 5.2 Milestone, Iteration, Epic, and Assignee Handling
 
-**Challenge:** Milestones, iterations, and epics can be group-level objects with complex hierarchies that may not exist or may differ between instances.
+**Challenge:** Milestones, iterations, and epics can be group-level objects with complex hierarchies that may not exist or may differ between instances. Similarly, users/assignees often have different usernames across instances, making reliable mapping impossible.
 
 **Recommended Strategy: Convert to Labels + Description Footer**
 
-Instead of trying to sync or map these complex GitLab objects, convert them to informational labels on the target:
+Instead of trying to sync or map these complex GitLab objects and user identities, convert them to informational labels on the target:
 
 ```python
 def convert_pm_fields_to_labels(source_issue: dict) -> List[str]:
-    """Convert milestone/iteration/epic to labels for target."""
+    """Convert milestone/iteration/epic/assignees to labels for target."""
     labels = []
 
     # Milestone → Label
@@ -557,6 +538,12 @@ def convert_pm_fields_to_labels(source_issue: dict) -> List[str]:
     if source_issue.get('epic'):
         epic_title = simplify_epic_title(source_issue['epic']['title'])
         labels.append(f"Epic::{epic_title}")
+
+    # Assignees → Labels
+    if source_issue.get('assignees'):
+        for assignee in source_issue['assignees']:
+            username = assignee['username']
+            labels.append(f"Assigned::{username}")
 
     return labels
 
@@ -580,25 +567,32 @@ def build_description_with_pm_context(source_issue: dict) -> str:
     if source_issue.get('epic'):
         footer += f">\n> **🎯 Epic:** {source_issue['epic']['title']} ([view]({source_issue['epic']['web_url']}))"
 
+    if source_issue.get('assignees'):
+        assignee_names = ', '.join([f"@{a['username']}" for a in source_issue['assignees']])
+        footer += f">\n> **👤 Originally assigned to:** {assignee_names}"
+
     footer += f">\n> Last synced: {datetime.utcnow().isoformat()} UTC"
 
     return source_issue['description'] + footer
 ```
 
 **Benefits:**
-- ✅ Works regardless of group structure differences
+- ✅ Works regardless of group structure differences or username mismatches
 - ✅ No group-level API permissions required
-- ✅ Developers in target can filter by iteration/milestone using labels
+- ✅ No complex user mapping when usernames differ between instances
+- ✅ Developers can filter by iteration/milestone/assignee using labels
 - ✅ Full context preserved in description with links back to source
-- ✅ Developers in target can still manually assign to their local milestones/iterations if desired
-- ✅ Simple implementation, no complex mapping tables
+- ✅ Target developers can manually assign to themselves or local milestones/iterations
+- ✅ Simple implementation, no complex mapping tables (removed `user_mappings` table!)
 
 **Target Developers Can Still Use Local PM Fields:**
 
 The labels are informational only. Target developers can:
 1. See label `Iteration::Sprint-24` (from source Environment A)
-2. Manually assign issue to their local "Sprint 24" iteration in Environment B
-3. Manual assignments won't be overwritten (we don't sync these fields)
+2. See label `Assigned::alice.smith` (from source Environment A)
+3. Manually assign issue to their local "Sprint 24" iteration in Environment B
+4. Manually assign to themselves (even if username differs: alice.smith in A, alice.b in B)
+5. Manual assignments won't be overwritten (we don't sync milestone/iteration/assignee fields)
 
 **Example Synced Issue:**
 
@@ -618,38 +612,26 @@ Users experiencing timeouts after 30 seconds...
 > **📅 Milestone:** Q1 2024 (Due: 2024-03-31)
 > **🏃 Iteration:** Sprint 24 (2024-01-01 to 2024-01-14)
 > **🎯 Epic:** Platform → Authentication → SSO Implementation ([view](link))
+> **👤 Originally assigned to:** @alice.smith, @bob.jones
 >
 > Last synced: 2024-01-15T10:30:00 UTC
 ```
 
-**Labels on target:** `Milestone::Q1-2024`, `Iteration::Sprint-24`, `Epic::Platform-Auth`, `🔄 MIRRORED`
+**Labels on target:**
+- `Milestone::Q1-2024`
+- `Iteration::Sprint-24`
+- `Epic::Platform-Auth`
+- `Assigned::alice.smith`
+- `Assigned::bob.jones`
+- `🔄 MIRRORED`
 
-### 5.3 User/Assignee Mapping
+**Actual GitLab fields on target:**
+- Milestone: NULL (or manually set by user)
+- Iteration: NULL (or manually set by user)
+- Assignees: [] (or manually set by user)
+- Epic: NULL (or manually set by user)
 
-**Strategy 1: By Username (Default)**
-- Source user "alice" → Find target user "alice"
-- If not found, apply fallback strategy
-
-**Strategy 2: By Email**
-- Match users by email address
-- Requires API permission to view emails
-- More reliable for cross-instance mapping
-
-**Strategy 3: Explicit Mapping**
-- User defines: Source user_id → Target user_id
-- For enterprise scenarios with different usernames
-
-**Fallback Strategies:**
-- `unassign`: Create issue without assignee
-- `assign_to_bot`: Assign to the API token user
-- `assign_to_creator`: Assign to the user who created the mirror config (if stored)
-
-**Note:** Add explanation comment when assignee mapping fails:
-```
-> ⚠️ Original assignee: @alice (not found on target instance)
-```
-
-### 5.4 Weight and Time Tracking
+### 5.3 Weight and Time Tracking
 
 **Weight (Story Points):**
 ```python
@@ -1022,7 +1004,6 @@ Add "Issue Sync" tab to mirror details page:
 │ What to sync:                                    │
 │ [✓] Comments                                    │
 │ [✓] Labels                                      │
-│ [✓] Assignees                                   │
 │ [✓] Attachments                                 │
 │ [✓] Weight (story points)                       │
 │ [✓] Time estimate                               │
@@ -1031,6 +1012,11 @@ Add "Issue Sync" tab to mirror details page:
 │        B→A), fields flow both ways using       │
 │        last-sync-wins strategy.                 │
 │ [ ] Closed issues                               │
+│                                                  │
+│ ℹ️  Milestones, iterations, epics, and          │
+│    assignees are converted to informational     │
+│    labels. Users can manually set these fields  │
+│    on target issues if desired.                 │
 │                                                  │
 │ Sync Interval: [15] minutes                     │
 │                                                  │
@@ -1164,19 +1150,18 @@ Full sync workflows:
 ## 12. Implementation Phases
 
 ### Phase 1: Foundation (Week 1-2)
-- [ ] Database schema implementation (7 tables)
+- [ ] Database schema implementation (6 tables - removed user_mappings!)
 - [ ] GitLab API client extensions (issue, note, upload, time tracking endpoints)
 - [ ] Basic issue sync engine (title, description, state, labels)
 - [ ] Label auto-creation (exact match)
-- [ ] Milestone/iteration/epic → label conversion
+- [ ] Milestone/iteration/epic/assignee → label conversion
 - [ ] Sync job scheduler (polling-based)
 - [ ] Weight and time tracking field sync
 
 ### Phase 2: Core Features (Week 3-4)
 - [ ] Comment syncing with content hash tracking
-- [ ] User/assignee mapping with fallback strategies
 - [ ] Attachment download/upload/URL rewriting
-- [ ] Issue description footer with PM context and source link
+- [ ] Issue description footer with PM context (milestone/iteration/epic/assignee info)
 - [ ] Configuration API endpoints
 
 ### Phase 3: UI and UX (Week 5-6)
