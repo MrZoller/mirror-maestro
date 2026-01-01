@@ -1976,6 +1976,8 @@ function renderMirrors(mirrors) {
             return '<span class="badge badge-secondary">Unknown</span>';
         })();
 
+        const verifyBadge = getVerificationBadgeHtml(mirror.id);
+
         return `
             <tr>
                 <td>${formatProjectPath(mirror.source_project_path)}</td>
@@ -1987,10 +1989,12 @@ function renderMirrors(mirrors) {
                     ${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}
                 </td>
                 <td>${tokenStatusBadge}</td>
+                <td>${verifyBadge}</td>
                 <td>
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
                         <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
+                        <button class="btn btn-info btn-small" data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id})" title="Check if mirror exists and settings match GitLab">Verify</button>
                         <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate Token</button>
                         <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
                     </div>
@@ -2013,6 +2017,196 @@ async function rotateMirrorToken(mirrorId) {
     } catch (error) {
         console.error('Failed to rotate token:', error);
     }
+}
+
+// Verification status cache (mirror_id -> verification result)
+const verificationCache = new Map();
+
+// Verify a single mirror for orphan/drift status
+async function verifyMirror(mirrorId, showMessages = true) {
+    const btn = document.querySelector(`[data-verify-btn="${mirrorId}"]`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '...';
+    }
+
+    try {
+        const result = await apiRequest(`/api/mirrors/${mirrorId}/verify`);
+        verificationCache.set(mirrorId, result);
+
+        // Update the verification badge in the UI
+        updateVerificationBadge(mirrorId, result);
+
+        if (showMessages) {
+            if (result.status === 'healthy') {
+                showMessage(`Mirror #${mirrorId}: Healthy ✓`, 'success');
+            } else if (result.status === 'orphan') {
+                showMessage(`Mirror #${mirrorId}: ORPHAN - Mirror was deleted from GitLab`, 'error');
+            } else if (result.status === 'drift') {
+                const fields = result.drift.map(d => d.field).join(', ');
+                showMessage(`Mirror #${mirrorId}: DRIFT detected in: ${fields}`, 'warning');
+            } else if (result.status === 'not_created') {
+                showMessage(`Mirror #${mirrorId}: Not yet created on GitLab`, 'info');
+            } else if (result.status === 'error') {
+                showMessage(`Mirror #${mirrorId}: Error - ${result.error}`, 'error');
+            }
+        }
+
+        return result;
+    } catch (error) {
+        console.error('Failed to verify mirror:', error);
+        if (showMessages) {
+            showMessage(`Failed to verify mirror #${mirrorId}: ${error.message}`, 'error');
+        }
+        return null;
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Verify';
+        }
+    }
+}
+
+// Verify all visible mirrors
+async function verifyAllMirrors() {
+    const mirrorIds = state.mirrors.map(m => m.id);
+    if (mirrorIds.length === 0) {
+        showMessage('No mirrors to verify', 'info');
+        return;
+    }
+
+    const btn = document.getElementById('verify-all-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Verifying...';
+    }
+
+    try {
+        const results = await apiRequest('/api/mirrors/verify', {
+            method: 'POST',
+            body: JSON.stringify({ mirror_ids: mirrorIds }),
+        });
+
+        // Update cache and UI for each result
+        let healthy = 0, orphan = 0, drift = 0, errors = 0, notCreated = 0;
+
+        for (const result of results) {
+            verificationCache.set(result.mirror_id, result);
+            updateVerificationBadge(result.mirror_id, result);
+
+            switch (result.status) {
+                case 'healthy': healthy++; break;
+                case 'orphan': orphan++; break;
+                case 'drift': drift++; break;
+                case 'not_created': notCreated++; break;
+                case 'error': errors++; break;
+            }
+        }
+
+        // Show summary
+        const parts = [];
+        if (healthy > 0) parts.push(`${healthy} healthy`);
+        if (orphan > 0) parts.push(`${orphan} orphan`);
+        if (drift > 0) parts.push(`${drift} drifted`);
+        if (notCreated > 0) parts.push(`${notCreated} not created`);
+        if (errors > 0) parts.push(`${errors} errors`);
+
+        const msgType = (orphan > 0 || errors > 0) ? 'error' : (drift > 0 ? 'warning' : 'success');
+        showMessage(`Verification complete: ${parts.join(', ')}`, msgType);
+
+    } catch (error) {
+        console.error('Failed to verify mirrors:', error);
+        showMessage(`Failed to verify mirrors: ${error.message}`, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Verify All';
+        }
+    }
+}
+
+// Update the verification badge for a mirror row
+function updateVerificationBadge(mirrorId, result) {
+    const badge = document.querySelector(`[data-verify-badge="${mirrorId}"]`);
+    if (!badge) return;
+
+    badge.className = 'badge';
+    badge.title = '';
+
+    switch (result.status) {
+        case 'healthy':
+            badge.className = 'badge badge-success';
+            badge.textContent = '✓';
+            badge.title = 'Mirror verified: healthy';
+            break;
+        case 'orphan':
+            badge.className = 'badge badge-danger';
+            badge.textContent = 'Orphan';
+            badge.title = 'Mirror was deleted from GitLab externally';
+            break;
+        case 'drift':
+            badge.className = 'badge badge-warning';
+            const fields = result.drift.map(d => `${d.field}: expected ${d.expected}, got ${d.actual}`).join('\n');
+            badge.textContent = 'Drift';
+            badge.title = `Settings mismatch:\n${fields}`;
+            break;
+        case 'not_created':
+            badge.className = 'badge badge-secondary';
+            badge.textContent = 'N/C';
+            badge.title = 'Mirror not yet created on GitLab';
+            break;
+        case 'error':
+            badge.className = 'badge badge-danger';
+            badge.textContent = 'Err';
+            badge.title = result.error || 'Verification error';
+            break;
+        default:
+            badge.textContent = '?';
+            badge.title = 'Unknown status';
+    }
+}
+
+// Get cached verification status badge HTML
+function getVerificationBadgeHtml(mirrorId) {
+    const cached = verificationCache.get(mirrorId);
+    if (!cached) {
+        return `<span data-verify-badge="${mirrorId}" class="badge badge-secondary" title="Not verified">-</span>`;
+    }
+
+    let badgeClass = 'badge-secondary';
+    let text = '-';
+    let title = 'Not verified';
+
+    switch (cached.status) {
+        case 'healthy':
+            badgeClass = 'badge-success';
+            text = '✓';
+            title = 'Mirror verified: healthy';
+            break;
+        case 'orphan':
+            badgeClass = 'badge-danger';
+            text = 'Orphan';
+            title = 'Mirror was deleted from GitLab externally';
+            break;
+        case 'drift':
+            badgeClass = 'badge-warning';
+            text = 'Drift';
+            const fields = cached.drift.map(d => `${d.field}: expected ${d.expected}, got ${d.actual}`).join('\n');
+            title = `Settings mismatch:\n${fields}`;
+            break;
+        case 'not_created':
+            badgeClass = 'badge-secondary';
+            text = 'N/C';
+            title = 'Mirror not yet created on GitLab';
+            break;
+        case 'error':
+            badgeClass = 'badge-danger';
+            text = 'Err';
+            title = cached.error || 'Verification error';
+            break;
+    }
+
+    return `<span data-verify-badge="${mirrorId}" class="badge ${badgeClass}" title="${escapeHtml(title)}">${text}</span>`;
 }
 
 // Pagination controls
@@ -2461,6 +2655,64 @@ function resetMirrorOverrides() {
 
     // Update the inherit option texts to show pair defaults
     updateMirrorFormPairDefaults();
+
+    // Clear any project mirror badges
+    clearProjectMirrorBadges();
+}
+
+// Clear project mirror badges
+function clearProjectMirrorBadges() {
+    const sourceBadge = document.getElementById('source-project-mirrors-badge');
+    const targetBadge = document.getElementById('target-project-mirrors-badge');
+    if (sourceBadge) sourceBadge.innerHTML = '';
+    if (targetBadge) targetBadge.innerHTML = '';
+}
+
+// Check for existing mirrors on a selected project
+async function checkProjectMirrors(side) {
+    const instanceId = side === 'source' ? state.mirrorProjectInstances.source : state.mirrorProjectInstances.target;
+    const selectId = side === 'source' ? 'mirror-source-project' : 'mirror-target-project';
+    const badgeId = side === 'source' ? 'source-project-mirrors-badge' : 'target-project-mirrors-badge';
+
+    const select = document.getElementById(selectId);
+    const badge = document.getElementById(badgeId);
+
+    if (!badge) return;
+
+    const projectId = select?.value;
+    if (!projectId || !instanceId) {
+        badge.innerHTML = '';
+        return;
+    }
+
+    // Show loading state
+    badge.innerHTML = '<span class="badge badge-secondary">Checking...</span>';
+
+    try {
+        const result = await apiRequest(`/api/instances/${instanceId}/projects/${projectId}/mirrors`);
+
+        if (result.total_count === 0) {
+            badge.innerHTML = '';
+            return;
+        }
+
+        // Build badge content
+        const parts = [];
+        if (result.push_count > 0) {
+            parts.push(`${result.push_count} push`);
+        }
+        if (result.pull_count > 0) {
+            parts.push(`${result.pull_count} pull`);
+        }
+
+        const badgeText = parts.length > 0 ? parts.join(', ') : `${result.total_count} mirror(s)`;
+        const tooltip = `This project has ${result.total_count} existing mirror(s) on GitLab`;
+
+        badge.innerHTML = `<span class="badge badge-warning" title="${escapeHtml(tooltip)}">⚠ ${escapeHtml(badgeText)}</span>`;
+    } catch (error) {
+        console.error('Failed to check project mirrors:', error);
+        badge.innerHTML = '';
+    }
 }
 
 function updateMirrorFormPairDefaults() {

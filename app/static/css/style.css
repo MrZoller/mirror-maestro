@@ -544,6 +544,18 @@ tr.search-highlight {
     box-shadow: var(--shadow-sm);
 }
 
+.btn-info {
+    background: rgba(31, 117, 203, 0.08);
+    color: var(--secondary-color);
+    border-color: rgba(31, 117, 203, 0.25);
+}
+
+.btn-info:hover {
+    background: rgba(31, 117, 203, 0.14);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
 .btn-small {
     padding: 6px 12px;
     font-size: 0.85rem;
@@ -744,6 +756,16 @@ table tbody tr:hover {
 .badge-info {
     background: #e9f3fc;
     color: var(--info-color);
+}
+
+/* Project mirrors badge (shown when selecting projects in create mirror form) */
+.project-mirrors-badge {
+    min-height: 24px;
+    margin-top: 6px;
+}
+
+.project-mirrors-badge .badge {
+    font-size: 0.75rem;
 }
 
 /* Messages */
@@ -1318,7 +1340,8 @@ table tbody tr:hover {
 
 .btn-secondary.loading::after,
 .btn-danger.loading::after,
-.btn-success.loading::after {
+.btn-success.loading::after,
+.btn-info.loading::after {
     border: 2px solid var(--border-color);
     border-top: 2px solid var(--primary-color);
 }
