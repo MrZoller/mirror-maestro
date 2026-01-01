@@ -7,29 +7,30 @@ This document outlines a comprehensive plan for implementing optional issue mirr
 **Key Challenges:**
 1. Cross-instance reference mapping (labels, milestones, users, epics)
 2. Handling missing or different entities across instances
-3. Bidirectional sync and conflict resolution
-4. Attachment/file handling
-5. Maintaining sync reliability and performance
+3. Attachment/file handling
+4. Maintaining sync reliability and performance
+
+**Design Decision:**
+Issue mirroring follows the same pattern as repository mirroring: always one-way (source → target). For bidirectional issue sync, users create two separate mirror pairs (A→B and B→A), just like with repository mirrors. This eliminates all conflict resolution complexity.
 
 ## 1. Architecture Overview
 
-### 1.1 Sync Direction Options
+### 1.1 Sync Direction
 
-**Option A: One-Way Sync (Recommended for Initial Implementation)**
-- Issues flow from source → target only
-- Simpler to implement and reason about
+**One-Way Sync Only (Source → Target)**
+- Issues always flow from source → target
+- Consistent with repository mirror behavior
 - No conflict resolution needed
-- Clear ownership model
-- Changes on target are considered "local modifications" and preserved unless explicitly overwritten
+- Clear ownership model: source instance is authoritative
+- Changes on target issues are overwritten by subsequent syncs (target issues are read-only mirrors)
 
-**Option B: Bidirectional Sync**
-- Issues sync both ways
-- Requires conflict detection and resolution
-- More complex state management
-- Useful for distributed teams working across instances
-- Higher risk of data inconsistencies
-
-**Recommendation:** Start with Option A (one-way sync) and add Option B in a future iteration.
+**For Bidirectional Issue Sync:**
+- Create two separate mirror pairs:
+  - Mirror 1: Instance A → Instance B (syncs issues from A to B)
+  - Mirror 2: Instance B → Instance A (syncs issues from B to A)
+- Each mirror operates independently
+- No cross-mirror conflict detection (user responsibility to avoid editing same issue on both sides)
+- Simpler architecture, easier to reason about and debug
 
 ### 1.2 Sync Trigger Mechanisms
 
@@ -61,13 +62,13 @@ This document outlines a comprehensive plan for implementing optional issue mirr
 
 ```sql
 -- Main configuration: which mirrors should sync issues
+-- Note: Issue sync is always one-way (source → target), matching repository mirror behavior
 CREATE TABLE mirror_issue_configs (
     id SERIAL PRIMARY KEY,
     mirror_id INTEGER NOT NULL REFERENCES mirrors(id) ON DELETE CASCADE,
 
     -- Issue sync settings
     enabled BOOLEAN DEFAULT true,
-    sync_direction VARCHAR(20) DEFAULT 'source_to_target', -- 'source_to_target', 'target_to_source', 'bidirectional'
 
     -- What to sync
     sync_comments BOOLEAN DEFAULT true,
@@ -78,8 +79,7 @@ CREATE TABLE mirror_issue_configs (
     sync_closed_issues BOOLEAN DEFAULT false, -- Only sync open issues by default
 
     -- Sync behavior
-    update_existing BOOLEAN DEFAULT true, -- Update already-synced issues
-    conflict_resolution VARCHAR(20) DEFAULT 'source_wins', -- 'source_wins', 'target_wins', 'manual'
+    update_existing BOOLEAN DEFAULT true, -- Update already-synced issues on subsequent syncs
 
     -- Sync state
     last_sync_at TIMESTAMP,
@@ -565,65 +565,31 @@ def extract_attachment_urls(content: str) -> List[str]:
 
 **Recommendation:** Skip epic sync in initial implementation, add as advanced feature later.
 
-## 6. Conflict Resolution (For Future Bidirectional Sync)
+## 6. Handling Target-Side Modifications
 
-When both source and target issues are modified:
+Since issue sync is always one-way (source → target), there's no conflict resolution complexity:
 
-### 6.1 Detection
+**Sync Behavior:**
+- Source is always authoritative
+- Target issues are overwritten on each sync (if `update_existing=true`)
+- Target-side modifications are lost when source issue is updated
 
-```python
-def detect_conflict(mapping: IssueMapping, source_issue: dict, target_issue: dict) -> bool:
-    """Detect if both sides changed since last sync."""
-    source_changed = source_issue['updated_at'] > mapping.last_synced_at
-    target_changed = target_issue['updated_at'] > mapping.last_synced_at
-    return source_changed and target_changed
-```
+**Preventing Accidental Overwrites:**
+- Add prominent "🔄 MIRRORED ISSUE" label to target issues
+- Include mirror metadata footer warning users not to edit
+- Consider making target issues "confidential" or adding a bot comment warning about overwrites
 
-### 6.2 Resolution Strategies
+**For Users Who Need Bidirectional Sync:**
+- Create two separate mirror pairs (A→B and B→A)
+- User is responsible for avoiding editing the same issue on both sides
+- If both sides are edited, last sync wins (no automatic merge)
+- This is consistent with how repository mirroring works
 
-**Strategy 1: Source Wins (Default)**
-- Always overwrite target with source content
-- Simple, predictable
-- Risk: Lose target changes
-
-**Strategy 2: Target Wins**
-- Never overwrite target if it changed
-- Preserves local modifications
-- Risk: Source changes not propagated
-
-**Strategy 3: Last Write Wins**
-- Compare `updated_at` timestamps
-- Most recent change wins
-- Risk: Race conditions
-
-**Strategy 4: Manual Resolution**
-- Mark issue_mapping as `sync_status='conflict'`
-- Show in UI for manual resolution
-- Admin chooses which side wins or manually merges
-- Most reliable, requires user intervention
-
-**Strategy 5: Field-Level Merge**
-- Merge non-conflicting fields
-- Example: Title changed on source, labels on target → Apply both
-- Complex to implement
-- Best user experience
-
-**Recommendation:** Start with Strategy 1 (source wins) for one-way sync. For bidirectional, implement Strategy 4 (manual resolution) as safest option.
-
-### 6.3 Conflict UI
-
-Show conflicts in dashboard:
-```
-⚠️ 5 issues with sync conflicts
-┌─────────────────────────────────────────────────┐
-│ Issue #123: "Login bug"                        │
-│ Source: Updated 2h ago by @bob                 │
-│ Target: Updated 1h ago by @alice               │
-│                                                 │
-│ [Preview Source] [Preview Target] [Diff]       │
-│ [Use Source] [Use Target] [Manual Merge]       │
-└─────────────────────────────────────────────────┘
-```
+**Optional: Overwrite Protection (Future Enhancement)**
+- Track if target issue was modified since last sync
+- Mark as `sync_status='target_modified'`
+- Require manual confirmation before overwriting
+- Show warning in UI: "Target issue was modified. Overwrite?"
 
 ## 7. Performance Optimization
 
@@ -920,14 +886,13 @@ Add "Issue Sync" tab to mirror details page:
 │ [Repository] [Issue Sync] [Settings]            │
 ├─────────────────────────────────────────────────┤
 │                                                  │
-│ Issue Synchronization                            │
+│ Issue Synchronization (Source → Target)          │
 │                                                  │
 │ [✓] Enable issue syncing                        │
 │                                                  │
-│ Sync Direction:                                  │
-│ ( ) Source → Target (one-way)                   │
-│ ( ) Target → Source (one-way)                   │
-│ ( ) Bidirectional                               │
+│ ℹ️  Issues always sync from source to target.   │
+│    For bidirectional sync, create a reverse     │
+│    mirror pair (target → source).               │
 │                                                  │
 │ What to sync:                                    │
 │ [✓] Comments                                    │
@@ -938,10 +903,6 @@ Add "Issue Sync" tab to mirror details page:
 │ [ ] Closed issues                               │
 │                                                  │
 │ Sync Interval: [15] minutes                     │
-│                                                  │
-│ Conflict Resolution:                             │
-│ ( ) Source wins                                 │
-│ (•) Manual resolution                           │
 │                                                  │
 │ [Save Configuration]                             │
 │                                                  │
@@ -1073,26 +1034,27 @@ Full sync workflows:
 ## 12. Implementation Phases
 
 ### Phase 1: Foundation (Week 1-2)
-- [ ] Database schema implementation
-- [ ] GitLab API client extensions
-- [ ] Basic issue sync (no comments, no attachments)
+- [ ] Database schema implementation (7 tables)
+- [ ] GitLab API client extensions (issue, note, upload endpoints)
+- [ ] Basic issue sync engine (no comments, no attachments)
 - [ ] Label mapping (exact match only)
-- [ ] One-way sync (source → target)
+- [ ] Sync job scheduler (polling-based)
 
 ### Phase 2: Core Features (Week 3-4)
 - [ ] Comment syncing
 - [ ] Milestone mapping
-- [ ] User/assignee mapping with fallback
-- [ ] Attachment handling
+- [ ] User/assignee mapping with fallback strategies
+- [ ] Attachment download/upload/URL rewriting
 - [ ] Configuration API endpoints
 
 ### Phase 3: UI and UX (Week 5-6)
-- [ ] Frontend configuration UI
-- [ ] Sync status dashboard
-- [ ] Issue mapping list view
+- [ ] Frontend configuration UI with inline help
+- [ ] Sync status dashboard with metrics
+- [ ] Issue mapping list view with status indicators
 - [ ] Manual sync trigger
+- [ ] Label/milestone/user mapping management UI
 
-### Phase 4: Reliability (Week 7-8)
+### Phase 4: Reliability & Testing (Week 7-8)
 - [ ] Error handling and retry logic
 - [ ] Rate limiting
 - [ ] Incremental sync optimization
@@ -1100,11 +1062,11 @@ Full sync workflows:
 - [ ] Documentation
 
 ### Phase 5: Advanced Features (Future)
-- [ ] Bidirectional sync
-- [ ] Conflict resolution UI
-- [ ] Webhook-based sync
-- [ ] Epic syncing
-- [ ] Advanced mapping strategies
+- [ ] Webhook-based real-time sync
+- [ ] Epic syncing (for Premium/Ultimate instances)
+- [ ] Advanced mapping strategies (custom label transformations, regex-based filtering)
+- [ ] Target-side modification detection and warnings
+- [ ] Batch operations (bulk enable/disable, mapping management)
 
 ## 13. Risks and Mitigations
 
@@ -1121,57 +1083,62 @@ Full sync workflows:
 
 ## 14. Open Questions for Discussion
 
-1. **Sync Direction Default:** Should default be source→target or let user choose during setup?
+1. **Closed Issues:** Should we sync closed/resolved issues by default, or only open ones?
 
-2. **Closed Issues:** Should we sync closed/resolved issues by default, or only open ones?
-
-3. **Existing Issues:** When enabling issue sync on a mirror with existing issues on both sides, how to handle initial mapping? Options:
+2. **Existing Issues:** When enabling issue sync on a mirror with existing issues on both sides, how to handle initial mapping? Options:
    - Only sync new issues going forward
    - Try to match by title and link existing issues
    - Let user manually map existing issues
 
-4. **Epic Handling:** Skip entirely, or add basic note in description about epic association?
+3. **Epic Handling:** Skip entirely, or add basic note in description about epic association?
 
-5. **Label Auto-Create:** Default to true or false? Creating labels automatically might clutter target.
+4. **Label Auto-Create:** Default to true or false? Creating labels automatically might clutter target.
 
-6. **Milestone Auto-Create:** Should we allow this, or always require manual milestone creation?
+5. **Milestone Auto-Create:** Should we allow this, or always require manual milestone creation?
 
-7. **Attachment Size Limit:** What's reasonable? 10MB? 50MB? Configurable?
+6. **Attachment Size Limit:** What's reasonable? 10MB? 50MB? Configurable?
 
-8. **Sync Frequency:** Default to 15 minutes? Allow real-time (1 minute) polling?
+7. **Sync Frequency:** Default to 15 minutes? Allow real-time (1 minute) polling?
 
-9. **Performance Target:** What's acceptable sync time? 100 issues in < 1 minute?
+8. **Performance Target:** What's acceptable sync time? 100 issues in < 1 minute?
 
-10. **Webhook Support:** Priority for Phase 1, or defer to later phase?
+9. **Webhook Support:** Priority for Phase 1, or defer to later phase?
 
-11. **Issue Types:** Should we sync all issue types (issue, incident, test case) or filter?
+10. **Issue Types:** Should we sync all issue types (issue, incident, test case) or filter?
 
-12. **Time Tracking:** Should we sync time estimates, time spent?
+11. **Time Tracking:** Should we sync time estimates, time spent?
 
 ## 15. Conclusion
 
-GitLab issue mirroring is a complex but valuable feature that requires careful design around reference mapping, sync reliability, and conflict handling. The recommended approach is:
+GitLab issue mirroring is a valuable feature that requires careful design around reference mapping and sync reliability. The recommended approach is:
 
 1. **Start Simple:** One-way sync (source→target), polling-based, exact label matching
 2. **Build Reliability:** Focus on error handling, rate limiting, idempotency
-3. **Iterate Based on Feedback:** Add bidirectional sync, webhooks, advanced mapping later
+3. **Iterate Based on Feedback:** Add webhooks, advanced mapping strategies later
 4. **Maintain Transparency:** Clear UI indicators that issues are mirrored, metadata footers
+5. **Consistent Architecture:** Follow the same pattern as repository mirroring (one-way only, use two pairs for bidirectional flow)
 
 **Estimated Development Time:**
 - Phase 1 (Foundation): 2 weeks
 - Phase 2 (Core Features): 2 weeks
-- Phase 3 (UI/UX): 2 weeks
-- Phase 4 (Reliability): 2 weeks
-- **Total for MVP:** ~8 weeks (2 months) for single developer
-- Phase 5 (Advanced): +4 weeks for bidirectional sync
+- Phase 3 (UI/UX): 1.5 weeks
+- Phase 4 (Reliability & Testing): 2 weeks
+- **Total for MVP:** ~7.5 weeks (~2 months) for single developer
+- Phase 5 (Advanced - Webhooks, etc.): +2-3 weeks
 
 **Recommended Tech Stack:**
 - Backend: Extend existing FastAPI app
 - Background Jobs: Add `asyncio` task scheduler or integrate Celery/Dramatiq for robustness
-- Frontend: Extend existing vanilla JS (or consider Vue.js for complex UI like conflict resolution)
+- Frontend: Extend existing vanilla JS (simpler than originally estimated - no conflict resolution UI needed)
 - Database: PostgreSQL (already in use)
 
-This plan provides a solid foundation for implementing reliable GitLab issue mirroring while acknowledging the inherent complexity of the problem.
+**Key Simplifications from One-Way Design:**
+- No conflict resolution UI needed (saves ~1 week)
+- No bidirectional sync state management (saves ~2 weeks)
+- Simpler database schema (fewer fields to manage)
+- Clearer mental model for users (consistent with repository mirroring)
+
+This plan provides a solid foundation for implementing reliable GitLab issue mirroring using a proven architectural pattern.
 
 ---
 
