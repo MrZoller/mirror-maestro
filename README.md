@@ -27,6 +27,10 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 ![Mirrors](docs/screenshots/04-mirrors.png?v=5)
 *View and manage mirrors with pagination, smart path truncation, tree view for nested groups, group filtering, sorting, token status, real-time sync status, safe per-mirror edits, and **issue sync configuration** with visual indicators*
 
+### Issue Mirroring Configuration
+![Issue Configuration](docs/screenshots/04b-issue-config.png?v=1)
+*Configure issue syncing: enable/disable synchronization, choose what to sync (comments, labels, attachments, time tracking), and control behavior including the important **Sync Existing Issues** option (disabled by default - only syncs new issues created after enabling)*
+
 ### Topology
 ![Topology](docs/screenshots/05-topology.png?v=3)
 *Interactive topology visualization with animated data flows, zoom controls, and hover highlighting - click nodes or links to drill down into mirror details*
