@@ -98,6 +98,22 @@ class IssueScheduler:
         """Sync a single issue mirror configuration."""
         logger.info(f"Starting sync for issue mirror config {config.id}")
 
+        # Check if there's already a running or pending sync for this config
+        existing_job_result = await db.execute(
+            select(IssueSyncJob).where(
+                IssueSyncJob.mirror_issue_config_id == config.id,
+                IssueSyncJob.status.in_(["pending", "running"])
+            )
+        )
+        existing_job = existing_job_result.scalar_one_or_none()
+
+        if existing_job:
+            logger.info(
+                f"Skipping sync for config {config.id} - already in progress "
+                f"(job ID: {existing_job.id}, status: {existing_job.status})"
+            )
+            return
+
         # Create sync job
         job = IssueSyncJob(
             mirror_issue_config_id=config.id,
