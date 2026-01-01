@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +30,7 @@ class MirrorIssueConfigCreate(BaseModel):
     sync_closed_issues: bool = False
     update_existing: bool = True
     sync_existing_issues: bool = False
-    sync_interval_minutes: int = 15
+    sync_interval_minutes: int = Field(default=15, ge=5, le=1440)
 
 
 class MirrorIssueConfigUpdate(BaseModel):
@@ -45,7 +45,7 @@ class MirrorIssueConfigUpdate(BaseModel):
     sync_closed_issues: Optional[bool] = None
     update_existing: Optional[bool] = None
     sync_existing_issues: Optional[bool] = None
-    sync_interval_minutes: Optional[int] = None
+    sync_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
 
 
 class MirrorIssueConfigResponse(BaseModel):

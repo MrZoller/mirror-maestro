@@ -202,8 +202,8 @@ async def download_file(url: str) -> Optional[bytes]:
 def extract_filename_from_url(url: str) -> str:
     """Extract filename from URL."""
     path = urlparse(url).path
-    filename = path.split('/')[-1] if '/' in path else 'attachment'
-    return filename
+    filename = path.split('/')[-1] if '/' in path else ''
+    return filename if filename else 'attachment'
 
 
 def replace_urls_in_description(description: str, url_mapping: Dict[str, str]) -> str:
