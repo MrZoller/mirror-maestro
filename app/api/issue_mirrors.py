@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 from app.models import MirrorIssueConfig, Mirror
 from app.core.auth import verify_credentials
 
@@ -281,6 +281,21 @@ async def trigger_sync(
         raise HTTPException(
             status_code=404,
             detail="Source or target instance not found"
+        )
+
+    # Check if there's already a running or pending sync for this config
+    existing_job_result = await db.execute(
+        select(IssueSyncJob).where(
+            IssueSyncJob.mirror_issue_config_id == config.id,
+            IssueSyncJob.status.in_(["pending", "running"])
+        )
+    )
+    existing_job = existing_job_result.scalar_one_or_none()
+
+    if existing_job:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Sync already in progress (job ID: {existing_job.id}, status: {existing_job.status})"
         )
 
     # Create sync job
