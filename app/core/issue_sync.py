@@ -185,23 +185,56 @@ def extract_mirror_urls_from_description(description: Optional[str]) -> Set[str]
     return urls
 
 
-async def download_file(url: str, max_retries: int = 3) -> Optional[bytes]:
+async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0) -> Optional[bytes]:
     """
-    Download a file from a URL with retry logic.
+    Download a file from a URL with retry logic and size limits.
 
     Args:
         url: URL to download from.
         max_retries: Maximum number of retry attempts (default: 3).
+        max_size_bytes: Maximum file size in bytes (0 = unlimited).
 
     Returns:
         File content as bytes, or None if download failed after all retries.
+
+    Raises:
+        ValueError: If file size exceeds max_size_bytes.
     """
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(url, follow_redirects=True, timeout=30.0)
+                response = await client.get(
+                    url,
+                    follow_redirects=True,
+                    timeout=settings.attachment_download_timeout
+                )
                 response.raise_for_status()
-                return response.content
+
+                # Check content length before downloading
+                content_length = response.headers.get('content-length')
+                if content_length and max_size_bytes > 0:
+                    size_bytes = int(content_length)
+                    if size_bytes > max_size_bytes:
+                        size_mb = size_bytes / (1024 * 1024)
+                        max_mb = max_size_bytes / (1024 * 1024)
+                        raise ValueError(
+                            f"File size ({size_mb:.2f}MB) exceeds maximum allowed size ({max_mb:.2f}MB)"
+                        )
+
+                content = response.content
+
+                # Double-check actual size
+                if max_size_bytes > 0 and len(content) > max_size_bytes:
+                    size_mb = len(content) / (1024 * 1024)
+                    max_mb = max_size_bytes / (1024 * 1024)
+                    raise ValueError(
+                        f"File size ({size_mb:.2f}MB) exceeds maximum allowed size ({max_mb:.2f}MB)"
+                    )
+
+                return content
+        except ValueError:
+            # Don't retry size limit errors
+            raise
         except Exception as e:
             if attempt < max_retries - 1:
                 # Calculate exponential backoff delay: 1s, 2s, 4s
@@ -283,15 +316,15 @@ class IssueSyncEngine:
         )
 
         # Initialize circuit breakers for source and target GitLab instances
-        # Opens after 5 consecutive failures, attempts recovery after 60s
+        # Uses configurable thresholds from settings
         self.source_circuit_breaker = CircuitBreaker(
-            failure_threshold=5,
-            recovery_timeout=60,
+            failure_threshold=settings.circuit_breaker_failure_threshold,
+            recovery_timeout=settings.circuit_breaker_recovery_timeout,
             expected_exception=GitLabClientError
         )
         self.target_circuit_breaker = CircuitBreaker(
-            failure_threshold=5,
-            recovery_timeout=60,
+            failure_threshold=settings.circuit_breaker_failure_threshold,
+            recovery_timeout=settings.circuit_breaker_recovery_timeout,
             expected_exception=GitLabClientError
         )
 
@@ -401,8 +434,9 @@ class IssueSyncEngine:
             # Determine state filter
             state_filter = "all" if self.config.sync_closed_issues else "opened"
 
-            # Fetch issues from source with pagination limit (max 10,000 issues)
+            # Fetch issues from source with configurable pagination limit
             # This prevents memory issues and excessive API calls
+            max_pages = settings.max_pages_per_request
             source_issues = await self._execute_gitlab_api_call(
                 self.source_client.get_issues,
                 "fetch_source_issues",
@@ -411,30 +445,50 @@ class IssueSyncEngine:
                 state=state_filter,
                 per_page=100,
                 get_all=True,
-                max_pages=100,  # Limit to 100 pages = 10,000 issues max
+                max_pages=max_pages,
             )
 
             logger.info(f"Found {len(source_issues)} issues to process")
 
-            # Sync each issue with rate limiting between operations
-            for idx, source_issue in enumerate(source_issues):
+            # Process issues in batches with progress checkpointing
+            batch_size = settings.issue_batch_size
+            total_issues = len(source_issues)
+
+            for batch_start in range(0, total_issues, batch_size):
+                batch_end = min(batch_start + batch_size, total_issues)
+                batch = source_issues[batch_start:batch_end]
+
+                logger.info(f"Processing batch {batch_start // batch_size + 1}: issues {batch_start + 1}-{batch_end} of {total_issues}")
+
+                # Process each issue in the batch
+                for idx, source_issue in enumerate(batch):
+                    try:
+                        await self._sync_issue(source_issue, stats)
+
+                        # Apply rate limiting delay between issues (except after last one)
+                        if idx < len(batch) - 1:
+                            await self.rate_limiter.delay()
+
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to sync issue {source_issue.get('iid')}: {e}",
+                            exc_info=True
+                        )
+                        stats["issues_failed"] += 1
+                        stats["errors"].append({
+                            "issue_iid": source_issue.get("iid"),
+                            "error": str(e)
+                        })
+
+                # Checkpoint: Update config with progress
                 try:
-                    await self._sync_issue(source_issue, stats)
-
-                    # Apply rate limiting delay between issues (except after last one)
-                    if idx < len(source_issues) - 1:
-                        await self.rate_limiter.delay()
-
-                except Exception as e:
-                    logger.error(
-                        f"Failed to sync issue {source_issue.get('iid')}: {e}",
-                        exc_info=True
-                    )
-                    stats["issues_failed"] += 1
-                    stats["errors"].append({
-                        "issue_iid": source_issue.get("iid"),
-                        "error": str(e)
-                    })
+                    self.config.last_sync_at = datetime.utcnow()
+                    self.config.last_sync_status = "in_progress"
+                    await self.db.commit()
+                    logger.debug(f"Progress checkpoint saved: {batch_end}/{total_issues} issues processed")
+                except Exception as checkpoint_error:
+                    logger.warning(f"Failed to save progress checkpoint: {checkpoint_error}")
+                    # Continue processing - checkpoint failure is not critical
 
             logger.info(
                 f"Issue sync completed: {stats['issues_created']} created, "
@@ -919,10 +973,15 @@ class IssueSyncEngine:
                     url_mapping[source_url] = existing.target_url
                     continue
 
-            # Download file from source
-            file_content = await download_file(source_url)
-            if not file_content:
-                logger.warning(f"Failed to download attachment: {source_url}")
+            # Download file from source with size limit
+            max_size_bytes = settings.max_attachment_size_mb * 1024 * 1024 if settings.max_attachment_size_mb > 0 else 0
+            try:
+                file_content = await download_file(source_url, max_size_bytes=max_size_bytes)
+                if not file_content:
+                    logger.warning(f"Failed to download attachment: {source_url}")
+                    continue
+            except ValueError as e:
+                logger.warning(f"Skipping attachment due to size limit: {source_url} - {e}")
                 continue
 
             # Extract filename
@@ -1002,6 +1061,8 @@ class IssueSyncEngine:
 
         try:
             # Find orphaned issues on target
+            # Use limited pages for cleanup to avoid long-running operations
+            cleanup_max_pages = min(10, settings.max_pages_per_request)
             target_issues = await self._execute_gitlab_api_call(
                 self.target_client.get_issues,
                 "cleanup_fetch_target_issues",
@@ -1010,7 +1071,7 @@ class IssueSyncEngine:
                 state="all",
                 per_page=100,
                 get_all=True,
-                max_pages=10  # Limit cleanup scope
+                max_pages=cleanup_max_pages
             )
 
             # Check each issue against database mappings
