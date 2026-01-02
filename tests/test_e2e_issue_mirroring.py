@@ -543,7 +543,7 @@ async def test_resource_cleanup_detects_orphans(db_session):
         issue_mapping_id=999,  # Non-existent
         source_note_id=1,
         target_note_id=101,
-        last_synced_at=db_session.execute.__self__.query(Mock).first().__class__.utcnow(),
+        last_synced_at=datetime.utcnow(),
         source_content_hash="abc123"
     )
     db_session.add(orphaned_comment)
