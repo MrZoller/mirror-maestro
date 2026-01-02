@@ -12,7 +12,9 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.gitlab_client import GitLabClient
+from app.config import settings
+from app.core.gitlab_client import GitLabClient, GitLabClientError
+from app.core.rate_limiter import RateLimiter, CircuitBreaker
 from app.models import (
     Mirror,
     MirrorIssueConfig,
@@ -183,23 +185,56 @@ def extract_mirror_urls_from_description(description: Optional[str]) -> Set[str]
     return urls
 
 
-async def download_file(url: str, max_retries: int = 3) -> Optional[bytes]:
+async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0) -> Optional[bytes]:
     """
-    Download a file from a URL with retry logic.
+    Download a file from a URL with retry logic and size limits.
 
     Args:
         url: URL to download from.
         max_retries: Maximum number of retry attempts (default: 3).
+        max_size_bytes: Maximum file size in bytes (0 = unlimited).
 
     Returns:
         File content as bytes, or None if download failed after all retries.
+
+    Raises:
+        ValueError: If file size exceeds max_size_bytes.
     """
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(url, follow_redirects=True, timeout=30.0)
+                response = await client.get(
+                    url,
+                    follow_redirects=True,
+                    timeout=settings.attachment_download_timeout
+                )
                 response.raise_for_status()
-                return response.content
+
+                # Check content length before downloading
+                content_length = response.headers.get('content-length')
+                if content_length and max_size_bytes > 0:
+                    size_bytes = int(content_length)
+                    if size_bytes > max_size_bytes:
+                        size_mb = size_bytes / (1024 * 1024)
+                        max_mb = max_size_bytes / (1024 * 1024)
+                        raise ValueError(
+                            f"File size ({size_mb:.2f}MB) exceeds maximum allowed size ({max_mb:.2f}MB)"
+                        )
+
+                content = response.content
+
+                # Double-check actual size
+                if max_size_bytes > 0 and len(content) > max_size_bytes:
+                    size_mb = len(content) / (1024 * 1024)
+                    max_mb = max_size_bytes / (1024 * 1024)
+                    raise ValueError(
+                        f"File size ({size_mb:.2f}MB) exceeds maximum allowed size ({max_mb:.2f}MB)"
+                    )
+
+                return content
+        except ValueError:
+            # Don't retry size limit errors
+            raise
         except Exception as e:
             if attempt < max_retries - 1:
                 # Calculate exponential backoff delay: 1s, 2s, 4s
@@ -262,19 +297,110 @@ class IssueSyncEngine:
         self.target_instance = target_instance
         self.instance_pair = instance_pair
 
-        # Initialize GitLab clients
+        # Initialize GitLab clients with timeout
         self.source_client = GitLabClient(
             source_instance.url,
-            source_instance.encrypted_token
+            source_instance.encrypted_token,
+            timeout=settings.gitlab_api_timeout
         )
         self.target_client = GitLabClient(
             target_instance.url,
-            target_instance.encrypted_token
+            target_instance.encrypted_token,
+            timeout=settings.gitlab_api_timeout
+        )
+
+        # Initialize rate limiter for GitLab API calls
+        self.rate_limiter = RateLimiter(
+            delay_ms=settings.gitlab_api_delay_ms,
+            max_retries=settings.gitlab_api_max_retries
+        )
+
+        # Initialize circuit breakers for source and target GitLab instances
+        # Uses configurable thresholds from settings
+        self.source_circuit_breaker = CircuitBreaker(
+            failure_threshold=settings.circuit_breaker_failure_threshold,
+            recovery_timeout=settings.circuit_breaker_recovery_timeout,
+            expected_exception=GitLabClientError
+        )
+        self.target_circuit_breaker = CircuitBreaker(
+            failure_threshold=settings.circuit_breaker_failure_threshold,
+            recovery_timeout=settings.circuit_breaker_recovery_timeout,
+            expected_exception=GitLabClientError
         )
 
         # Cache for labels
         self.target_labels_cache: Dict[str, Dict[str, Any]] = {}
         self.mirror_from_label: str = get_mirror_from_label(source_instance.id)
+
+    async def _execute_gitlab_api_call(
+        self,
+        operation_func,
+        operation_name: str,
+        *args,
+        **kwargs
+    ):
+        """
+        Execute a GitLab API call with retry logic, rate limiting, and circuit breaker.
+
+        Args:
+            operation_func: The GitLab client method to call
+            operation_name: Name of the operation for logging
+            *args, **kwargs: Arguments to pass to the operation
+
+        Returns:
+            The result from the GitLab API call
+        """
+        # Determine which circuit breaker to use based on which client is being called
+        if operation_func.__self__ == self.source_client:
+            circuit_breaker = self.source_circuit_breaker
+        elif operation_func.__self__ == self.target_client:
+            circuit_breaker = self.target_circuit_breaker
+        else:
+            # Unknown client, skip circuit breaker
+            circuit_breaker = None
+
+        async def _execute():
+            # Apply rate limiting delay
+            await self.rate_limiter.delay()
+
+            # Define the operation
+            def operation():
+                return operation_func(*args, **kwargs)
+
+            # Execute the operation with retry logic and circuit breaker
+            if circuit_breaker:
+                # Check circuit breaker state manually (since it's sync but we need async execution)
+                if circuit_breaker.state == "OPEN":
+                    if circuit_breaker._should_attempt_reset():
+                        circuit_breaker.state = "HALF_OPEN"
+                        logger.info("Circuit breaker entering HALF_OPEN state, testing recovery")
+                    else:
+                        raise Exception(
+                            f"Circuit breaker is OPEN. Service unavailable. "
+                            f"Will retry after {circuit_breaker.recovery_timeout}s cooldown."
+                        )
+
+                try:
+                    # Execute with retry logic (async)
+                    result = await self.rate_limiter.execute_with_retry(
+                        operation,
+                        operation_name=operation_name
+                    )
+                    # Mark success on circuit breaker
+                    circuit_breaker._on_success()
+                    return result
+                except Exception as e:
+                    # Mark failure on circuit breaker
+                    circuit_breaker._on_failure()
+                    raise
+            else:
+                # No circuit breaker, just use retry logic
+                return await self.rate_limiter.execute_with_retry(
+                    operation,
+                    operation_name=operation_name
+                )
+
+        return await _execute()
 
     async def sync(self) -> Dict[str, Any]:
         """
@@ -322,32 +448,61 @@ class IssueSyncEngine:
             # Determine state filter
             state_filter = "all" if self.config.sync_closed_issues else "opened"
 
-            # Fetch issues from source
-            source_issues = await asyncio.to_thread(
+            # Fetch issues from source with configurable pagination limit
+            # This prevents memory issues and excessive API calls
+            max_pages = settings.max_pages_per_request
+            source_issues = await self._execute_gitlab_api_call(
                 self.source_client.get_issues,
+                "fetch_source_issues",
                 self.mirror.source_project_id,
                 updated_after=updated_after,
                 state=state_filter,
                 per_page=100,
                 get_all=True,
+                max_pages=max_pages,
             )
 
             logger.info(f"Found {len(source_issues)} issues to process")
 
-            # Sync each issue
-            for source_issue in source_issues:
+            # Process issues in batches with progress checkpointing
+            batch_size = settings.issue_batch_size
+            total_issues = len(source_issues)
+
+            for batch_start in range(0, total_issues, batch_size):
+                batch_end = min(batch_start + batch_size, total_issues)
+                batch = source_issues[batch_start:batch_end]
+
+                logger.info(f"Processing batch {batch_start // batch_size + 1}: issues {batch_start + 1}-{batch_end} of {total_issues}")
+
+                # Process each issue in the batch
+                for idx, source_issue in enumerate(batch):
+                    try:
+                        await self._sync_issue(source_issue, stats)
+
+                        # Apply rate limiting delay between issues (except after last one)
+                        if idx < len(batch) - 1:
+                            await self.rate_limiter.delay()
+
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to sync issue {source_issue.get('iid')}: {e}",
+                            exc_info=True
+                        )
+                        stats["issues_failed"] += 1
+                        stats["errors"].append({
+                            "issue_iid": source_issue.get("iid"),
+                            "error": str(e)
+                        })
+
+                # Checkpoint: Update config with progress
                 try:
-                    await self._sync_issue(source_issue, stats)
-                except Exception as e:
-                    logger.error(
-                        f"Failed to sync issue {source_issue.get('iid')}: {e}",
-                        exc_info=True
-                    )
-                    stats["issues_failed"] += 1
-                    stats["errors"].append({
-                        "issue_iid": source_issue.get("iid"),
-                        "error": str(e)
-                    })
+                    self.config.last_sync_at = datetime.utcnow()
+                    self.config.last_sync_status = "in_progress"
+                    await self.db.commit()
+                    logger.debug(f"Progress checkpoint saved: {batch_end}/{total_issues} issues processed")
+                except Exception as checkpoint_error:
+                    logger.warning(f"Failed to save progress checkpoint: {checkpoint_error}")
+                    # Continue processing - checkpoint failure is not critical
 
             logger.info(
                 f"Issue sync completed: {stats['issues_created']} created, "
@@ -411,40 +566,86 @@ class IssueSyncEngine:
         source_issue: Dict[str, Any],
         content_hash: str
     ) -> None:
-        """Create a new issue on target instance."""
+        """
+        Create a new issue on target instance with idempotency protection.
+
+        Checks if the issue already exists on target (orphaned from previous failed sync)
+        before creating a new one.
+        """
         source_issue_id = source_issue["id"]
         source_issue_iid = source_issue["iid"]
 
-        # Prepare labels
-        labels = self._prepare_labels(source_issue)
+        # Idempotency check: search for existing issue with same source reference
+        # This prevents creating duplicates if DB commit failed but GitLab creation succeeded
+        existing_target_issue = await self._find_existing_target_issue(source_issue_id, source_issue_iid)
+        if existing_target_issue:
+            logger.info(
+                f"Found orphaned issue {existing_target_issue['iid']} for source issue {source_issue_iid}. "
+                "Reusing and updating it with current source content."
+            )
+            target_issue_id = existing_target_issue["id"]
+            target_issue_iid = existing_target_issue["iid"]
 
-        # Prepare description with footer
-        description = self._prepare_description(source_issue)
+            # Update the orphaned issue with current source content
+            # to ensure it's in sync before marking the mapping as synced
+            labels = self._prepare_labels(source_issue)
+            description = self._prepare_description(source_issue)
 
-        # Handle attachments if enabled
-        if self.config.sync_attachments:
-            description = await self._sync_attachments_in_description(
-                description,
-                source_issue_id,
-                None,  # No existing mapping yet
+            # Handle attachments if enabled
+            if self.config.sync_attachments:
+                description = await self._sync_attachments_in_description(
+                    description,
+                    source_issue_id,
+                    None,  # No existing mapping yet
+                )
+
+            # Update the target issue
+            target_issue = await self._execute_gitlab_api_call(
+                self.target_client.update_issue,
+                f"update_orphaned_issue_{target_issue_iid}",
+                self.mirror.target_project_id,
+                target_issue_iid,
+                title=source_issue["title"],
+                description=description,
+                labels=labels,
+                weight=source_issue.get("weight") if self.config.sync_weight else None,
             )
 
-        # Create issue on target
-        target_issue = await asyncio.to_thread(
-            self.target_client.create_issue,
-            self.mirror.target_project_id,
-            title=source_issue["title"],
-            description=description,
-            labels=labels,
-            weight=source_issue.get("weight") if self.config.sync_weight else None,
-        )
+            logger.info(
+                f"Updated orphaned issue {target_issue_iid} with current source content"
+            )
+        else:
+            # Prepare labels
+            labels = self._prepare_labels(source_issue)
 
-        target_issue_id = target_issue["id"]
-        target_issue_iid = target_issue["iid"]
+            # Prepare description with footer
+            description = self._prepare_description(source_issue)
 
-        logger.info(
-            f"Created target issue {target_issue_iid} for source issue {source_issue_iid}"
-        )
+            # Handle attachments if enabled
+            if self.config.sync_attachments:
+                description = await self._sync_attachments_in_description(
+                    description,
+                    source_issue_id,
+                    None,  # No existing mapping yet
+                )
+
+            # Create issue on target with retry logic
+            target_issue = await self._execute_gitlab_api_call(
+                self.target_client.create_issue,
+                f"create_issue_{source_issue_iid}",
+                self.mirror.target_project_id,
+                title=source_issue["title"],
+                description=description,
+                labels=labels,
+                weight=source_issue.get("weight") if self.config.sync_weight else None,
+            )
+
+            target_issue_id = target_issue["id"]
+            target_issue_iid = target_issue["iid"]
+
+            logger.info(
+                f"Created target issue {target_issue_iid} for source issue {source_issue_iid}"
+            )
 
         # Sync time tracking if enabled
         if self.config.sync_time_estimate or self.config.sync_time_spent:
@@ -452,14 +653,16 @@ class IssueSyncEngine:
 
         # Close target issue if source is closed
         if source_issue["state"] == "closed" and self.config.sync_closed_issues:
-            await asyncio.to_thread(
+            await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
+                f"close_issue_{target_issue_iid}",
                 self.mirror.target_project_id,
                 target_issue_iid,
                 state_event="close"
             )
 
-        # Create issue mapping
+        # Create issue mapping with transaction safety
+        # Use a savepoint so we can rollback if comment sync fails
         mapping = IssueMapping(
             mirror_issue_config_id=self.config.id,
             source_issue_id=source_issue_id,
@@ -475,11 +678,29 @@ class IssueSyncEngine:
             source_content_hash=content_hash,
         )
         self.db.add(mapping)
-        await self.db.commit()
 
-        # Sync comments if enabled
-        if self.config.sync_comments:
-            await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+        try:
+            # Commit the mapping first to get the ID for comment/attachment mappings
+            await self.db.commit()
+            await self.db.refresh(mapping)
+
+            # Sync comments if enabled (uses mapping.id for foreign key)
+            if self.config.sync_comments:
+                await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+
+        except Exception as e:
+            # If post-creation sync fails, log warning but don't fail entire sync
+            # The issue is created on GitLab and mapped in DB - comments can sync later
+            logger.warning(
+                f"Issue {target_issue_iid} created successfully, but post-creation sync failed: {e}"
+            )
+            # Update mapping status to indicate partial sync
+            mapping.sync_status = "partial"
+            try:
+                await self.db.commit()
+            except Exception as commit_error:
+                logger.error(f"Failed to update sync status: {commit_error}")
+                await self.db.rollback()
 
     async def _update_target_issue(
         self,
@@ -505,9 +726,10 @@ class IssueSyncEngine:
                 mapping.id,
             )
 
-        # Update issue on target
-        await asyncio.to_thread(
+        # Update issue on target with retry logic
+        await self._execute_gitlab_api_call(
             self.target_client.update_issue,
+            f"update_issue_{target_issue_iid}",
             self.mirror.target_project_id,
             target_issue_iid,
             title=source_issue["title"],
@@ -524,33 +746,50 @@ class IssueSyncEngine:
         if self.config.sync_time_estimate or self.config.sync_time_spent:
             await self._sync_time_tracking(source_issue, target_issue_iid)
 
-        # Sync state (open/closed)
+        # Sync state (open/closed) with retry logic
         if source_issue["state"] == "closed" and self.config.sync_closed_issues:
-            await asyncio.to_thread(
+            await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
+                f"close_issue_{target_issue_iid}",
                 self.mirror.target_project_id,
                 target_issue_iid,
                 state_event="close"
             )
         elif source_issue["state"] == "opened":
-            await asyncio.to_thread(
+            await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
+                f"reopen_issue_{target_issue_iid}",
                 self.mirror.target_project_id,
                 target_issue_iid,
                 state_event="reopen"
             )
 
-        # Update mapping
+        # Update mapping with transaction safety
         mapping.source_content_hash = content_hash
         mapping.last_synced_at = datetime.utcnow()
         mapping.source_updated_at = self._parse_datetime(source_issue.get("updated_at"))
         mapping.target_updated_at = datetime.utcnow()
         mapping.sync_status = "synced"
-        await self.db.commit()
 
-        # Sync comments if enabled
-        if self.config.sync_comments:
-            await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+        try:
+            await self.db.commit()
+
+            # Sync comments if enabled
+            if self.config.sync_comments:
+                await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+
+        except Exception as e:
+            # If post-update sync fails, log warning but don't fail entire sync
+            logger.warning(
+                f"Issue {target_issue_iid} updated successfully, but post-update sync failed: {e}"
+            )
+            # Update mapping status to indicate partial sync
+            mapping.sync_status = "partial"
+            try:
+                await self.db.commit()
+            except Exception as commit_error:
+                logger.error(f"Failed to update sync status: {commit_error}")
+                await self.db.rollback()
 
     def _prepare_labels(self, source_issue: Dict[str, Any]) -> List[str]:
         """Prepare labels for target issue, including PM field conversions."""
@@ -607,32 +846,35 @@ class IssueSyncEngine:
         if not time_stats:
             return
 
-        # Sync time estimate
+        # Sync time estimate with retry logic
         if self.config.sync_time_estimate:
             time_estimate = time_stats.get("time_estimate")
             if time_estimate and time_estimate > 0:
                 # Convert seconds to human-readable format
                 duration = self._seconds_to_duration(time_estimate)
-                await asyncio.to_thread(
+                await self._execute_gitlab_api_call(
                     self.target_client.set_time_estimate,
+                    f"set_time_estimate_{target_issue_iid}",
                     self.mirror.target_project_id,
                     target_issue_iid,
                     duration
                 )
 
-        # Sync time spent
+        # Sync time spent with retry logic
         if self.config.sync_time_spent:
             total_time_spent = time_stats.get("total_time_spent")
             if total_time_spent and total_time_spent > 0:
                 # Reset time spent first, then add
-                await asyncio.to_thread(
+                await self._execute_gitlab_api_call(
                     self.target_client.reset_time_spent,
+                    f"reset_time_spent_{target_issue_iid}",
                     self.mirror.target_project_id,
                     target_issue_iid
                 )
                 duration = self._seconds_to_duration(total_time_spent)
-                await asyncio.to_thread(
+                await self._execute_gitlab_api_call(
                     self.target_client.add_time_spent,
+                    f"add_time_spent_{target_issue_iid}",
                     self.mirror.target_project_id,
                     target_issue_iid,
                     duration
@@ -644,10 +886,15 @@ class IssueSyncEngine:
         target_issue_iid: int,
         issue_mapping_id: int
     ) -> None:
-        """Sync comments from source to target issue."""
-        # Fetch source comments (excluding system notes)
-        source_notes = await asyncio.to_thread(
+        """
+        Sync comments from source to target issue with batched commits.
+
+        Uses batched database commits for better transaction safety and performance.
+        """
+        # Fetch source comments (excluding system notes) with retry logic
+        source_notes = await self._execute_gitlab_api_call(
             self.source_client.get_issue_notes,
+            f"get_issue_notes_{source_issue_iid}",
             self.mirror.source_project_id,
             source_issue_iid
         )
@@ -662,6 +909,10 @@ class IssueSyncEngine:
         )
         existing_mappings = {m.source_note_id: m for m in result.scalars().all()}
 
+        # Track changes to commit in batch
+        mappings_to_add = []
+        mappings_to_update = []
+
         for source_note in source_notes:
             source_note_id = source_note["id"]
             source_note_body = source_note.get("body", "")
@@ -675,9 +926,10 @@ class IssueSyncEngine:
                     # No changes
                     continue
 
-                # Update target comment
-                await asyncio.to_thread(
+                # Update target comment with retry logic
+                await self._execute_gitlab_api_call(
                     self.target_client.update_issue_note,
+                    f"update_note_{mapping.target_note_id}",
                     self.mirror.target_project_id,
                     target_issue_iid,
                     mapping.target_note_id,
@@ -686,17 +938,18 @@ class IssueSyncEngine:
 
                 mapping.source_content_hash = content_hash
                 mapping.last_synced_at = datetime.utcnow()
-                await self.db.commit()
+                mappings_to_update.append(mapping)
             else:
-                # Create new comment on target
-                target_note = await asyncio.to_thread(
+                # Create new comment on target with retry logic
+                target_note = await self._execute_gitlab_api_call(
                     self.target_client.create_issue_note,
+                    f"create_note_{source_note_id}",
                     self.mirror.target_project_id,
                     target_issue_iid,
                     source_note_body
                 )
 
-                # Create mapping
+                # Create mapping (will be added to DB in batch)
                 mapping = CommentMapping(
                     issue_mapping_id=issue_mapping_id,
                     source_note_id=source_note_id,
@@ -704,8 +957,23 @@ class IssueSyncEngine:
                     last_synced_at=datetime.utcnow(),
                     source_content_hash=content_hash,
                 )
+                mappings_to_add.append(mapping)
+
+        # Batch commit all changes for better transaction safety
+        try:
+            for mapping in mappings_to_add:
                 self.db.add(mapping)
+
+            if mappings_to_add or mappings_to_update:
                 await self.db.commit()
+                logger.debug(
+                    f"Synced {len(mappings_to_add)} new comments, "
+                    f"updated {len(mappings_to_update)} comments"
+                )
+        except Exception as e:
+            logger.error(f"Failed to commit comment mappings: {e}")
+            await self.db.rollback()
+            raise
 
     async def _sync_attachments_in_description(
         self,
@@ -714,7 +982,7 @@ class IssueSyncEngine:
         issue_mapping_id: Optional[int]
     ) -> str:
         """
-        Sync attachments referenced in description.
+        Sync attachments referenced in description with batched commits.
 
         Downloads files from source URLs and uploads to target,
         then replaces URLs in description.
@@ -729,6 +997,7 @@ class IssueSyncEngine:
             return description
 
         url_mapping = {}
+        attachment_mappings_to_add = []
 
         for source_url in source_urls:
             # Check if this attachment was already synced
@@ -746,19 +1015,25 @@ class IssueSyncEngine:
                     url_mapping[source_url] = existing.target_url
                     continue
 
-            # Download file from source
-            file_content = await download_file(source_url)
-            if not file_content:
-                logger.warning(f"Failed to download attachment: {source_url}")
+            # Download file from source with size limit
+            max_size_bytes = settings.max_attachment_size_mb * 1024 * 1024 if settings.max_attachment_size_mb > 0 else 0
+            try:
+                file_content = await download_file(source_url, max_size_bytes=max_size_bytes)
+                if not file_content:
+                    logger.warning(f"Failed to download attachment: {source_url}")
+                    continue
+            except ValueError as e:
+                logger.warning(f"Skipping attachment due to size limit: {source_url} - {e}")
                 continue
 
             # Extract filename
             filename = extract_filename_from_url(source_url)
 
-            # Upload to target
+            # Upload to target with retry logic
             try:
-                upload_result = await asyncio.to_thread(
+                upload_result = await self._execute_gitlab_api_call(
                     self.target_client.upload_file,
+                    f"upload_file_{filename}",
                     self.mirror.target_project_id,
                     file_content,
                     filename
@@ -771,7 +1046,7 @@ class IssueSyncEngine:
 
                 url_mapping[source_url] = target_url
 
-                # Create attachment mapping
+                # Queue attachment mapping for batch commit
                 if issue_mapping_id:
                     attachment_mapping = AttachmentMapping(
                         issue_mapping_id=issue_mapping_id,
@@ -781,21 +1056,194 @@ class IssueSyncEngine:
                         file_size=len(file_content),
                         uploaded_at=datetime.utcnow(),
                     )
-                    self.db.add(attachment_mapping)
-                    await self.db.commit()
+                    attachment_mappings_to_add.append(attachment_mapping)
 
                 logger.info(f"Synced attachment: {filename}")
 
             except Exception as e:
                 logger.error(f"Failed to upload attachment {filename}: {e}")
 
+        # Batch commit all attachment mappings
+        if attachment_mappings_to_add:
+            try:
+                for mapping in attachment_mappings_to_add:
+                    self.db.add(mapping)
+                await self.db.commit()
+                logger.debug(f"Committed {len(attachment_mappings_to_add)} attachment mappings")
+            except Exception as e:
+                logger.error(f"Failed to commit attachment mappings: {e}")
+                await self.db.rollback()
+                # Don't raise - attachments are synced on GitLab, just mapping failed
+
         # Replace URLs in description
         return replace_urls_in_description(description, url_mapping)
 
+    async def cleanup_orphaned_resources(self) -> Dict[str, Any]:
+        """
+        Detect and report orphaned resources (issues created but not properly mapped).
+
+        This method identifies:
+        - Issues on target with Mirrored-From label but no database mapping
+        - Comment mappings without valid parent issue mappings
+        - Attachment mappings without valid parent issue mappings
+
+        Returns:
+            Dict with cleanup statistics
+        """
+        stats = {
+            "orphaned_issues_found": 0,
+            "orphaned_comments_found": 0,
+            "orphaned_attachments_found": 0,
+            "mappings_created": 0,
+            "mappings_deleted": 0,
+            "errors": []
+        }
+
+        logger.info(f"Starting resource cleanup for mirror {self.mirror.id}")
+
+        try:
+            # Find orphaned issues on target
+            # Use limited pages for cleanup to avoid long-running operations
+            cleanup_max_pages = min(10, settings.max_pages_per_request)
+            target_issues = await self._execute_gitlab_api_call(
+                self.target_client.get_issues,
+                "cleanup_fetch_target_issues",
+                self.mirror.target_project_id,
+                labels=self.mirror_from_label,
+                state="all",
+                per_page=100,
+                get_all=True,
+                max_pages=cleanup_max_pages
+            )
+
+            # Check each issue against database mappings
+            for issue in target_issues:
+                target_issue_id = issue["id"]
+
+                # Check if mapping exists
+                result = await self.db.execute(
+                    select(IssueMapping).where(
+                        IssueMapping.mirror_issue_config_id == self.config.id,
+                        IssueMapping.target_issue_id == target_issue_id
+                    )
+                )
+                mapping = result.scalar_one_or_none()
+
+                if not mapping:
+                    stats["orphaned_issues_found"] += 1
+                    logger.warning(
+                        f"Found orphaned issue {issue['iid']} on target - "
+                        "exists on GitLab but not in database"
+                    )
+
+            # Find orphaned comment mappings
+            orphaned_comments = await self.db.execute(
+                select(CommentMapping).where(
+                    ~CommentMapping.issue_mapping_id.in_(
+                        select(IssueMapping.id).where(
+                            IssueMapping.mirror_issue_config_id == self.config.id
+                        )
+                    )
+                )
+            )
+            orphaned_comment_list = orphaned_comments.scalars().all()
+            stats["orphaned_comments_found"] = len(orphaned_comment_list)
+
+            if orphaned_comment_list:
+                logger.warning(
+                    f"Found {len(orphaned_comment_list)} orphaned comment mappings - "
+                    "deleting them from database"
+                )
+                for comment in orphaned_comment_list:
+                    await self.db.delete(comment)
+                    stats["mappings_deleted"] += 1
+                await self.db.commit()
+
+            # Find orphaned attachment mappings
+            orphaned_attachments = await self.db.execute(
+                select(AttachmentMapping).where(
+                    ~AttachmentMapping.issue_mapping_id.in_(
+                        select(IssueMapping.id).where(
+                            IssueMapping.mirror_issue_config_id == self.config.id
+                        )
+                    )
+                )
+            )
+            orphaned_attachment_list = orphaned_attachments.scalars().all()
+            stats["orphaned_attachments_found"] = len(orphaned_attachment_list)
+
+            if orphaned_attachment_list:
+                logger.warning(
+                    f"Found {len(orphaned_attachment_list)} orphaned attachment mappings - "
+                    "deleting them from database"
+                )
+                for attachment in orphaned_attachment_list:
+                    await self.db.delete(attachment)
+                    stats["mappings_deleted"] += 1
+                await self.db.commit()
+
+            logger.info(
+                f"Resource cleanup completed: "
+                f"{stats['orphaned_issues_found']} orphaned issues, "
+                f"{stats['mappings_deleted']} mappings deleted"
+            )
+
+        except Exception as e:
+            logger.error(f"Resource cleanup failed: {e}")
+            stats["errors"].append(str(e))
+
+        return stats
+
+    async def _find_existing_target_issue(
+        self,
+        source_issue_id: int,
+        source_issue_iid: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Search for an existing issue on target that matches the source issue.
+
+        This provides idempotency by finding orphaned issues (created but not mapped in DB).
+        Searches for issues with the Mirrored-From label and matching source reference in footer.
+
+        Args:
+            source_issue_id: Source issue ID
+            source_issue_iid: Source issue IID
+
+        Returns:
+            Existing issue dict if found, None otherwise
+        """
+        try:
+            # Search for issues with our Mirrored-From label
+            # Note: This is a simple search - in production you might want to cache these
+            target_issues = await self._execute_gitlab_api_call(
+                self.target_client.get_issues,
+                f"search_existing_issue_{source_issue_iid}",
+                self.mirror.target_project_id,
+                labels=self.mirror_from_label,
+                state="all",
+                per_page=100,
+                get_all=False,  # Only search first page for performance
+            )
+
+            # Look for issue with matching source reference in description
+            source_ref = f"{self.mirror.source_project_path}#{source_issue_iid}"
+            for issue in target_issues:
+                description = issue.get("description", "")
+                if source_ref in description and MIRROR_FOOTER_MARKER in description:
+                    logger.debug(f"Found existing target issue {issue['iid']} for source {source_issue_iid}")
+                    return issue
+
+            return None
+        except Exception as e:
+            # If search fails, log warning and continue (will create new issue)
+            logger.warning(f"Failed to search for existing target issue: {e}")
+            return None
+
     async def _load_target_labels_cache(self) -> None:
-        """Load all target project labels into cache."""
-        labels = await asyncio.to_thread(
+        """Load all target project labels into cache with retry logic."""
+        labels = await self._execute_gitlab_api_call(
             self.target_client.get_project_labels,
+            "load_target_labels",
             self.mirror.target_project_id
         )
         self.target_labels_cache = {label["name"]: label for label in labels}
@@ -804,10 +1252,11 @@ class IssueSyncEngine:
     async def _ensure_mirror_from_label(self) -> None:
         """Ensure the Mirrored-From label exists on target project."""
         if self.mirror_from_label not in self.target_labels_cache:
-            # Create the label
+            # Create the label with retry logic
             try:
-                label = await asyncio.to_thread(
+                label = await self._execute_gitlab_api_call(
                     self.target_client.create_label,
+                    f"create_label_{self.mirror_from_label}",
                     self.mirror.target_project_id,
                     name=self.mirror_from_label,
                     color=MIRROR_FROM_LABEL_COLOR,

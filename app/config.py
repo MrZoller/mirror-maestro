@@ -51,6 +51,26 @@ class Settings(BaseSettings):
     # Delay between GitLab API operations to avoid overwhelming instances
     gitlab_api_delay_ms: int = 200  # Delay in milliseconds (200ms = ~300 ops/min, well under 600/min limit)
     gitlab_api_max_retries: int = 3  # Number of retries on rate limit errors
+    gitlab_api_timeout: int = 60  # Timeout for GitLab API requests in seconds
+
+    # Issue Sync Configuration
+    # Circuit breaker settings for GitLab API resilience
+    circuit_breaker_failure_threshold: int = 5  # Number of failures before opening circuit
+    circuit_breaker_recovery_timeout: int = 60  # Seconds to wait before attempting recovery
+
+    # Pagination limits to prevent memory exhaustion
+    max_issues_per_sync: int = 10000  # Maximum issues to sync in one operation (100 pages * 100 per page)
+    max_pages_per_request: int = 100  # Maximum pagination pages for API requests
+
+    # Attachment handling
+    max_attachment_size_mb: int = 100  # Maximum attachment size in MB (0 = unlimited)
+    attachment_download_timeout: int = 30  # Timeout for downloading attachments in seconds
+
+    # Batch processing
+    issue_batch_size: int = 50  # Number of issues to process before committing progress checkpoint
+
+    # Graceful shutdown
+    sync_shutdown_timeout: int = 300  # Maximum seconds to wait for sync jobs to complete during shutdown
 
 
 settings = Settings()
