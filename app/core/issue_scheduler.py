@@ -3,11 +3,12 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Set
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models import (
     MirrorIssueConfig,
@@ -23,12 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 class IssueScheduler:
-    """Background scheduler for automatic issue syncing."""
+    """Background scheduler for automatic issue syncing with graceful shutdown support."""
 
     def __init__(self):
         """Initialize scheduler."""
         self.running = False
         self.task: Optional[asyncio.Task] = None
+        self.active_sync_tasks: Set[asyncio.Task] = set()
+        self.shutdown_event = asyncio.Event()
 
     async def start(self):
         """Start the scheduler."""
@@ -41,17 +44,49 @@ class IssueScheduler:
         logger.info("Issue sync scheduler started")
 
     async def stop(self):
-        """Stop the scheduler."""
+        """
+        Stop the scheduler with graceful shutdown.
+
+        Waits for active sync jobs to complete, up to sync_shutdown_timeout seconds.
+        """
         if not self.running:
             return
 
+        logger.info("Stopping issue sync scheduler (graceful shutdown)...")
         self.running = False
+
+        # Signal shutdown to any running jobs
+        self.shutdown_event.set()
+
+        # Cancel the main scheduler task
         if self.task:
             self.task.cancel()
             try:
                 await self.task
             except asyncio.CancelledError:
                 pass
+
+        # Wait for active sync tasks to complete
+        if self.active_sync_tasks:
+            active_count = len(self.active_sync_tasks)
+            logger.info(f"Waiting for {active_count} active sync job(s) to complete (timeout: {settings.sync_shutdown_timeout}s)...")
+
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self.active_sync_tasks, return_exceptions=True),
+                    timeout=settings.sync_shutdown_timeout
+                )
+                logger.info("All sync jobs completed gracefully")
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Timeout waiting for sync jobs to complete after {settings.sync_shutdown_timeout}s. "
+                    f"{len(self.active_sync_tasks)} job(s) may have been interrupted."
+                )
+                # Cancel remaining tasks
+                for task in self.active_sync_tasks:
+                    if not task.done():
+                        task.cancel()
+
         logger.info("Issue sync scheduler stopped")
 
     async def _run(self):
@@ -86,13 +121,27 @@ class IssueScheduler:
             logger.info(f"Found {len(configs)} issue mirror configs due for sync")
 
             for config in configs:
-                try:
+                # Spawn sync as a background task and track it
+                task = asyncio.create_task(self._sync_config_wrapper(config.id))
+                self.active_sync_tasks.add(task)
+                task.add_done_callback(self.active_sync_tasks.discard)
+
+    async def _sync_config_wrapper(self, config_id: int):
+        """Wrapper to sync a config with its own database session."""
+        async with AsyncSessionLocal() as db:
+            try:
+                # Reload config in this session
+                result = await db.execute(
+                    select(MirrorIssueConfig).where(MirrorIssueConfig.id == config_id)
+                )
+                config = result.scalar_one_or_none()
+                if config:
                     await self._sync_config(db, config)
-                except Exception as e:
-                    logger.error(
-                        f"Failed to sync issue mirror config {config.id}: {e}",
-                        exc_info=True
-                    )
+            except Exception as e:
+                logger.error(
+                    f"Failed to sync issue mirror config {config_id}: {e}",
+                    exc_info=True
+                )
 
     async def _sync_config(self, db: AsyncSession, config: MirrorIssueConfig):
         """Sync a single issue mirror configuration."""

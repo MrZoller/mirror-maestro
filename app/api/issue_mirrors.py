@@ -1,7 +1,8 @@
 """API endpoints for managing issue mirror configurations."""
 
+import asyncio
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Set
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -13,6 +14,44 @@ from app.core.auth import verify_credentials
 
 
 router = APIRouter(prefix="/api/issue-mirrors", tags=["issue-mirrors"])
+
+# Track manual sync tasks globally for graceful shutdown
+manual_sync_tasks: Set[asyncio.Task] = set()
+
+
+async def wait_for_manual_syncs(timeout: int = 300):
+    """
+    Wait for all manual sync tasks to complete.
+
+    Args:
+        timeout: Maximum seconds to wait (default: 300).
+    """
+    import logging
+    from app.config import settings
+
+    logger = logging.getLogger(__name__)
+
+    if not manual_sync_tasks:
+        return
+
+    active_count = len(manual_sync_tasks)
+    logger.info(f"Waiting for {active_count} manual sync task(s) to complete (timeout: {timeout}s)...")
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*manual_sync_tasks, return_exceptions=True),
+            timeout=timeout
+        )
+        logger.info("All manual sync tasks completed gracefully")
+    except asyncio.TimeoutError:
+        logger.warning(
+            f"Timeout waiting for manual sync tasks after {timeout}s. "
+            f"{len(manual_sync_tasks)} task(s) may have been interrupted."
+        )
+        # Cancel remaining tasks
+        for task in manual_sync_tasks:
+            if not task.done():
+                task.cancel()
 
 
 # Pydantic Schemas
@@ -382,8 +421,10 @@ async def trigger_sync(
 
                 await sync_db.commit()
 
-    # Start background task
-    asyncio.create_task(run_sync())
+    # Start background task and track it for graceful shutdown
+    task = asyncio.create_task(run_sync())
+    manual_sync_tasks.add(task)
+    task.add_done_callback(manual_sync_tasks.discard)
 
     return {
         "message": "Sync triggered",

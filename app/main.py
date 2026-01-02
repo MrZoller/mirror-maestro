@@ -79,12 +79,19 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
+    # Shutdown - wait for all sync jobs to complete gracefully
     try:
+        # Stop scheduler (waits for scheduled sync jobs)
         await scheduler.stop()
         logging.info("Issue sync scheduler stopped")
+
+        # Wait for manual sync jobs
+        from app.api.issue_mirrors import wait_for_manual_syncs
+        await wait_for_manual_syncs(timeout=settings.sync_shutdown_timeout)
+        logging.info("Manual sync tasks completed")
+
     except Exception as e:
-        logging.error(f"Failed to stop issue sync scheduler: {e}", exc_info=True)
+        logging.error(f"Error during graceful shutdown: {e}", exc_info=True)
 
 
 app = FastAPI(

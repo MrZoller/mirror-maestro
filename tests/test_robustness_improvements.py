@@ -439,3 +439,233 @@ async def test_transaction_rollback_on_comment_sync_failure():
     """Test that failed comment sync triggers proper rollback."""
     # Would need full integration test
     pass  # TODO: Add when full fixtures are available
+
+
+# -------------------------------------------------------------------------
+# Attachment Size Limit Tests
+# -------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_download_file_within_size_limit():
+    """Test downloading file within size limit."""
+    from app.core.issue_sync import download_file
+
+    # Mock a small file
+    with patch('httpx.AsyncClient') as MockClient:
+        mock_response = Mock()
+        mock_response.headers = {'content-length': '1024'}  # 1KB
+        mock_response.content = b'x' * 1024
+        mock_response.raise_for_status = Mock()
+
+        mock_client = Mock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        MockClient.return_value = mock_client
+
+        # Download with 1MB limit
+        max_size = 1024 * 1024  # 1MB
+        content = await download_file("http://example.com/file.txt", max_size_bytes=max_size)
+
+        assert content == mock_response.content
+        assert len(content) == 1024
+
+
+@pytest.mark.asyncio
+async def test_download_file_exceeds_size_limit_header():
+    """Test downloading file that exceeds size limit (detected via header)."""
+    from app.core.issue_sync import download_file
+
+    with patch('httpx.AsyncClient') as MockClient:
+        mock_response = Mock()
+        mock_response.headers = {'content-length': str(200 * 1024 * 1024)}  # 200MB
+        mock_response.raise_for_status = Mock()
+
+        mock_client = Mock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        MockClient.return_value = mock_client
+
+        # Download with 100MB limit
+        max_size = 100 * 1024 * 1024
+        with pytest.raises(ValueError, match="exceeds maximum allowed size"):
+            await download_file("http://example.com/huge.txt", max_size_bytes=max_size)
+
+
+@pytest.mark.asyncio
+async def test_download_file_exceeds_size_limit_content():
+    """Test downloading file that exceeds size limit (detected from actual content)."""
+    from app.core.issue_sync import download_file
+
+    with patch('httpx.AsyncClient') as MockClient:
+        # No content-length header
+        mock_response = Mock()
+        mock_response.headers = {}
+        mock_response.content = b'x' * (200 * 1024 * 1024)  # 200MB
+        mock_response.raise_for_status = Mock()
+
+        mock_client = Mock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        MockClient.return_value = mock_client
+
+        # Download with 100MB limit
+        max_size = 100 * 1024 * 1024
+        with pytest.raises(ValueError, match="exceeds maximum allowed size"):
+            await download_file("http://example.com/huge.txt", max_size_bytes=max_size)
+
+
+@pytest.mark.asyncio
+async def test_download_file_unlimited_size():
+    """Test downloading file with unlimited size (max_size_bytes=0)."""
+    from app.core.issue_sync import download_file
+
+    with patch('httpx.AsyncClient') as MockClient:
+        mock_response = Mock()
+        mock_response.headers = {'content-length': str(500 * 1024 * 1024)}  # 500MB
+        mock_response.content = b'x' * (500 * 1024 * 1024)
+        mock_response.raise_for_status = Mock()
+
+        mock_client = Mock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        MockClient.return_value = mock_client
+
+        # Download with unlimited size (0)
+        content = await download_file("http://example.com/big.txt", max_size_bytes=0)
+
+        assert len(content) == 500 * 1024 * 1024
+
+
+# -------------------------------------------------------------------------
+# Configuration Tests
+# -------------------------------------------------------------------------
+
+
+def test_configurable_circuit_breaker_settings():
+    """Test that circuit breaker uses configurable settings."""
+    from app.config import settings
+    from app.core.rate_limiter import CircuitBreaker
+
+    # Test with custom settings
+    breaker = CircuitBreaker(
+        failure_threshold=settings.circuit_breaker_failure_threshold,
+        recovery_timeout=settings.circuit_breaker_recovery_timeout
+    )
+
+    assert breaker.failure_threshold == settings.circuit_breaker_failure_threshold
+    assert breaker.recovery_timeout == settings.circuit_breaker_recovery_timeout
+
+
+def test_configurable_pagination_limits():
+    """Test that pagination uses configurable limits."""
+    from app.config import settings
+
+    # Verify settings exist and have reasonable defaults
+    assert hasattr(settings, 'max_issues_per_sync')
+    assert hasattr(settings, 'max_pages_per_request')
+    assert settings.max_issues_per_sync > 0
+    assert settings.max_pages_per_request > 0
+
+
+def test_configurable_attachment_settings():
+    """Test that attachment settings are configurable."""
+    from app.config import settings
+
+    assert hasattr(settings, 'max_attachment_size_mb')
+    assert hasattr(settings, 'attachment_download_timeout')
+    assert settings.max_attachment_size_mb >= 0
+    assert settings.attachment_download_timeout > 0
+
+
+def test_configurable_batch_size():
+    """Test that batch size is configurable."""
+    from app.config import settings
+
+    assert hasattr(settings, 'issue_batch_size')
+    assert settings.issue_batch_size > 0
+
+
+def test_configurable_shutdown_timeout():
+    """Test that shutdown timeout is configurable."""
+    from app.config import settings
+
+    assert hasattr(settings, 'sync_shutdown_timeout')
+    assert settings.sync_shutdown_timeout > 0
+
+
+# -------------------------------------------------------------------------
+# Progress Checkpointing Tests
+# -------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_progress_checkpoint_updates_config():
+    """Test that progress checkpoints update config status."""
+    # Would need full DB integration to test
+    pass  # TODO: Add when DB fixtures available
+
+
+@pytest.mark.asyncio
+async def test_batched_processing_checkpoints():
+    """Test that batched processing creates checkpoints."""
+    # Would need full DB integration to test
+    pass  # TODO: Add when DB fixtures available
+
+
+# -------------------------------------------------------------------------
+# Graceful Shutdown Tests
+# -------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_scheduler_tracks_active_tasks():
+    """Test that scheduler tracks active sync tasks."""
+    from app.core.issue_scheduler import IssueScheduler
+
+    scheduler = IssueScheduler()
+    assert hasattr(scheduler, 'active_sync_tasks')
+    assert isinstance(scheduler.active_sync_tasks, set)
+    assert len(scheduler.active_sync_tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_scheduler_graceful_stop():
+    """Test that scheduler stops gracefully."""
+    from app.core.issue_scheduler import IssueScheduler
+
+    scheduler = IssueScheduler()
+    await scheduler.start()
+
+    # Stop should complete without error
+    await scheduler.stop()
+    assert not scheduler.running
+
+
+@pytest.mark.asyncio
+async def test_manual_sync_task_tracking():
+    """Test that manual sync tasks are tracked."""
+    from app.api.issue_mirrors import manual_sync_tasks
+
+    # Should be empty initially
+    assert isinstance(manual_sync_tasks, set)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_manual_syncs_no_tasks():
+    """Test wait_for_manual_syncs completes immediately if no tasks."""
+    from app.api.issue_mirrors import wait_for_manual_syncs, manual_sync_tasks
+
+    # Clear tasks
+    manual_sync_tasks.clear()
+
+    # Should complete immediately
+    await wait_for_manual_syncs(timeout=1)
