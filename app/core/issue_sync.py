@@ -363,28 +363,42 @@ class IssueSyncEngine:
             # Apply rate limiting delay
             await self.rate_limiter.delay()
 
-            # Execute the operation with retry logic and circuit breaker
-            def execute_with_circuit_breaker():
-                def operation():
-                    return operation_func(*args, **kwargs)
+            # Define the operation
+            def operation():
+                return operation_func(*args, **kwargs)
 
-                if circuit_breaker:
-                    # Wrap in circuit breaker
-                    return circuit_breaker.call(
-                        lambda: self.rate_limiter.execute_with_retry(
-                            operation,
-                            operation_name=operation_name
+            # Execute the operation with retry logic and circuit breaker
+            if circuit_breaker:
+                # Check circuit breaker state manually (since it's sync but we need async execution)
+                if circuit_breaker.state == "OPEN":
+                    if circuit_breaker._should_attempt_reset():
+                        circuit_breaker.state = "HALF_OPEN"
+                        logger.info("Circuit breaker entering HALF_OPEN state, testing recovery")
+                    else:
+                        raise Exception(
+                            f"Circuit breaker is OPEN. Service unavailable. "
+                            f"Will retry after {circuit_breaker.recovery_timeout}s cooldown."
                         )
-                    )
-                else:
-                    # No circuit breaker, just use retry logic
-                    return self.rate_limiter.execute_with_retry(
+
+                try:
+                    # Execute with retry logic (async)
+                    result = await self.rate_limiter.execute_with_retry(
                         operation,
                         operation_name=operation_name
                     )
-
-            result = await asyncio.to_thread(execute_with_circuit_breaker)
-            return result
+                    # Mark success on circuit breaker
+                    circuit_breaker._on_success()
+                    return result
+                except Exception as e:
+                    # Mark failure on circuit breaker
+                    circuit_breaker._on_failure()
+                    raise
+            else:
+                # No circuit breaker, just use retry logic
+                return await self.rate_limiter.execute_with_retry(
+                    operation,
+                    operation_name=operation_name
+                )
 
         return await _execute()
 
@@ -567,11 +581,39 @@ class IssueSyncEngine:
         if existing_target_issue:
             logger.info(
                 f"Found orphaned issue {existing_target_issue['iid']} for source issue {source_issue_iid}. "
-                "Reusing it instead of creating duplicate."
+                "Reusing and updating it with current source content."
             )
-            target_issue = existing_target_issue
-            target_issue_id = target_issue["id"]
-            target_issue_iid = target_issue["iid"]
+            target_issue_id = existing_target_issue["id"]
+            target_issue_iid = existing_target_issue["iid"]
+
+            # Update the orphaned issue with current source content
+            # to ensure it's in sync before marking the mapping as synced
+            labels = self._prepare_labels(source_issue)
+            description = self._prepare_description(source_issue)
+
+            # Handle attachments if enabled
+            if self.config.sync_attachments:
+                description = await self._sync_attachments_in_description(
+                    description,
+                    source_issue_id,
+                    None,  # No existing mapping yet
+                )
+
+            # Update the target issue
+            target_issue = await self._execute_gitlab_api_call(
+                self.target_client.update_issue,
+                f"update_orphaned_issue_{target_issue_iid}",
+                self.mirror.target_project_id,
+                target_issue_iid,
+                title=source_issue["title"],
+                description=description,
+                labels=labels,
+                weight=source_issue.get("weight") if self.config.sync_weight else None,
+            )
+
+            logger.info(
+                f"Updated orphaned issue {target_issue_iid} with current source content"
+            )
         else:
             # Prepare labels
             labels = self._prepare_labels(source_issue)
