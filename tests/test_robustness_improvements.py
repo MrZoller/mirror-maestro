@@ -452,7 +452,7 @@ async def test_download_file_within_size_limit():
     from app.core.issue_sync import download_file
 
     # Mock a small file
-    with patch('httpx.AsyncClient') as MockClient:
+    with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
         mock_response = Mock()
         mock_response.headers = {'content-length': '1024'}  # 1KB
         mock_response.content = b'x' * 1024
@@ -461,7 +461,7 @@ async def test_download_file_within_size_limit():
         mock_client = Mock()
         mock_client.get = AsyncMock(return_value=mock_response)
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.__aexit__ = AsyncMock(return_value=None)
 
         MockClient.return_value = mock_client
 
@@ -478,7 +478,7 @@ async def test_download_file_exceeds_size_limit_header():
     """Test downloading file that exceeds size limit (detected via header)."""
     from app.core.issue_sync import download_file
 
-    with patch('httpx.AsyncClient') as MockClient:
+    with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
         mock_response = Mock()
         mock_response.headers = {'content-length': str(200 * 1024 * 1024)}  # 200MB
         mock_response.raise_for_status = Mock()
@@ -486,7 +486,7 @@ async def test_download_file_exceeds_size_limit_header():
         mock_client = Mock()
         mock_client.get = AsyncMock(return_value=mock_response)
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.__aexit__ = AsyncMock(return_value=None)
 
         MockClient.return_value = mock_client
 
@@ -501,7 +501,7 @@ async def test_download_file_exceeds_size_limit_content():
     """Test downloading file that exceeds size limit (detected from actual content)."""
     from app.core.issue_sync import download_file
 
-    with patch('httpx.AsyncClient') as MockClient:
+    with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
         # No content-length header
         mock_response = Mock()
         mock_response.headers = {}
@@ -511,7 +511,7 @@ async def test_download_file_exceeds_size_limit_content():
         mock_client = Mock()
         mock_client.get = AsyncMock(return_value=mock_response)
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.__aexit__ = AsyncMock(return_value=None)
 
         MockClient.return_value = mock_client
 
@@ -526,7 +526,7 @@ async def test_download_file_unlimited_size():
     """Test downloading file with unlimited size (max_size_bytes=0)."""
     from app.core.issue_sync import download_file
 
-    with patch('httpx.AsyncClient') as MockClient:
+    with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
         mock_response = Mock()
         mock_response.headers = {'content-length': str(500 * 1024 * 1024)}  # 500MB
         mock_response.content = b'x' * (500 * 1024 * 1024)
@@ -535,7 +535,7 @@ async def test_download_file_unlimited_size():
         mock_client = Mock()
         mock_client.get = AsyncMock(return_value=mock_response)
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.__aexit__ = AsyncMock(return_value=None)
 
         MockClient.return_value = mock_client
 
