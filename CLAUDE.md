@@ -17,6 +17,7 @@ This document provides comprehensive guidance for AI assistants working on the M
 11. [Testing Guidelines](#testing-guidelines)
 12. [Common Tasks](#common-tasks)
 13. [Troubleshooting](#troubleshooting)
+14. [Production Deployment](#production-deployment)
 
 ## Project Overview
 
@@ -2208,6 +2209,117 @@ const response = await fetch('/api/resource');
 const data = await response.json();
 state.resources = data;
 renderResources();
+```
+
+## Production Deployment
+
+### Issue Syncing Robustness
+
+**Production Readiness Features**:
+
+Mirror Maestro's issue syncing includes enterprise-grade robustness features for production environments:
+
+**1. Configurable Resource Limits**:
+```bash
+# In .env
+MAX_ATTACHMENT_SIZE_MB=100          # Attachment size limit (0 = unlimited)
+MAX_ISSUES_PER_SYNC=10000           # Maximum issues per sync operation
+MAX_PAGES_PER_REQUEST=100           # Pagination limit
+ATTACHMENT_DOWNLOAD_TIMEOUT=30      # Attachment download timeout (seconds)
+```
+
+**2. Circuit Breaker Pattern**:
+```bash
+CIRCUIT_BREAKER_FAILURE_THRESHOLD=5  # Failures before circuit opens
+CIRCUIT_BREAKER_RECOVERY_TIMEOUT=60  # Recovery attempt delay (seconds)
+```
+
+Prevents cascading failures by opening circuit after threshold failures, blocking requests until recovery timeout.
+
+**3. Progress Checkpointing**:
+```bash
+ISSUE_BATCH_SIZE=50  # Issues processed per checkpoint
+```
+
+Syncs process issues in batches, committing progress after each batch. Enables recovery from interruptions without starting over.
+
+**4. Graceful Shutdown**:
+```bash
+SYNC_SHUTDOWN_TIMEOUT=300  # Max seconds to wait for jobs during shutdown
+```
+
+Application waits for active sync jobs to complete during shutdown, preventing data corruption and incomplete syncs.
+
+**5. Retry Logic with Exponential Backoff**:
+```bash
+GITLAB_API_MAX_RETRIES=3  # Number of retries
+GITLAB_API_DELAY_MS=200   # Base delay between operations
+```
+
+Automatic retry with exponential backoff (1s, 2s, 4s) for transient failures.
+
+**6. Rate Limiting**:
+```bash
+GITLAB_API_DELAY_MS=200  # 200ms = ~300 ops/min (under 600/min GitLab limit)
+```
+
+Prevents API rate limit exhaustion with configurable delays between operations.
+
+**Architecture**:
+```
+IssueSyncEngine
+├── Circuit Breakers (source & target)
+├── Rate Limiter (shared)
+├── Retry Logic (exponential backoff)
+├── Batch Processor (configurable size)
+├── Progress Checkpointing
+└── Attachment Size Validation
+```
+
+**Monitoring Considerations**:
+
+For production deployments, monitor:
+- Sync job status (`IssueSyncJob.status`)
+- Circuit breaker states (check logs for "Circuit breaker is OPEN")
+- Failed issues count (`IssueSyncJob.issues_failed`)
+- Checkpoint frequency (batch processing logs)
+
+**Scaling Recommendations**:
+
+- **Small repos (<1,000 issues)**: Default settings work well
+- **Medium repos (1,000-10,000 issues)**: Consider increasing `ISSUE_BATCH_SIZE` to 100
+- **Large repos (>10,000 issues)**: Increase `MAX_ISSUES_PER_SYNC` and `ISSUE_BATCH_SIZE`, monitor memory
+
+**Memory Management**:
+
+Batch processing prevents memory exhaustion:
+```python
+# Process issues in batches
+for batch_start in range(0, total_issues, batch_size):
+    batch = source_issues[batch_start:batch_end]
+    # Process batch
+    # Checkpoint progress
+```
+
+**Error Recovery**:
+
+Syncs handle errors at multiple levels:
+1. **Transient failures**: Automatic retry with backoff
+2. **Circuit open**: Block requests, attempt recovery after timeout
+3. **Batch failures**: Checkpoint last successful batch, continue
+4. **Attachment size**: Skip oversized files, log warning, continue sync
+
+**Example Production Configuration**:
+```bash
+# High-availability production setup
+GITLAB_API_TIMEOUT=60
+CIRCUIT_BREAKER_FAILURE_THRESHOLD=5
+CIRCUIT_BREAKER_RECOVERY_TIMEOUT=60
+MAX_ATTACHMENT_SIZE_MB=100
+ISSUE_BATCH_SIZE=50
+SYNC_SHUTDOWN_TIMEOUT=300
+GITLAB_API_MAX_RETRIES=3
+GITLAB_API_DELAY_MS=200
 ```
 
 ---
