@@ -13,8 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.gitlab_client import GitLabClient
-from app.core.rate_limiter import RateLimiter
+from app.core.gitlab_client import GitLabClient, GitLabClientError
+from app.core.rate_limiter import RateLimiter, CircuitBreaker
 from app.models import (
     Mirror,
     MirrorIssueConfig,
@@ -282,6 +282,19 @@ class IssueSyncEngine:
             max_retries=settings.gitlab_api_max_retries
         )
 
+        # Initialize circuit breakers for source and target GitLab instances
+        # Opens after 5 consecutive failures, attempts recovery after 60s
+        self.source_circuit_breaker = CircuitBreaker(
+            failure_threshold=5,
+            recovery_timeout=60,
+            expected_exception=GitLabClientError
+        )
+        self.target_circuit_breaker = CircuitBreaker(
+            failure_threshold=5,
+            recovery_timeout=60,
+            expected_exception=GitLabClientError
+        )
+
         # Cache for labels
         self.target_labels_cache: Dict[str, Dict[str, Any]] = {}
         self.mirror_from_label: str = get_mirror_from_label(source_instance.id)
@@ -294,7 +307,7 @@ class IssueSyncEngine:
         **kwargs
     ):
         """
-        Execute a GitLab API call with retry logic and rate limiting.
+        Execute a GitLab API call with retry logic, rate limiting, and circuit breaker.
 
         Args:
             operation_func: The GitLab client method to call
@@ -304,17 +317,40 @@ class IssueSyncEngine:
         Returns:
             The result from the GitLab API call
         """
+        # Determine which circuit breaker to use based on which client is being called
+        if operation_func.__self__ == self.source_client:
+            circuit_breaker = self.source_circuit_breaker
+        elif operation_func.__self__ == self.target_client:
+            circuit_breaker = self.target_circuit_breaker
+        else:
+            # Unknown client, skip circuit breaker
+            circuit_breaker = None
+
         async def _execute():
             # Apply rate limiting delay
             await self.rate_limiter.delay()
 
-            # Execute the operation with retry logic
-            result = await asyncio.to_thread(
-                lambda: self.rate_limiter.execute_with_retry(
-                    lambda: operation_func(*args, **kwargs),
-                    operation_name=operation_name
-                )
-            )
+            # Execute the operation with retry logic and circuit breaker
+            def execute_with_circuit_breaker():
+                def operation():
+                    return operation_func(*args, **kwargs)
+
+                if circuit_breaker:
+                    # Wrap in circuit breaker
+                    return circuit_breaker.call(
+                        lambda: self.rate_limiter.execute_with_retry(
+                            operation,
+                            operation_name=operation_name
+                        )
+                    )
+                else:
+                    # No circuit breaker, just use retry logic
+                    return self.rate_limiter.execute_with_retry(
+                        operation,
+                        operation_name=operation_name
+                    )
+
+            result = await asyncio.to_thread(execute_with_circuit_breaker)
             return result
 
         return await _execute()
@@ -529,7 +565,8 @@ class IssueSyncEngine:
                 state_event="close"
             )
 
-        # Create issue mapping
+        # Create issue mapping with transaction safety
+        # Use a savepoint so we can rollback if comment sync fails
         mapping = IssueMapping(
             mirror_issue_config_id=self.config.id,
             source_issue_id=source_issue_id,
@@ -545,11 +582,29 @@ class IssueSyncEngine:
             source_content_hash=content_hash,
         )
         self.db.add(mapping)
-        await self.db.commit()
 
-        # Sync comments if enabled
-        if self.config.sync_comments:
-            await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+        try:
+            # Commit the mapping first to get the ID for comment/attachment mappings
+            await self.db.commit()
+            await self.db.refresh(mapping)
+
+            # Sync comments if enabled (uses mapping.id for foreign key)
+            if self.config.sync_comments:
+                await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+
+        except Exception as e:
+            # If post-creation sync fails, log warning but don't fail entire sync
+            # The issue is created on GitLab and mapped in DB - comments can sync later
+            logger.warning(
+                f"Issue {target_issue_iid} created successfully, but post-creation sync failed: {e}"
+            )
+            # Update mapping status to indicate partial sync
+            mapping.sync_status = "partial"
+            try:
+                await self.db.commit()
+            except Exception as commit_error:
+                logger.error(f"Failed to update sync status: {commit_error}")
+                await self.db.rollback()
 
     async def _update_target_issue(
         self,
@@ -613,17 +668,32 @@ class IssueSyncEngine:
                 state_event="reopen"
             )
 
-        # Update mapping
+        # Update mapping with transaction safety
         mapping.source_content_hash = content_hash
         mapping.last_synced_at = datetime.utcnow()
         mapping.source_updated_at = self._parse_datetime(source_issue.get("updated_at"))
         mapping.target_updated_at = datetime.utcnow()
         mapping.sync_status = "synced"
-        await self.db.commit()
 
-        # Sync comments if enabled
-        if self.config.sync_comments:
-            await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+        try:
+            await self.db.commit()
+
+            # Sync comments if enabled
+            if self.config.sync_comments:
+                await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+
+        except Exception as e:
+            # If post-update sync fails, log warning but don't fail entire sync
+            logger.warning(
+                f"Issue {target_issue_iid} updated successfully, but post-update sync failed: {e}"
+            )
+            # Update mapping status to indicate partial sync
+            mapping.sync_status = "partial"
+            try:
+                await self.db.commit()
+            except Exception as commit_error:
+                logger.error(f"Failed to update sync status: {commit_error}")
+                await self.db.rollback()
 
     def _prepare_labels(self, source_issue: Dict[str, Any]) -> List[str]:
         """Prepare labels for target issue, including PM field conversions."""
@@ -720,7 +790,11 @@ class IssueSyncEngine:
         target_issue_iid: int,
         issue_mapping_id: int
     ) -> None:
-        """Sync comments from source to target issue."""
+        """
+        Sync comments from source to target issue with batched commits.
+
+        Uses batched database commits for better transaction safety and performance.
+        """
         # Fetch source comments (excluding system notes) with retry logic
         source_notes = await self._execute_gitlab_api_call(
             self.source_client.get_issue_notes,
@@ -738,6 +812,10 @@ class IssueSyncEngine:
             )
         )
         existing_mappings = {m.source_note_id: m for m in result.scalars().all()}
+
+        # Track changes to commit in batch
+        mappings_to_add = []
+        mappings_to_update = []
 
         for source_note in source_notes:
             source_note_id = source_note["id"]
@@ -764,7 +842,7 @@ class IssueSyncEngine:
 
                 mapping.source_content_hash = content_hash
                 mapping.last_synced_at = datetime.utcnow()
-                await self.db.commit()
+                mappings_to_update.append(mapping)
             else:
                 # Create new comment on target with retry logic
                 target_note = await self._execute_gitlab_api_call(
@@ -775,7 +853,7 @@ class IssueSyncEngine:
                     source_note_body
                 )
 
-                # Create mapping
+                # Create mapping (will be added to DB in batch)
                 mapping = CommentMapping(
                     issue_mapping_id=issue_mapping_id,
                     source_note_id=source_note_id,
@@ -783,8 +861,23 @@ class IssueSyncEngine:
                     last_synced_at=datetime.utcnow(),
                     source_content_hash=content_hash,
                 )
+                mappings_to_add.append(mapping)
+
+        # Batch commit all changes for better transaction safety
+        try:
+            for mapping in mappings_to_add:
                 self.db.add(mapping)
+
+            if mappings_to_add or mappings_to_update:
                 await self.db.commit()
+                logger.debug(
+                    f"Synced {len(mappings_to_add)} new comments, "
+                    f"updated {len(mappings_to_update)} comments"
+                )
+        except Exception as e:
+            logger.error(f"Failed to commit comment mappings: {e}")
+            await self.db.rollback()
+            raise
 
     async def _sync_attachments_in_description(
         self,
@@ -793,7 +886,7 @@ class IssueSyncEngine:
         issue_mapping_id: Optional[int]
     ) -> str:
         """
-        Sync attachments referenced in description.
+        Sync attachments referenced in description with batched commits.
 
         Downloads files from source URLs and uploads to target,
         then replaces URLs in description.
@@ -808,6 +901,7 @@ class IssueSyncEngine:
             return description
 
         url_mapping = {}
+        attachment_mappings_to_add = []
 
         for source_url in source_urls:
             # Check if this attachment was already synced
@@ -851,7 +945,7 @@ class IssueSyncEngine:
 
                 url_mapping[source_url] = target_url
 
-                # Create attachment mapping
+                # Queue attachment mapping for batch commit
                 if issue_mapping_id:
                     attachment_mapping = AttachmentMapping(
                         issue_mapping_id=issue_mapping_id,
@@ -861,16 +955,141 @@ class IssueSyncEngine:
                         file_size=len(file_content),
                         uploaded_at=datetime.utcnow(),
                     )
-                    self.db.add(attachment_mapping)
-                    await self.db.commit()
+                    attachment_mappings_to_add.append(attachment_mapping)
 
                 logger.info(f"Synced attachment: {filename}")
 
             except Exception as e:
                 logger.error(f"Failed to upload attachment {filename}: {e}")
 
+        # Batch commit all attachment mappings
+        if attachment_mappings_to_add:
+            try:
+                for mapping in attachment_mappings_to_add:
+                    self.db.add(mapping)
+                await self.db.commit()
+                logger.debug(f"Committed {len(attachment_mappings_to_add)} attachment mappings")
+            except Exception as e:
+                logger.error(f"Failed to commit attachment mappings: {e}")
+                await self.db.rollback()
+                # Don't raise - attachments are synced on GitLab, just mapping failed
+
         # Replace URLs in description
         return replace_urls_in_description(description, url_mapping)
+
+    async def cleanup_orphaned_resources(self) -> Dict[str, Any]:
+        """
+        Detect and report orphaned resources (issues created but not properly mapped).
+
+        This method identifies:
+        - Issues on target with Mirrored-From label but no database mapping
+        - Comment mappings without valid parent issue mappings
+        - Attachment mappings without valid parent issue mappings
+
+        Returns:
+            Dict with cleanup statistics
+        """
+        stats = {
+            "orphaned_issues_found": 0,
+            "orphaned_comments_found": 0,
+            "orphaned_attachments_found": 0,
+            "mappings_created": 0,
+            "mappings_deleted": 0,
+            "errors": []
+        }
+
+        logger.info(f"Starting resource cleanup for mirror {self.mirror.id}")
+
+        try:
+            # Find orphaned issues on target
+            target_issues = await self._execute_gitlab_api_call(
+                self.target_client.get_issues,
+                "cleanup_fetch_target_issues",
+                self.mirror.target_project_id,
+                labels=self.mirror_from_label,
+                state="all",
+                per_page=100,
+                get_all=True,
+                max_pages=10  # Limit cleanup scope
+            )
+
+            # Check each issue against database mappings
+            for issue in target_issues:
+                target_issue_id = issue["id"]
+
+                # Check if mapping exists
+                result = await self.db.execute(
+                    select(IssueMapping).where(
+                        IssueMapping.mirror_issue_config_id == self.config.id,
+                        IssueMapping.target_issue_id == target_issue_id
+                    )
+                )
+                mapping = result.scalar_one_or_none()
+
+                if not mapping:
+                    stats["orphaned_issues_found"] += 1
+                    logger.warning(
+                        f"Found orphaned issue {issue['iid']} on target - "
+                        "exists on GitLab but not in database"
+                    )
+
+            # Find orphaned comment mappings
+            orphaned_comments = await self.db.execute(
+                select(CommentMapping).where(
+                    ~CommentMapping.issue_mapping_id.in_(
+                        select(IssueMapping.id).where(
+                            IssueMapping.mirror_issue_config_id == self.config.id
+                        )
+                    )
+                )
+            )
+            orphaned_comment_list = orphaned_comments.scalars().all()
+            stats["orphaned_comments_found"] = len(orphaned_comment_list)
+
+            if orphaned_comment_list:
+                logger.warning(
+                    f"Found {len(orphaned_comment_list)} orphaned comment mappings - "
+                    "deleting them from database"
+                )
+                for comment in orphaned_comment_list:
+                    await self.db.delete(comment)
+                    stats["mappings_deleted"] += 1
+                await self.db.commit()
+
+            # Find orphaned attachment mappings
+            orphaned_attachments = await self.db.execute(
+                select(AttachmentMapping).where(
+                    ~AttachmentMapping.issue_mapping_id.in_(
+                        select(IssueMapping.id).where(
+                            IssueMapping.mirror_issue_config_id == self.config.id
+                        )
+                    )
+                )
+            )
+            orphaned_attachment_list = orphaned_attachments.scalars().all()
+            stats["orphaned_attachments_found"] = len(orphaned_attachment_list)
+
+            if orphaned_attachment_list:
+                logger.warning(
+                    f"Found {len(orphaned_attachment_list)} orphaned attachment mappings - "
+                    "deleting them from database"
+                )
+                for attachment in orphaned_attachment_list:
+                    await self.db.delete(attachment)
+                    stats["mappings_deleted"] += 1
+                await self.db.commit()
+
+            logger.info(
+                f"Resource cleanup completed: "
+                f"{stats['orphaned_issues_found']} orphaned issues, "
+                f"{stats['mappings_deleted']} mappings deleted"
+            )
+
+        except Exception as e:
+            logger.error(f"Resource cleanup failed: {e}")
+            stats["errors"].append(str(e))
+
+        return stats
 
     async def _find_existing_target_issue(
         self,

@@ -129,6 +129,116 @@ class RateLimiter:
         raise last_error if last_error else Exception(f"Failed to execute {operation_name}")
 
 
+class CircuitBreaker:
+    """
+    Circuit breaker pattern for GitLab API operations.
+
+    Prevents repeated calls to failing services by opening the circuit
+    after a threshold of consecutive failures. The circuit automatically
+    attempts to close after a cooldown period.
+
+    States:
+    - CLOSED: Normal operation, requests pass through
+    - OPEN: Too many failures, requests are blocked
+    - HALF_OPEN: Testing if service recovered, limited requests allowed
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout: int = 60,
+        expected_exception: type = Exception
+    ):
+        """
+        Initialize circuit breaker.
+
+        Args:
+            failure_threshold: Number of consecutive failures before opening circuit
+            recovery_timeout: Seconds to wait before attempting recovery
+            expected_exception: Exception type that triggers the circuit breaker
+        """
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.expected_exception = expected_exception
+
+        self.failure_count = 0
+        self.last_failure_time: datetime | None = None
+        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+
+    def call(self, func, *args, **kwargs):
+        """
+        Execute a function through the circuit breaker.
+
+        Args:
+            func: Function to execute
+            *args, **kwargs: Arguments to pass to function
+
+        Returns:
+            Function result if successful
+
+        Raises:
+            Exception: If circuit is OPEN or function fails
+        """
+        if self.state == "OPEN":
+            # Check if recovery timeout has elapsed
+            if self._should_attempt_reset():
+                self.state = "HALF_OPEN"
+                logger.info("Circuit breaker entering HALF_OPEN state, testing recovery")
+            else:
+                raise Exception(
+                    f"Circuit breaker is OPEN. Service unavailable. "
+                    f"Will retry after {self.recovery_timeout}s cooldown."
+                )
+
+        try:
+            result = func(*args, **kwargs)
+            self._on_success()
+            return result
+        except self.expected_exception as e:
+            self._on_failure()
+            raise
+
+    def _should_attempt_reset(self) -> bool:
+        """Check if enough time has passed to attempt circuit reset."""
+        if self.last_failure_time is None:
+            return True
+        elapsed = (datetime.utcnow() - self.last_failure_time).total_seconds()
+        return elapsed >= self.recovery_timeout
+
+    def _on_success(self):
+        """Handle successful operation."""
+        self.failure_count = 0
+        if self.state == "HALF_OPEN":
+            self.state = "CLOSED"
+            logger.info("Circuit breaker recovered, state is now CLOSED")
+
+    def _on_failure(self):
+        """Handle failed operation."""
+        self.failure_count += 1
+        self.last_failure_time = datetime.utcnow()
+
+        if self.state == "HALF_OPEN":
+            # Failed during recovery attempt, reopen circuit
+            self.state = "OPEN"
+            logger.warning("Circuit breaker recovery failed, reopening circuit")
+        elif self.failure_count >= self.failure_threshold:
+            # Too many failures, open circuit
+            self.state = "OPEN"
+            logger.error(
+                f"Circuit breaker OPENED after {self.failure_count} consecutive failures. "
+                f"Will attempt recovery in {self.recovery_timeout}s"
+            )
+
+    def get_state(self) -> dict[str, Any]:
+        """Get current circuit breaker state."""
+        return {
+            "state": self.state,
+            "failure_count": self.failure_count,
+            "last_failure_time": self.last_failure_time.isoformat() if self.last_failure_time else None,
+            "recovery_timeout": self.recovery_timeout
+        }
+
+
 class BatchOperationTracker:
     """
     Track progress of batch operations with rate limiting.
