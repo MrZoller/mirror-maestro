@@ -74,6 +74,14 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
   - Attachment download/upload with URL rewriting
   - Time tracking sync (estimates and time spent)
   - Loop prevention and incremental syncing
+  - **Production-Ready Robustness**:
+    - Circuit breaker pattern prevents cascading failures
+    - Retry logic with exponential backoff for transient errors
+    - Progress checkpointing for large syncs (resumable on interruption)
+    - Attachment size limits (configurable, default 100MB)
+    - Graceful shutdown waits for active syncs to complete
+    - Batched processing prevents memory exhaustion
+    - Rate limiting prevents API quota exhaustion
   - See [Issue Mirroring Guide](docs/ISSUE_MIRRORING.md) for details
 
 ### Mirror Management
