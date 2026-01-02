@@ -137,11 +137,19 @@ def _handle_gitlab_error(e: Exception, operation: str) -> None:
 class GitLabClient:
     """Wrapper for GitLab API interactions."""
 
-    def __init__(self, url: str, encrypted_token: str):
-        """Initialize GitLab client with URL and encrypted token."""
+    def __init__(self, url: str, encrypted_token: str, timeout: int = 60):
+        """
+        Initialize GitLab client with URL and encrypted token.
+
+        Args:
+            url: GitLab instance URL
+            encrypted_token: Encrypted API token
+            timeout: Request timeout in seconds (default: 60)
+        """
         self.url = url
         self.token = encryption.decrypt(encrypted_token)
-        self.gl = gitlab.Gitlab(url, private_token=self.token)
+        # Set timeout for all HTTP requests to prevent hanging operations
+        self.gl = gitlab.Gitlab(url, private_token=self.token, timeout=timeout)
 
     def test_connection(self) -> bool:
         """Test if the connection to GitLab is working."""
@@ -957,9 +965,11 @@ class GitLabClient:
         *,
         updated_after: Optional[str] = None,
         state: Optional[str] = None,
+        labels: Optional[str] = None,
         per_page: int = 100,
         page: int = 1,
         get_all: bool = False,
+        max_pages: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get issues from a project with optional filtering.
@@ -968,9 +978,12 @@ class GitLabClient:
             project_id: The project ID.
             updated_after: ISO 8601 datetime string to filter issues updated after this time.
             state: Filter by state ('opened', 'closed', 'all').
+            labels: Comma-separated label names to filter by.
             per_page: Number of issues per page.
             page: Page number (only used when get_all=False).
             get_all: If True, fetch all pages of issues. If False, fetch only one page.
+            max_pages: Maximum number of pages to fetch (only used when get_all=True).
+                      Prevents unlimited fetching. None = no limit.
 
         Returns:
             List of issue dictionaries.
@@ -983,13 +996,23 @@ class GitLabClient:
                 params["updated_after"] = updated_after
             if state:
                 params["state"] = state
+            if labels:
+                params["labels"] = labels
 
             result = []
 
             if get_all:
-                # Fetch all pages
+                # Fetch all pages (or up to max_pages if specified)
                 current_page = 1
                 while True:
+                    # Check if we've reached the max_pages limit
+                    if max_pages is not None and current_page > max_pages:
+                        logger.warning(
+                            f"Reached max_pages limit ({max_pages}) for project {project_id}. "
+                            f"Fetched {len(result)} issues so far."
+                        )
+                        break
+
                     params["page"] = current_page
                     issues = self.gl.http_get(f"/projects/{project_id}/issues", query_data=params)
 
