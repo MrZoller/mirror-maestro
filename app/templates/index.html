@@ -1315,6 +1315,174 @@ Safe and controlled cleanup</code></pre>
                 <p class="alert alert-info"><strong>Note:</strong> This checks GitLab directly, showing all mirrors on the project - including those created outside of Mirror Maestro.</p>
             </div>
 
+            <!-- Issue Mirroring -->
+            <div class="card">
+                <h2>Issue Mirroring</h2>
+                <p class="text-muted">Automatically sync issues, comments, labels, and attachments between mirrored repositories.</p>
+
+                <h3>What is Issue Mirroring?</h3>
+                <p>In addition to syncing repository code, Mirror Maestro can synchronize GitLab issues between source and target projects. This keeps issue trackers in sync across instances, making it perfect for:</p>
+                <ul>
+                    <li>Maintaining consistent issue tracking across dev/staging/prod environments</li>
+                    <li>Creating backup copies of issue data alongside code mirrors</li>
+                    <li>Consolidating issues from multiple instances into a central tracking system</li>
+                </ul>
+
+                <h3>Configuring Issue Syncing</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a> tab and click the "Issue Configs" button</li>
+                    <li>Click "Create Issue Config" and select a mirror</li>
+                    <li>Configure what to sync:
+                        <ul>
+                            <li><strong>Sync Comments</strong> - Mirror all issue comments and notes</li>
+                            <li><strong>Sync Labels</strong> - Copy labels to target issues</li>
+                            <li><strong>Sync Attachments</strong> - Download and upload issue attachments</li>
+                            <li><strong>Sync Weight/Time Tracking</strong> - Copy issue weight, time estimates, and time spent</li>
+                            <li><strong>Sync Closed Issues</strong> - Include closed/resolved issues in sync</li>
+                        </ul>
+                    </li>
+                    <li>Set the sync interval (5-1440 minutes, default: 15 minutes)</li>
+                    <li>Click "Create Config" to enable automatic syncing</li>
+                </ol>
+
+                <h3>Production-Ready Robustness</h3>
+                <p>Mirror Maestro's issue syncing is built for reliability in production environments with the following features:</p>
+
+                <h4>Circuit Breaker Protection</h4>
+                <p>Prevents cascading failures when GitLab instances experience issues:</p>
+                <ul>
+                    <li>After 5 consecutive failures (configurable), the sync pauses automatically</li>
+                    <li>Waits 60 seconds (configurable) before attempting recovery</li>
+                    <li>Protects both your Mirror Maestro server and GitLab instances from overload</li>
+                </ul>
+
+                <h4>Automatic Retry with Backoff</h4>
+                <p>Transient network errors don't stop your syncs:</p>
+                <ul>
+                    <li>Automatically retries failed operations up to 3 times</li>
+                    <li>Uses exponential backoff (1s, 2s, 4s delays) to avoid overwhelming the API</li>
+                    <li>Distinguishes between retryable errors (network) and permanent failures (permissions)</li>
+                </ul>
+
+                <h4>Progress Checkpointing</h4>
+                <p>Large syncs can be interrupted and resumed without data loss:</p>
+                <ul>
+                    <li>Processes issues in batches of 50 (configurable)</li>
+                    <li>Commits progress after each batch to the database</li>
+                    <li>If interrupted, next sync resumes from where it left off</li>
+                    <li>Perfect for syncing thousands of issues safely</li>
+                </ul>
+
+                <h4>Memory Management</h4>
+                <p>Efficiently handles large repositories without exhausting resources:</p>
+                <ul>
+                    <li>Batched processing prevents loading all issues into memory at once</li>
+                    <li>Streaming downloads for attachments</li>
+                    <li>Pagination limits prevent API response overload (max 100 pages)</li>
+                    <li>Maximum 10,000 issues per sync (configurable)</li>
+                </ul>
+
+                <h4>Attachment Safety</h4>
+                <p>Protects against oversized file transfers:</p>
+                <ul>
+                    <li>Default 100MB limit per attachment (configurable)</li>
+                    <li>Checks file size before downloading (via Content-Length header)</li>
+                    <li>Validates actual content size after download</li>
+                    <li>Set to 0 for unlimited size (use with caution)</li>
+                </ul>
+
+                <h4>Rate Limiting</h4>
+                <p>Stays within GitLab's API quotas:</p>
+                <ul>
+                    <li>Automatic 200ms delay between operations (~300 ops/min)</li>
+                    <li>Well under GitLab's 600 requests/min limit</li>
+                    <li>Prevents API quota exhaustion even with large syncs</li>
+                </ul>
+
+                <h4>Graceful Shutdown</h4>
+                <p>Safe deployment and maintenance:</p>
+                <ul>
+                    <li>Active sync jobs complete before shutdown</li>
+                    <li>Configurable timeout (default: 300 seconds)</li>
+                    <li>No data loss during restarts or deployments</li>
+                    <li>Partially completed syncs resume on next run</li>
+                </ul>
+
+                <h3>Configuration Options</h3>
+                <p>Advanced settings can be configured via environment variables:</p>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Setting</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>CIRCUIT_BREAKER_FAILURE_THRESHOLD</code></td>
+                            <td>5</td>
+                            <td>Failures before circuit opens</td>
+                        </tr>
+                        <tr>
+                            <td><code>CIRCUIT_BREAKER_RECOVERY_TIMEOUT</code></td>
+                            <td>60</td>
+                            <td>Seconds to wait before recovery attempt</td>
+                        </tr>
+                        <tr>
+                            <td><code>MAX_ISSUES_PER_SYNC</code></td>
+                            <td>10000</td>
+                            <td>Maximum issues to process in one sync</td>
+                        </tr>
+                        <tr>
+                            <td><code>MAX_PAGES_PER_REQUEST</code></td>
+                            <td>100</td>
+                            <td>Maximum API pagination pages</td>
+                        </tr>
+                        <tr>
+                            <td><code>MAX_ATTACHMENT_SIZE_MB</code></td>
+                            <td>100</td>
+                            <td>Maximum attachment size in MB (0=unlimited)</td>
+                        </tr>
+                        <tr>
+                            <td><code>ATTACHMENT_DOWNLOAD_TIMEOUT</code></td>
+                            <td>30</td>
+                            <td>Timeout for downloading attachments (seconds)</td>
+                        </tr>
+                        <tr>
+                            <td><code>ISSUE_BATCH_SIZE</code></td>
+                            <td>50</td>
+                            <td>Issues per checkpoint batch</td>
+                        </tr>
+                        <tr>
+                            <td><code>SYNC_SHUTDOWN_TIMEOUT</code></td>
+                            <td>300</td>
+                            <td>Max wait for syncs during shutdown (seconds)</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Monitoring Sync Status</h3>
+                <p>Track your issue syncs in the Issue Configs view:</p>
+                <ul>
+                    <li><strong>Last Sync</strong> - Timestamp of most recent sync</li>
+                    <li><strong>Status</strong> - Success, failed, or in progress</li>
+                    <li><strong>Next Sync</strong> - When the next automatic sync will run</li>
+                    <li><strong>Error Message</strong> - Details if sync failed</li>
+                    <li><strong>Manual Trigger</strong> - Force immediate sync with "Trigger Sync" button</li>
+                </ul>
+
+                <h3>Best Practices</h3>
+                <ul>
+                    <li>Start with a short sync interval (15 min) for active projects</li>
+                    <li>For initial syncs of large repos, consider disabling sync_existing_issues temporarily</li>
+                    <li>Monitor attachment sizes - large files can slow syncs significantly</li>
+                    <li>Use longer intervals (60+ min) for archived or infrequently updated projects</li>
+                    <li>Check sync status regularly to catch configuration issues early</li>
+                    <li>Increase batch size for repositories with thousands of issues to reduce overhead</li>
+                </ul>
+            </div>
+
             <!-- System Health -->
             <div class="card">
                 <h2>System Health</h2>
