@@ -43,8 +43,9 @@ ENV/
 # Database
 *.db
 *.db-journal
-data/*.db
-data/*.db-journal
+
+# Runtime data directory (encryption keys, backups, database files)
+data/
 
 # Logs
 *.log
