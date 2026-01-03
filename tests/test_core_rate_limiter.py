@@ -260,8 +260,9 @@ def test_circuit_breaker_blocks_when_open():
 
 
 def test_circuit_breaker_half_open_recovery():
-    """Test circuit breaker attempts recovery after timeout."""
-    breaker = CircuitBreaker(failure_threshold=2, recovery_timeout=1)
+    """Test circuit breaker attempts recovery after timeout with gradual recovery."""
+    # Use success_threshold=3 to test gradual recovery (default behavior)
+    breaker = CircuitBreaker(failure_threshold=2, recovery_timeout=1, success_threshold=3)
 
     def failing_func():
         raise Exception("Service unavailable")
@@ -280,6 +281,19 @@ def test_circuit_breaker_half_open_recovery():
     def success_func():
         return "recovered"
 
+    # First success: enters HALF_OPEN, increments success count
+    result = breaker.call(success_func)
+    assert result == "recovered"
+    assert breaker.state == "HALF_OPEN"  # Not closed yet - needs more successes
+    assert breaker.success_count == 1
+
+    # Second success
+    result = breaker.call(success_func)
+    assert result == "recovered"
+    assert breaker.state == "HALF_OPEN"
+    assert breaker.success_count == 2
+
+    # Third success: should close the circuit
     result = breaker.call(success_func)
     assert result == "recovered"
     assert breaker.state == "CLOSED"

@@ -141,12 +141,17 @@ class CircuitBreaker:
     - CLOSED: Normal operation, requests pass through
     - OPEN: Too many failures, requests are blocked
     - HALF_OPEN: Testing if service recovered, limited requests allowed
+
+    Features:
+    - Gradual recovery: Requires multiple consecutive successes to fully close
+    - Configurable thresholds for both failure and recovery
     """
 
     def __init__(
         self,
         failure_threshold: int = 5,
         recovery_timeout: int = 60,
+        success_threshold: int = 3,
         expected_exception: type = Exception
     ):
         """
@@ -155,13 +160,16 @@ class CircuitBreaker:
         Args:
             failure_threshold: Number of consecutive failures before opening circuit
             recovery_timeout: Seconds to wait before attempting recovery
+            success_threshold: Number of consecutive successes needed to close circuit
             expected_exception: Exception type that triggers the circuit breaker
         """
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
+        self.success_threshold = success_threshold
         self.expected_exception = expected_exception
 
         self.failure_count = 0
+        self.success_count = 0  # Track consecutive successes in HALF_OPEN state
         self.last_failure_time: datetime | None = None
         self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
 
@@ -183,6 +191,7 @@ class CircuitBreaker:
             # Check if recovery timeout has elapsed
             if self._should_attempt_reset():
                 self.state = "HALF_OPEN"
+                self.success_count = 0  # Reset success count for new recovery attempt
                 logger.info("Circuit breaker entering HALF_OPEN state, testing recovery")
             else:
                 raise Exception(
@@ -208,9 +217,21 @@ class CircuitBreaker:
     def _on_success(self):
         """Handle successful operation."""
         self.failure_count = 0
+
         if self.state == "HALF_OPEN":
-            self.state = "CLOSED"
-            logger.info("Circuit breaker recovered, state is now CLOSED")
+            self.success_count += 1
+            logger.debug(
+                f"Circuit breaker recovery progress: {self.success_count}/{self.success_threshold} successes"
+            )
+
+            # Only close circuit after reaching success threshold
+            if self.success_count >= self.success_threshold:
+                self.state = "CLOSED"
+                self.success_count = 0
+                logger.info(
+                    f"Circuit breaker recovered after {self.success_threshold} consecutive successes, "
+                    f"state is now CLOSED"
+                )
 
     def _on_failure(self):
         """Handle failed operation."""
@@ -220,7 +241,11 @@ class CircuitBreaker:
         if self.state == "HALF_OPEN":
             # Failed during recovery attempt, reopen circuit
             self.state = "OPEN"
-            logger.warning("Circuit breaker recovery failed, reopening circuit")
+            self.success_count = 0
+            logger.warning(
+                f"Circuit breaker recovery failed after {self.success_count} successes, "
+                f"reopening circuit"
+            )
         elif self.failure_count >= self.failure_threshold:
             # Too many failures, open circuit
             self.state = "OPEN"
@@ -234,6 +259,8 @@ class CircuitBreaker:
         return {
             "state": self.state,
             "failure_count": self.failure_count,
+            "success_count": self.success_count,
+            "success_threshold": self.success_threshold,
             "last_failure_time": self.last_failure_time.isoformat() if self.last_failure_time else None,
             "recovery_timeout": self.recovery_timeout
         }

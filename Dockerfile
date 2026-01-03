@@ -17,8 +17,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app ./app
 
-# Create data directory (for encryption key)
-RUN mkdir -p /app/data
+# Create non-root user for security
+# Using UID 1000 for compatibility with common host user IDs
+RUN groupadd -r -g 1000 appgroup && \
+    useradd -r -u 1000 -g appgroup appuser
+
+# Create data directory with proper ownership
+RUN mkdir -p /app/data && \
+    chown -R appuser:appgroup /app/data
+
+# Switch to non-root user
+USER appuser
 
 # Expose port
 EXPOSE 8000

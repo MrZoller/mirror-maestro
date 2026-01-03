@@ -269,6 +269,11 @@ If you prefer to build the image locally:
 Create a `.env` file with the following variables:
 
 ```bash
+# Environment Mode (development, staging, production)
+# IMPORTANT: Set to 'production' for production deployments
+# In production mode, default credentials are rejected at startup
+ENVIRONMENT=development
+
 # Server Configuration
 HOST=0.0.0.0
 PORT=8000
@@ -474,6 +479,103 @@ No need to restart the entire application stack.
 - Check nginx logs: `docker-compose logs nginx`
 - Verify certificate files are valid: `openssl x509 -in ssl/cert.pem -text -noout`
 - Ensure ports 80 and 443 are not already in use
+
+### Production Deployment
+
+Mirror Maestro includes several production-ready features for secure, reliable deployments.
+
+#### Production Environment Mode
+
+Set `ENVIRONMENT=production` to enable strict security validation:
+
+```bash
+# In .env
+ENVIRONMENT=production
+AUTH_PASSWORD=your-secure-password-here  # Required - 'changeme' is rejected
+POSTGRES_PASSWORD=your-secure-db-password  # Required - 'postgres' is rejected
+```
+
+**In production mode, the application will refuse to start if:**
+- `AUTH_PASSWORD` is still set to `changeme`
+- `INITIAL_ADMIN_PASSWORD` is still set to `changeme` (when multi-user mode is enabled)
+- `DATABASE_URL` contains default credentials (`postgres:postgres`)
+
+This prevents accidental deployment with insecure defaults.
+
+#### Security Features
+
+**Security Headers**: All responses include security headers:
+- `X-Frame-Options: DENY` - Prevents clickjacking
+- `X-Content-Type-Options: nosniff` - Prevents MIME sniffing
+- `X-XSS-Protection: 1; mode=block` - XSS filter
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy` - Restricts browser features
+
+**HTTP Rate Limiting**: Built-in protection against brute force attacks:
+- Auth endpoints: 5 requests/minute
+- Write operations: 30 requests/minute
+- Read operations: 100 requests/minute
+- Sync operations: 10 requests/minute
+
+**Docker Security**: The container runs as non-root user `appuser` (UID 1000) for improved security.
+
+**Encryption Key Permissions**: The encryption key file is automatically set to `0o600` (owner read/write only).
+
+#### Resource Limits
+
+The `docker-compose.yml` includes CPU and memory limits for all services:
+
+| Service | CPU Limit | Memory Limit | Memory Reservation |
+|---------|-----------|--------------|-------------------|
+| Database (PostgreSQL) | 2 | 1GB | 256MB |
+| Application (FastAPI) | 2 | 2GB | 512MB |
+| Nginx | 1 | 256MB | 64MB |
+
+Adjust these in `docker-compose.yml` based on your workload.
+
+#### Request Logging
+
+All requests are logged with:
+- Correlation IDs (`X-Request-ID` header for tracing)
+- Request method and path
+- Response status code
+- Request duration
+
+Example log output:
+```
+2026-01-03 12:34:56 [INFO] [abc12345] GET /api/mirrors -> 200 (45ms)
+```
+
+#### Database Migrations
+
+Mirror Maestro uses [Alembic](https://alembic.sqlalchemy.org/) for database schema management:
+
+```bash
+# Create a new migration
+alembic revision --autogenerate -m "description of change"
+
+# Apply migrations
+alembic upgrade head
+
+# View current revision
+alembic current
+
+# View migration history
+alembic history
+```
+
+For Docker deployments, migrations can be run in the container:
+```bash
+docker-compose exec app alembic upgrade head
+```
+
+#### Monitoring Recommendations
+
+For production monitoring, consider:
+- **Health check endpoint**: `GET /api/health/quick` (no auth required, suitable for load balancers)
+- **Detailed health**: `GET /api/health` (authenticated, includes component status)
+- **Logs**: Configure log aggregation for the `app` container
+- **Metrics**: Monitor request latency, error rates, and sync job status
 
 ## Usage Guide
 

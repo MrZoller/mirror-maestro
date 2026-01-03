@@ -3,9 +3,16 @@ from app.config import settings
 from app.models import Base
 
 
+# SQL echo should only be enabled in development with explicit flag
+# Never enable in production as it may log sensitive data (tokens, credentials)
+_enable_sql_echo = (
+    settings.log_level.upper() == "DEBUG" and
+    settings.environment == "development"
+)
+
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.log_level == "DEBUG",
+    echo=_enable_sql_echo,
     future=True,
     # Connection pool configuration for production resilience
     pool_size=settings.db_pool_size,
