@@ -95,5 +95,8 @@ class Settings(BaseSettings):
     # Graceful shutdown
     sync_shutdown_timeout: int = 300  # Maximum seconds to wait for sync jobs to complete during shutdown
 
+    # Stale job cleanup
+    stale_job_timeout_minutes: int = 60  # Jobs running longer than this are considered stale and will be marked as failed
+
 
 settings = Settings()

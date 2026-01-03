@@ -204,6 +204,51 @@ This means:
 - ⚠️ Edits made directly on mirrored issues will be overwritten by the next sync from the source
 - 💡 Best practice: Edit issues on their origin instance, use mirrors as read-only copies
 
+### Concurrent Sync Protection
+
+When using bidirectional mirroring (A→B and B→A), the sync engine ensures that reverse syncs don't run simultaneously to prevent race conditions:
+
+**How it works:**
+1. Before starting a sync (e.g., A→B), the scheduler checks if a reverse sync (B→A) is currently running or pending
+2. If a reverse sync is in progress, the current sync is deferred and will retry in 1 minute
+3. Manual sync triggers also check for conflicts and return HTTP 409 if a reverse sync is active
+
+**Example scenario:**
+```
+Time 0:00  A→B sync starts (running)
+Time 0:01  B→A scheduler check → deferred (A→B in progress)
+Time 0:03  A→B sync completes
+Time 0:04  B→A scheduler check → starts (no conflict)
+```
+
+**Why this matters:**
+- Prevents inconsistent issue states from concurrent modifications
+- Ensures issue mappings remain accurate
+- Avoids potential data corruption from race conditions
+
+**Configuration:**
+No configuration needed—this protection is always active.
+
+### Stale Job Cleanup
+
+The scheduler automatically recovers from jobs that get stuck (e.g., due to application crashes or restarts):
+
+**How it works:**
+- Jobs running or pending for longer than `STALE_JOB_TIMEOUT_MINUTES` (default: 60 minutes) are marked as failed
+- This cleanup runs every scheduler cycle (every minute)
+- Failed stale jobs no longer block subsequent syncs
+
+**Configuration:**
+```bash
+# In .env
+STALE_JOB_TIMEOUT_MINUTES=60  # Jobs older than this are considered stale
+```
+
+**When you might see this:**
+- After restarting Mirror Maestro while a sync was in progress
+- After recovering from an unexpected crash
+- Logs will show: "Marking stale job {id} as failed"
+
 ---
 
 ## Use Cases

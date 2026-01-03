@@ -862,7 +862,9 @@ async def test_progress_checkpoint_updates_config(db_session):
 
     job = IssueSyncJob(
         mirror_issue_config_id=config.id, job_type="full_sync",
-        status="running", issues_processed=0, issues_created=0
+        status="running", issues_processed=0, issues_created=0,
+        source_project_id=mirror.source_project_id,
+        target_project_id=mirror.target_project_id,
     )
     db_session.add(job)
     await db_session.commit()
@@ -905,7 +907,9 @@ async def test_batched_processing_checkpoints(db_session):
 
     job = IssueSyncJob(
         mirror_issue_config_id=config.id, job_type="full_sync",
-        status="running", issues_processed=0, issues_created=0
+        status="running", issues_processed=0, issues_created=0,
+        source_project_id=mirror.source_project_id,
+        target_project_id=mirror.target_project_id,
     )
     db_session.add(job)
     await db_session.commit()

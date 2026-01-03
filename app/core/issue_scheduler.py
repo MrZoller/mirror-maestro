@@ -63,6 +63,66 @@ async def check_bidirectional_sync_conflict(
 logger = logging.getLogger(__name__)
 
 
+async def cleanup_stale_jobs(db: AsyncSession) -> int:
+    """
+    Mark stale jobs as failed to prevent permanent sync blocking.
+
+    Jobs that have been in 'running' or 'pending' status for longer than
+    stale_job_timeout_minutes are considered stale (likely due to crashes
+    or restarts) and are marked as failed.
+
+    Args:
+        db: Database session
+
+    Returns:
+        Number of stale jobs cleaned up
+    """
+    stale_threshold = datetime.utcnow() - timedelta(minutes=settings.stale_job_timeout_minutes)
+
+    # Find stale jobs: running/pending jobs that started before the threshold
+    # For pending jobs without started_at, use created_at
+    stale_jobs_result = await db.execute(
+        select(IssueSyncJob).where(
+            and_(
+                IssueSyncJob.status.in_(["pending", "running"]),
+                or_(
+                    # Running jobs with started_at before threshold
+                    and_(
+                        IssueSyncJob.status == "running",
+                        IssueSyncJob.started_at != None,
+                        IssueSyncJob.started_at < stale_threshold
+                    ),
+                    # Pending jobs created before threshold (stuck in queue)
+                    and_(
+                        IssueSyncJob.status == "pending",
+                        IssueSyncJob.created_at < stale_threshold
+                    )
+                )
+            )
+        )
+    )
+    stale_jobs = stale_jobs_result.scalars().all()
+
+    if not stale_jobs:
+        return 0
+
+    for job in stale_jobs:
+        logger.warning(
+            f"Marking stale job {job.id} as failed (config: {job.mirror_issue_config_id}, "
+            f"status: {job.status}, started: {job.started_at}, created: {job.created_at})"
+        )
+        job.status = "failed"
+        job.completed_at = datetime.utcnow()
+        job.error_details = {
+            "error": f"Job marked as stale after {settings.stale_job_timeout_minutes} minutes. "
+                     f"This usually indicates the application crashed or restarted during sync."
+        }
+
+    await db.commit()
+    logger.info(f"Cleaned up {len(stale_jobs)} stale sync job(s)")
+    return len(stale_jobs)
+
+
 class IssueScheduler:
     """Background scheduler for automatic issue syncing with graceful shutdown support."""
 
@@ -143,6 +203,9 @@ class IssueScheduler:
     async def _check_and_sync(self):
         """Check for configs that need syncing and trigger them."""
         async with AsyncSessionLocal() as db:
+            # Clean up any stale jobs first to prevent permanent blocking
+            await cleanup_stale_jobs(db)
+
             # Find configs that are enabled and due for sync
             now = datetime.utcnow()
 
