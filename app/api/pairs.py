@@ -431,7 +431,7 @@ async def delete_pair(
         await db.execute(delete(Mirror).where(Mirror.instance_pair_id == pair_id))
 
         # Finally delete the pair itself
-        await db.delete(pair)
+        db.delete(pair)
 
         # Commit all changes atomically
         await db.commit()

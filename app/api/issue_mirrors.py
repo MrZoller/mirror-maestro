@@ -27,31 +27,33 @@ async def wait_for_manual_syncs(timeout: int = 300):
         timeout: Maximum seconds to wait (default: 300).
     """
     import logging
-    from app.config import settings
 
     logger = logging.getLogger(__name__)
 
     if not manual_sync_tasks:
         return
 
-    active_count = len(manual_sync_tasks)
+    # Take a snapshot of the current tasks to avoid "Set changed size during iteration"
+    # since tasks may complete and be removed by their done callback while we're waiting
+    tasks_snapshot = list(manual_sync_tasks)
+    active_count = len(tasks_snapshot)
     logger.info(f"Waiting for {active_count} manual sync task(s) to complete (timeout: {timeout}s)...")
 
     try:
         await asyncio.wait_for(
-            asyncio.gather(*manual_sync_tasks, return_exceptions=True),
+            asyncio.gather(*tasks_snapshot, return_exceptions=True),
             timeout=timeout
         )
         logger.info("All manual sync tasks completed gracefully")
     except asyncio.TimeoutError:
+        remaining = [t for t in tasks_snapshot if not t.done()]
         logger.warning(
             f"Timeout waiting for manual sync tasks after {timeout}s. "
-            f"{len(manual_sync_tasks)} task(s) may have been interrupted."
+            f"{len(remaining)} task(s) may have been interrupted."
         )
         # Cancel remaining tasks
-        for task in manual_sync_tasks:
-            if not task.done():
-                task.cancel()
+        for task in remaining:
+            task.cancel()
 
 
 # Pydantic Schemas
@@ -245,7 +247,7 @@ async def delete_issue_config(
             detail=f"Issue mirror configuration {config_id} not found"
         )
 
-    await db.delete(config)
+    db.delete(config)
     await db.commit()
 
 
@@ -349,7 +351,12 @@ async def trigger_sync(
 
     # Trigger sync in background
     async def run_sync():
+        import logging
+        sync_logger = logging.getLogger(__name__)
+
         async with AsyncSessionLocal() as sync_db:
+            sync_job = None
+            sync_config = None
             try:
                 # Update job status
                 job_result = await sync_db.execute(
@@ -405,21 +412,30 @@ async def trigger_sync(
                 await sync_db.commit()
 
             except Exception as e:
-                # Update job as failed
-                sync_job.status = "failed"
-                sync_job.completed_at = datetime.utcnow()
-                sync_job.error_details = {"error": str(e)}
+                sync_logger.error(f"Sync failed for config {config_id}: {e}", exc_info=True)
 
-                # Update config status
-                config_result = await sync_db.execute(
-                    select(MirrorIssueConfig).where(MirrorIssueConfig.id == config_id)
-                )
-                sync_config = config_result.scalar_one()
-                sync_config.last_sync_at = datetime.utcnow()
-                sync_config.last_sync_status = "failed"
-                sync_config.last_sync_error = str(e)
+                try:
+                    # Update job as failed (if we have a reference to it)
+                    if sync_job is not None:
+                        sync_job.status = "failed"
+                        sync_job.completed_at = datetime.utcnow()
+                        sync_job.error_details = {"error": str(e)}
 
-                await sync_db.commit()
+                    # Update config status (reload if needed)
+                    if sync_config is None:
+                        config_result = await sync_db.execute(
+                            select(MirrorIssueConfig).where(MirrorIssueConfig.id == config_id)
+                        )
+                        sync_config = config_result.scalar_one_or_none()
+
+                    if sync_config is not None:
+                        sync_config.last_sync_at = datetime.utcnow()
+                        sync_config.last_sync_status = "failed"
+                        sync_config.last_sync_error = str(e)
+
+                    await sync_db.commit()
+                except Exception as inner_e:
+                    sync_logger.error(f"Failed to update job/config status: {inner_e}")
 
     # Start background task and track it for graceful shutdown
     task = asyncio.create_task(run_sync())

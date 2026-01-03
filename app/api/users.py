@@ -290,5 +290,5 @@ async def delete_user(
             detail="Cannot delete the last admin user"
         )
 
-    await db.delete(user)
+    db.delete(user)
     await db.commit()
