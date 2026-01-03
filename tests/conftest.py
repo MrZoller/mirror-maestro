@@ -80,11 +80,15 @@ async def app(engine, session_maker: async_sessionmaker[AsyncSession], monkeypat
     from app.api import mirrors as mirrors_mod
     from app.api import backup as backup_mod
     from app.core import gitlab_client as gitlab_client_mod
+    from app.core import mirror_gitlab_service as service_mod
 
     instances_mod.encryption = fake_encryption
     mirrors_mod.encryption = fake_encryption
     backup_mod.encryption = fake_encryption
     gitlab_client_mod.encryption = fake_encryption
+
+    # Reset the mirror service singleton for each test
+    service_mod.reset_mirror_gitlab_service()
 
     async def override_get_db():
         async with session_maker() as session:
