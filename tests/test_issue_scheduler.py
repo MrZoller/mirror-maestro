@@ -308,3 +308,157 @@ async def test_no_conflict_for_different_projects(db_session, sample_mirror):
         target_project_id=400
     )
     assert conflict is None
+
+
+# Tests for stale job cleanup
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_running_job(db_session, sample_mirror):
+    """Test that stale running jobs are marked as failed."""
+    from app.core.issue_scheduler import cleanup_stale_jobs
+    from app.config import settings
+
+    config = MirrorIssueConfig(
+        mirror_id=sample_mirror.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    db_session.add(config)
+    await db_session.commit()
+    await db_session.refresh(config)
+
+    # Create a running job that started long ago (beyond stale threshold)
+    stale_time = datetime.utcnow() - timedelta(minutes=settings.stale_job_timeout_minutes + 10)
+    stale_job = IssueSyncJob(
+        mirror_issue_config_id=config.id,
+        job_type="scheduled",
+        status="running",
+        started_at=stale_time,
+        source_project_id=sample_mirror.source_project_id,
+        target_project_id=sample_mirror.target_project_id,
+    )
+    db_session.add(stale_job)
+    await db_session.commit()
+    await db_session.refresh(stale_job)
+
+    # Run cleanup
+    cleaned_count = await cleanup_stale_jobs(db_session)
+
+    assert cleaned_count == 1
+    await db_session.refresh(stale_job)
+    assert stale_job.status == "failed"
+    assert stale_job.completed_at is not None
+    assert "stale" in stale_job.error_details["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_pending_job(db_session, sample_mirror):
+    """Test that stale pending jobs are marked as failed."""
+    from app.core.issue_scheduler import cleanup_stale_jobs
+    from app.config import settings
+
+    config = MirrorIssueConfig(
+        mirror_id=sample_mirror.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    db_session.add(config)
+    await db_session.commit()
+    await db_session.refresh(config)
+
+    # Create a pending job that was created long ago (beyond stale threshold)
+    stale_time = datetime.utcnow() - timedelta(minutes=settings.stale_job_timeout_minutes + 10)
+    stale_job = IssueSyncJob(
+        mirror_issue_config_id=config.id,
+        job_type="manual",
+        status="pending",
+        source_project_id=sample_mirror.source_project_id,
+        target_project_id=sample_mirror.target_project_id,
+    )
+    db_session.add(stale_job)
+    await db_session.commit()
+
+    # Manually set created_at to stale time (since default is utcnow)
+    stale_job.created_at = stale_time
+    await db_session.commit()
+    await db_session.refresh(stale_job)
+
+    # Run cleanup
+    cleaned_count = await cleanup_stale_jobs(db_session)
+
+    assert cleaned_count == 1
+    await db_session.refresh(stale_job)
+    assert stale_job.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_does_not_affect_recent_jobs(db_session, sample_mirror):
+    """Test that recent jobs are not affected by cleanup."""
+    from app.core.issue_scheduler import cleanup_stale_jobs
+
+    config = MirrorIssueConfig(
+        mirror_id=sample_mirror.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    db_session.add(config)
+    await db_session.commit()
+    await db_session.refresh(config)
+
+    # Create a running job that started recently
+    recent_job = IssueSyncJob(
+        mirror_issue_config_id=config.id,
+        job_type="scheduled",
+        status="running",
+        started_at=datetime.utcnow(),  # Just started
+        source_project_id=sample_mirror.source_project_id,
+        target_project_id=sample_mirror.target_project_id,
+    )
+    db_session.add(recent_job)
+    await db_session.commit()
+    await db_session.refresh(recent_job)
+
+    # Run cleanup
+    cleaned_count = await cleanup_stale_jobs(db_session)
+
+    assert cleaned_count == 0
+    await db_session.refresh(recent_job)
+    assert recent_job.status == "running"  # Unchanged
+
+
+@pytest.mark.asyncio
+async def test_cleanup_does_not_affect_completed_jobs(db_session, sample_mirror):
+    """Test that completed jobs are not affected by cleanup."""
+    from app.core.issue_scheduler import cleanup_stale_jobs
+    from app.config import settings
+
+    config = MirrorIssueConfig(
+        mirror_id=sample_mirror.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    db_session.add(config)
+    await db_session.commit()
+    await db_session.refresh(config)
+
+    # Create a completed job that was created long ago
+    stale_time = datetime.utcnow() - timedelta(minutes=settings.stale_job_timeout_minutes + 10)
+    completed_job = IssueSyncJob(
+        mirror_issue_config_id=config.id,
+        job_type="scheduled",
+        status="completed",
+        started_at=stale_time,
+        completed_at=stale_time + timedelta(minutes=5),
+        source_project_id=sample_mirror.source_project_id,
+        target_project_id=sample_mirror.target_project_id,
+    )
+    db_session.add(completed_job)
+    await db_session.commit()
+    await db_session.refresh(completed_job)
+
+    # Run cleanup
+    cleaned_count = await cleanup_stale_jobs(db_session)
+
+    assert cleaned_count == 0
+    await db_session.refresh(completed_job)
+    assert completed_job.status == "completed"  # Unchanged
