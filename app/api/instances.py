@@ -423,7 +423,7 @@ async def delete_instance(
             await db.execute(delete(InstancePair).where(InstancePair.id.in_(pair_ids)))
 
         # Finally delete the instance itself
-        db.delete(instance)
+        await db.delete(instance)
 
         # Commit all changes atomically
         await db.commit()

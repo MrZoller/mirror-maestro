@@ -247,7 +247,7 @@ async def delete_issue_config(
             detail=f"Issue mirror configuration {config_id} not found"
         )
 
-    db.delete(config)
+    await db.delete(config)
     await db.commit()
 
 
