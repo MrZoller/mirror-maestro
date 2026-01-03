@@ -266,6 +266,8 @@ class IssueSyncJob(Base):
     __table_args__ = (
         Index('idx_sync_jobs_status', 'status'),
         Index('idx_sync_jobs_config', 'mirror_issue_config_id', 'created_at'),
+        # Index for bidirectional conflict detection - find running syncs by project
+        Index('idx_sync_jobs_projects', 'source_project_id', 'target_project_id', 'status'),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -273,6 +275,11 @@ class IssueSyncJob(Base):
 
     job_type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(50), default='pending')
+
+    # Project tracking for bidirectional sync conflict detection
+    # These track which projects are involved in this sync job
+    source_project_id: Mapped[Optional[int]] = mapped_column(Integer)
+    target_project_id: Mapped[Optional[int]] = mapped_column(Integer)
 
     # Job parameters (JSON)
     parameters: Mapped[Optional[dict]] = mapped_column(JSON)

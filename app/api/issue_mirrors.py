@@ -339,11 +339,34 @@ async def trigger_sync(
             detail=f"Sync already in progress (job ID: {existing_job.id}, status: {existing_job.status})"
         )
 
-    # Create sync job
+    # Check for bidirectional sync conflict
+    # This prevents A→B and B→A syncs from running simultaneously
+    from app.core.issue_scheduler import check_bidirectional_sync_conflict
+
+    conflicting_job = await check_bidirectional_sync_conflict(
+        db,
+        source_project_id=mirror.source_project_id,
+        target_project_id=mirror.target_project_id,
+        exclude_config_id=config.id
+    )
+
+    if conflicting_job:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Bidirectional sync conflict: A reverse sync job (ID: {conflicting_job.id}) is in progress "
+                f"syncing {conflicting_job.source_project_id}→{conflicting_job.target_project_id}. "
+                f"Please wait for it to complete before triggering this sync."
+            )
+        )
+
+    # Create sync job with project tracking for conflict detection
     job = IssueSyncJob(
         mirror_issue_config_id=config.id,
         job_type="manual",
         status="pending",
+        source_project_id=mirror.source_project_id,
+        target_project_id=mirror.target_project_id,
     )
     db.add(job)
     await db.commit()
