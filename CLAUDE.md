@@ -18,6 +18,7 @@ This document provides comprehensive guidance for AI assistants working on the M
 12. [Common Tasks](#common-tasks)
 13. [Troubleshooting](#troubleshooting)
 14. [Production Deployment](#production-deployment)
+15. [CI/CD and Distribution](#cicd-and-distribution)
 
 ## Project Overview
 
@@ -2100,6 +2101,129 @@ async def list_mirrors(
     )
     return result.scalars().all()
 ```
+
+## CI/CD and Distribution
+
+### GitHub Workflows
+
+The project uses GitHub Actions for continuous integration and distribution:
+
+| Workflow | File | Trigger | Purpose |
+|----------|------|---------|---------|
+| Tests | `tests.yml` | Push/PR to any branch | Run pytest on Python 3.11 and 3.12 |
+| Live GitLab E2E | `e2e-live-gitlab.yml` | Manual dispatch | Run E2E tests against real GitLab instances |
+| Release | `release.yml` | Tag push (`v*.*.*`) | Build/push Docker images, create GitHub release |
+
+### Release Workflow
+
+The release workflow (`.github/workflows/release.yml`) automates distribution when a version tag is pushed:
+
+**Trigger**:
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+**Pipeline Steps**:
+1. **Test** - Runs full test suite to ensure release quality
+2. **Build and Push** - Builds multi-architecture Docker images (amd64/arm64) and pushes to GitHub Container Registry
+3. **Create Release** - Creates a GitHub release with auto-generated changelog
+
+**Docker Image Tags**:
+For a release like `v1.2.3`, the workflow creates these tags:
+- `ghcr.io/mrzoller/mirror-maestro:1.2.3` - Exact version
+- `ghcr.io/mrzoller/mirror-maestro:1.2` - Minor version (updated with patches)
+- `ghcr.io/mrzoller/mirror-maestro:1` - Major version (updated with minor/patches)
+- `ghcr.io/mrzoller/mirror-maestro:latest` - Latest stable release
+
+### Creating a Release
+
+**Step-by-Step Process**:
+
+1. **Update version** in `pyproject.toml`:
+```python
+[project]
+name = "mirror-maestro"
+version = "1.2.3"  # Update this
+```
+
+2. **Commit the version bump**:
+```bash
+git add pyproject.toml
+git commit -m "chore: bump version to 1.2.3"
+git push origin main
+```
+
+3. **Create and push the tag**:
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+4. **Monitor the workflow** in GitHub Actions
+
+5. **Verify the release**:
+   - Check GitHub Releases for the new release
+   - Verify Docker image is available: `docker pull ghcr.io/mrzoller/mirror-maestro:1.2.3`
+
+### Using Published Docker Images
+
+**Pull from GitHub Container Registry**:
+```bash
+# Latest stable
+docker pull ghcr.io/mrzoller/mirror-maestro:latest
+
+# Specific version
+docker pull ghcr.io/mrzoller/mirror-maestro:1.2.3
+```
+
+**Using in docker-compose.yml**:
+```yaml
+services:
+  app:
+    image: ghcr.io/mrzoller/mirror-maestro:latest
+    # Remove 'build: .' when using published image
+    expose:
+      - "8000"
+    # ... rest of configuration
+```
+
+**Create docker-compose.override.yml** for local customization:
+```yaml
+# docker-compose.override.yml
+version: '3.8'
+services:
+  app:
+    image: ghcr.io/mrzoller/mirror-maestro:1.2.3
+```
+
+### Version Numbering
+
+Follow [Semantic Versioning](https://semver.org/):
+- **Major** (`v2.0.0`): Breaking changes, incompatible API/database changes
+- **Minor** (`v1.1.0`): New features, backwards compatible
+- **Patch** (`v1.0.1`): Bug fixes, backwards compatible
+
+**Pre-release versions**:
+- `v1.2.3-beta.1` - Beta release (marked as pre-release in GitHub)
+- `v1.2.3-rc.1` - Release candidate
+
+### Multi-Architecture Support
+
+Docker images are built for multiple architectures:
+- `linux/amd64` - Standard x86_64 servers
+- `linux/arm64` - ARM servers (AWS Graviton, Apple Silicon, Raspberry Pi 4+)
+
+Docker automatically pulls the correct architecture for your platform.
+
+### Workflow Permissions
+
+The release workflow requires these permissions:
+- `contents: read` - Checkout repository
+- `packages: write` - Push to GitHub Container Registry
+- `contents: write` - Create GitHub releases
+
+These are configured in the workflow file and use the built-in `GITHUB_TOKEN`.
 
 ## Best Practices Summary
 
