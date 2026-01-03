@@ -1,6 +1,7 @@
 """Health check API for monitoring system status."""
 
 from datetime import datetime, timedelta
+from importlib.metadata import version, PackageNotFoundError
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, case
@@ -13,6 +14,12 @@ from app.core.auth import verify_credentials
 from app.core.gitlab_client import GitLabClient
 from app.core.rate_limiter import RateLimiter
 from app.config import settings
+
+# Get version from package metadata (same as main.py)
+try:
+    __version__ = version("mirror-maestro")
+except PackageNotFoundError:
+    __version__ = "1.0.0"  # Fallback for development
 
 
 router = APIRouter(prefix="/api/health", tags=["health"])
@@ -197,7 +204,7 @@ async def detailed_health(
     return HealthResponse(
         status=overall_status,
         timestamp=datetime.utcnow().isoformat(),
-        version="0.1.0",
+        version=__version__,
         components=components,
         mirrors=mirrors_summary,
         tokens=tokens_summary,

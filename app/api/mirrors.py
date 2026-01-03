@@ -434,6 +434,11 @@ async def list_mirrors(
     - page_size: Items per page (default: 50, max: 200)
     - order_by: Field to order by (created_at, updated_at, source_project_path, target_project_path, last_update_status)
     - order_dir: Order direction (asc, desc)
+
+    Note: When using token_status filter, pagination metadata (total, total_pages) reflects
+    only the filtered items on the current page, not the total across all pages. This is
+    because token_status is computed post-query. For accurate totals with token_status,
+    request all items (page_size=200) or use client-side filtering.
     """
     # Validate and limit page_size
     page = max(1, page)
