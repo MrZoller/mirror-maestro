@@ -1155,7 +1155,7 @@ class IssueSyncEngine:
                     "deleting them from database"
                 )
                 for comment in orphaned_comment_list:
-                    await self.db.delete(comment)
+                    self.db.delete(comment)
                     stats["mappings_deleted"] += 1
                 await self.db.commit()
 
@@ -1178,7 +1178,7 @@ class IssueSyncEngine:
                     "deleting them from database"
                 )
                 for attachment in orphaned_attachment_list:
-                    await self.db.delete(attachment)
+                    self.db.delete(attachment)
                     stats["mappings_deleted"] += 1
                 await self.db.commit()
 
