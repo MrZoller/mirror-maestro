@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     # Database Configuration (PostgreSQL)
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/mirror_maestro"
 
+    # Database Connection Pool Settings
+    db_pool_size: int = 20  # Number of persistent connections
+    db_pool_max_overflow: int = 40  # Additional connections under load
+    db_pool_recycle: int = 3600  # Recycle connections after 1 hour (seconds)
+    db_pool_pre_ping: bool = True  # Test connections before use
+
     # Authentication (legacy single-user mode, still supported for backward compatibility)
     auth_enabled: bool = True
     auth_username: str = "admin"
