@@ -1,3 +1,4 @@
+import logging
 import gitlab
 from gitlab.exceptions import (
     GitlabAuthenticationError as GitlabAuthError,
@@ -9,6 +10,8 @@ from gitlab.exceptions import (
 )
 from typing import List, Dict, Any, Optional
 from app.core.encryption import encryption
+
+logger = logging.getLogger(__name__)
 
 
 class GitLabClientError(Exception):

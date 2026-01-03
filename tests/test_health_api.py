@@ -40,7 +40,7 @@ async def test_detailed_health_empty_database(client):
     data = response.json()
 
     assert data["status"] == "healthy"
-    assert data["version"] == "0.1.0"
+    assert "version" in data  # Version is dynamic (from package metadata or fallback)
     assert "timestamp" in data
 
     # Check components
@@ -619,7 +619,9 @@ async def test_health_response_includes_version(client):
     data = response.json()
 
     assert "version" in data
-    assert data["version"] == "0.1.0"
+    # Version is loaded from package metadata or uses fallback
+    assert isinstance(data["version"], str)
+    assert len(data["version"]) > 0
 
 
 @pytest.mark.asyncio
