@@ -48,9 +48,31 @@ async def _create_initial_admin():
         logging.info(f"Created initial admin user: {settings.initial_admin_username}")
 
 
+def _check_default_credentials():
+    """Warn if default credentials are still in use."""
+    warnings = []
+
+    if settings.auth_enabled and settings.auth_password == "changeme":
+        warnings.append("AUTH_PASSWORD is set to default 'changeme'")
+
+    if settings.multi_user_enabled and settings.initial_admin_password == "changeme":
+        warnings.append("INITIAL_ADMIN_PASSWORD is set to default 'changeme'")
+
+    if warnings:
+        logging.warning("=" * 60)
+        logging.warning("SECURITY WARNING: Default credentials detected!")
+        for warning in warnings:
+            logging.warning(f"  - {warning}")
+        logging.warning("Please change these before deploying to production.")
+        logging.warning("=" * 60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle events for the application."""
+    # Check for default credentials
+    _check_default_credentials()
+
     # Startup
     await init_db()
 

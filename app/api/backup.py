@@ -7,6 +7,7 @@ database and encryption key as a compressed archive.
 Backups are stored as JSON exports of all tables, making them portable and
 database-agnostic.
 """
+import logging
 from datetime import datetime
 from pathlib import Path
 import json
@@ -202,6 +203,19 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     await db.commit()
 
     # Reset sequences for PostgreSQL
+    # Use a whitelist of valid table names to prevent SQL injection
+    VALID_SEQUENCE_TABLES = frozenset({
+        'gitlab_instances',
+        'instance_pairs',
+        'mirrors',
+        'mirror_issue_configs',
+        'issue_mappings',
+        'comment_mappings',
+        'label_mappings',
+        'attachment_mappings',
+        'issue_sync_jobs'
+    })
+
     try:
         # Get max IDs and reset sequences
         for table, model in [
@@ -215,12 +229,19 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
             ('attachment_mappings', AttachmentMapping),
             ('issue_sync_jobs', IssueSyncJob)
         ]:
+            # Validate table name against whitelist (defense in depth)
+            if table not in VALID_SEQUENCE_TABLES:
+                continue
+
             max_id_result = await db.execute(
                 select(model.id).order_by(model.id.desc()).limit(1)
             )
             max_id = max_id_result.scalar() or 0
+
+            # Table name is validated above; sequence name follows PostgreSQL convention
+            sequence_name = f"{table}_id_seq"
             await db.execute(
-                text(f"SELECT setval('{table}_id_seq', :max_id, true)"),
+                text(f"SELECT setval('{sequence_name}', :max_id, true)"),
                 {"max_id": max_id}
             )
         await db.commit()
@@ -464,7 +485,7 @@ async def restore_backup(
                 pre_restore_backup = str(pre_restore_path)
             except Exception as e:
                 # Log but don't fail - user explicitly requested restore
-                print(f"Warning: Failed to create pre-restore backup: {e}")
+                logging.warning(f"Failed to create pre-restore backup: {e}")
 
         # Extract backup files
         extract_path = temp_path / "extracted"
