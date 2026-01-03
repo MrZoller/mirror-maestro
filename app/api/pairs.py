@@ -1,10 +1,10 @@
-from typing import List
+from typing import List, Optional
 import re
 import logging
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from app.database import get_db
 from app.models import InstancePair, GitLabInstance, Mirror
@@ -67,6 +67,16 @@ class InstancePairCreate(BaseModel):
         if v <= 0:
             raise ValueError("Instance ID must be a positive integer")
         return v
+
+    @model_validator(mode='after')
+    def validate_not_self_referential(self):
+        """Validate that source and target instances are different."""
+        if self.source_instance_id == self.target_instance_id:
+            raise ValueError(
+                "Source and target instances must be different. "
+                "A pair cannot mirror an instance to itself."
+            )
+        return self
 
 
 class InstancePairUpdate(BaseModel):
@@ -133,6 +143,9 @@ class InstancePairResponse(BaseModel):
     description: str | None
     created_at: str
     updated_at: str
+    # Optional warnings for bidirectional mirroring scenarios
+    warnings: Optional[List[str]] = None
+    reverse_pair_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -217,6 +230,33 @@ async def create_pair(
     if not target:
         raise HTTPException(status_code=404, detail="Target instance not found")
 
+    # Check for reverse pair (bidirectional mirroring scenario)
+    reverse_pair_result = await db.execute(
+        select(InstancePair).where(
+            and_(
+                InstancePair.source_instance_id == pair.target_instance_id,
+                InstancePair.target_instance_id == pair.source_instance_id
+            )
+        )
+    )
+    reverse_pair = reverse_pair_result.scalar_one_or_none()
+
+    warnings = []
+    reverse_pair_id = None
+    if reverse_pair:
+        reverse_pair_id = reverse_pair.id
+        warnings.append(
+            f"Bidirectional mirroring detected: A reverse pair '{reverse_pair.name}' "
+            f"(ID: {reverse_pair.id}) already exists between these instances. "
+            f"This creates bidirectional mirroring where changes flow both directions. "
+            f"For issue syncing, last-write-wins semantics apply. "
+            f"Consider using one instance as the source of truth for agile planning."
+        )
+        logger.info(
+            f"Creating bidirectional pair: new pair ({pair.source_instance_id}→{pair.target_instance_id}) "
+            f"is reverse of existing pair {reverse_pair.id} ({reverse_pair.source_instance_id}→{reverse_pair.target_instance_id})"
+        )
+
     # Create the pair
     db_pair = InstancePair(
         name=pair.name,
@@ -245,7 +285,9 @@ async def create_pair(
         mirror_branch_regex=db_pair.mirror_branch_regex,
         description=db_pair.description,
         created_at=db_pair.created_at.isoformat(),
-        updated_at=db_pair.updated_at.isoformat()
+        updated_at=db_pair.updated_at.isoformat(),
+        warnings=warnings if warnings else None,
+        reverse_pair_id=reverse_pair_id
     )
 
 
@@ -307,6 +349,45 @@ async def update_pair(
                 detail="Cannot change source/target instances for a pair that already has mirrors.",
             )
 
+    # Calculate what source/target will be after update
+    new_source_id = pair_update.source_instance_id if "source_instance_id" in fields else pair.source_instance_id
+    new_target_id = pair_update.target_instance_id if "target_instance_id" in fields else pair.target_instance_id
+
+    # Check for self-referential pair
+    if new_source_id == new_target_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Source and target instances must be different. A pair cannot mirror an instance to itself."
+        )
+
+    # Check for reverse pair (bidirectional mirroring scenario) if instances are changing
+    warnings = []
+    reverse_pair_id = None
+    if ("source_instance_id" in fields) or ("target_instance_id" in fields):
+        reverse_pair_result = await db.execute(
+            select(InstancePair).where(
+                and_(
+                    InstancePair.source_instance_id == new_target_id,
+                    InstancePair.target_instance_id == new_source_id,
+                    InstancePair.id != pair_id  # Exclude self
+                )
+            )
+        )
+        reverse_pair = reverse_pair_result.scalar_one_or_none()
+
+        if reverse_pair:
+            reverse_pair_id = reverse_pair.id
+            warnings.append(
+                f"Bidirectional mirroring detected: A reverse pair '{reverse_pair.name}' "
+                f"(ID: {reverse_pair.id}) exists between these instances. "
+                f"This creates bidirectional mirroring where changes flow both directions. "
+                f"For issue syncing, last-write-wins semantics apply. "
+                f"Consider using one instance as the source of truth for agile planning."
+            )
+            logger.info(
+                f"Updating pair {pair_id} creates bidirectional setup with existing pair {reverse_pair.id}"
+            )
+
     # Update fields (presence-aware to allow explicit null clears)
     if "name" in fields:
         pair.name = pair_update.name
@@ -342,7 +423,9 @@ async def update_pair(
         mirror_branch_regex=pair.mirror_branch_regex,
         description=pair.description,
         created_at=pair.created_at.isoformat(),
-        updated_at=pair.updated_at.isoformat()
+        updated_at=pair.updated_at.isoformat(),
+        warnings=warnings if warnings else None,
+        reverse_pair_id=reverse_pair_id
     )
 
 

@@ -332,6 +332,10 @@ class IssueSyncEngine:
         self.target_labels_cache: Dict[str, Dict[str, Any]] = {}
         self.mirror_from_label: str = get_mirror_from_label(source_instance.id)
 
+        # Loop prevention: label that indicates issue originated from target instance
+        # If a source issue has this label, it was mirrored FROM the target, so skip it
+        self.originated_from_target_label: str = get_mirror_from_label(target_instance.id)
+
     async def _execute_gitlab_api_call(
         self,
         operation_func,
@@ -527,6 +531,18 @@ class IssueSyncEngine:
         source_issue_iid = source_issue["iid"]
 
         stats["issues_processed"] += 1
+
+        # Loop prevention: Skip issues that originated from the target instance
+        # These have a Mirrored-From label pointing to the target, meaning they were
+        # created by the reverse sync and shouldn't be synced back (would create duplicates)
+        source_labels = source_issue.get("labels", [])
+        if self.originated_from_target_label in source_labels:
+            logger.debug(
+                f"Skipping issue {source_issue_iid}: originated from target instance "
+                f"(has label '{self.originated_from_target_label}')"
+            )
+            stats["issues_skipped"] += 1
+            return
 
         # Check if issue is already mirrored
         result = await self.db.execute(

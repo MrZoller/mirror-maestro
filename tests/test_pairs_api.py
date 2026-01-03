@@ -371,11 +371,12 @@ async def test_pairs_bidirectional_mirroring(client, session_maker):
     1. Two pairs can be created between the same instances (A→B and B→A)
     2. Each pair can have different settings
     3. Both pairs can be retrieved and have correct source/target
+    4. Creating the reverse pair returns a warning about bidirectional mirroring
     """
     instance_a = await seed_instance(session_maker, name="Instance A", url="https://gitlab-a.example.com")
     instance_b = await seed_instance(session_maker, name="Instance B", url="https://gitlab-b.example.com")
 
-    # Create A → B pair (push to backup)
+    # Create A → B pair (push to backup) - no warning expected (first pair)
     resp_ab = await client.post(
         "/api/pairs",
         json={
@@ -393,8 +394,10 @@ async def test_pairs_bidirectional_mirroring(client, session_maker):
     assert pair_ab["target_instance_id"] == instance_b
     assert pair_ab["mirror_direction"] == "push"
     assert pair_ab["mirror_overwrite_diverged"] is True
+    assert pair_ab.get("warnings") is None  # No warning for first pair
+    assert pair_ab.get("reverse_pair_id") is None
 
-    # Create B → A pair (pull from backup)
+    # Create B → A pair (pull from backup) - warning expected (reverse pair exists)
     resp_ba = await client.post(
         "/api/pairs",
         json={
@@ -412,6 +415,11 @@ async def test_pairs_bidirectional_mirroring(client, session_maker):
     assert pair_ba["target_instance_id"] == instance_a
     assert pair_ba["mirror_direction"] == "pull"
     assert pair_ba["mirror_overwrite_diverged"] is False
+    # Should have bidirectional warning
+    assert pair_ba.get("warnings") is not None
+    assert len(pair_ba["warnings"]) == 1
+    assert "Bidirectional mirroring detected" in pair_ba["warnings"][0]
+    assert pair_ba["reverse_pair_id"] == pair_ab["id"]
 
     # Verify both pairs exist and are distinct
     resp = await client.get("/api/pairs")
@@ -505,4 +513,97 @@ async def test_pairs_bidirectional_with_mirrors(client, session_maker):
     pairs = resp.json()
     assert len(pairs) == 1
     assert pairs[0]["name"] == "B to A"
+
+
+@pytest.mark.asyncio
+async def test_pairs_create_self_referential_rejected(client, session_maker):
+    """Test that creating a self-referential pair (A→A) is rejected."""
+    instance_a = await seed_instance(session_maker, name="Instance A")
+
+    resp = await client.post(
+        "/api/pairs",
+        json={
+            "name": "Self Mirror",
+            "source_instance_id": instance_a,
+            "target_instance_id": instance_a,  # Same as source
+            "mirror_direction": "push",
+        },
+    )
+    assert resp.status_code == 422  # Validation error from Pydantic
+    error_detail = resp.json()["detail"]
+    # Pydantic returns validation errors in a specific format
+    assert any("cannot mirror an instance to itself" in str(e).lower() for e in error_detail)
+
+
+@pytest.mark.asyncio
+async def test_pairs_update_to_self_referential_rejected(client, session_maker):
+    """Test that updating a pair to be self-referential is rejected."""
+    instance_a = await seed_instance(session_maker, name="Instance A")
+    instance_b = await seed_instance(session_maker, name="Instance B")
+
+    # Create valid pair first
+    resp = await client.post(
+        "/api/pairs",
+        json={
+            "name": "Valid Pair",
+            "source_instance_id": instance_a,
+            "target_instance_id": instance_b,
+        },
+    )
+    assert resp.status_code == 200
+    pair_id = resp.json()["id"]
+
+    # Try to update target to match source
+    resp = await client.put(
+        f"/api/pairs/{pair_id}",
+        json={"target_instance_id": instance_a},  # Would make it A→A
+    )
+    assert resp.status_code == 400
+    assert "cannot mirror an instance to itself" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_pairs_update_creates_bidirectional_warning(client, session_maker):
+    """Test that updating a pair to create bidirectional mirroring returns a warning."""
+    instance_a = await seed_instance(session_maker, name="Instance A")
+    instance_b = await seed_instance(session_maker, name="Instance B")
+    instance_c = await seed_instance(session_maker, name="Instance C")
+
+    # Create A → B pair
+    resp_ab = await client.post(
+        "/api/pairs",
+        json={
+            "name": "A to B",
+            "source_instance_id": instance_a,
+            "target_instance_id": instance_b,
+        },
+    )
+    assert resp_ab.status_code == 200
+    pair_ab_id = resp_ab.json()["id"]
+
+    # Create C → A pair (unrelated)
+    resp_ca = await client.post(
+        "/api/pairs",
+        json={
+            "name": "C to A",
+            "source_instance_id": instance_c,
+            "target_instance_id": instance_a,
+        },
+    )
+    assert resp_ca.status_code == 200
+    pair_ca_id = resp_ca.json()["id"]
+    assert resp_ca.json().get("warnings") is None  # No warning (not a reverse)
+
+    # Update C→A to become B→A (reverse of A→B)
+    resp_update = await client.put(
+        f"/api/pairs/{pair_ca_id}",
+        json={"source_instance_id": instance_b, "name": "B to A"},
+    )
+    assert resp_update.status_code == 200
+    data = resp_update.json()
+    # Should have bidirectional warning
+    assert data.get("warnings") is not None
+    assert len(data["warnings"]) == 1
+    assert "Bidirectional mirroring detected" in data["warnings"][0]
+    assert data["reverse_pair_id"] == pair_ab_id
 
