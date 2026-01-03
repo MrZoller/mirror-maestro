@@ -434,6 +434,11 @@ async def list_mirrors(
     - page_size: Items per page (default: 50, max: 200)
     - order_by: Field to order by (created_at, updated_at, source_project_path, target_project_path, last_update_status)
     - order_dir: Order direction (asc, desc)
+
+    Note: When using token_status filter, pagination metadata (total, total_pages) reflects
+    only the filtered items on the current page, not the total across all pages. This is
+    because token_status is computed post-query. For accurate totals with token_status,
+    request all items (page_size=200) or use client-side filtering.
     """
     # Validate and limit page_size
     page = max(1, page)
@@ -1479,7 +1484,7 @@ async def delete_mirror(
     gitlab_cleanup_failed, gitlab_error_msg, token_cleanup_failed, token_error_msg = await _cleanup_mirror_from_gitlab(mirror, db)
 
     # Always delete from database
-    await db.delete(mirror)
+    db.delete(mirror)
     await db.commit()
 
     # Return status with warnings if cleanup failed
