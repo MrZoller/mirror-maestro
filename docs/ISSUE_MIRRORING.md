@@ -183,12 +183,26 @@ GitLab Premium/Ultimate features (milestones, iterations, epics, assignees) are 
 To prevent infinite sync loops when using bidirectional mirroring (A→B and B→A), the sync engine:
 
 1. **Adds a "Mirrored-From" label** to every mirrored issue: `Mirrored-From::instance-{source_id}`
-2. **Future enhancement**: Could skip syncing issues with `Mirrored-From` label pointing back to the current source
+2. **Skips issues with reverse label**: Before syncing, checks if the source issue has a `Mirrored-From::instance-{target_id}` label, indicating it originated from the target instance and shouldn't be synced back
 
-Currently, bidirectional sync works by having two independent one-way syncs. Each sync operates on its own schedule and doesn't check for the reverse mirror. This is simple but means:
-- ✅ Changes flow both directions automatically
-- ⚠️ If both sides modify the same field simultaneously, last sync wins
-- 💡 Best practice: Use one instance as the "source of truth" for agile planning
+**How it works:**
+```
+Instance A                          Instance B
+-----------                         -----------
+Issue #100 (native)
+     ↓ A→B sync
+                                    Issue #200 (Mirrored-From::instance-A)
+                                         ↓ B→A sync attempts
+                                    SKIPPED: has Mirrored-From::instance-A label
+                                    (target of B→A is A, so skip)
+```
+
+This means:
+- ✅ Issues sync one direction only (from their origin instance)
+- ✅ Updates to the original issue sync to mirrors
+- ✅ No duplicate issues created from bidirectional syncs
+- ⚠️ Edits made directly on mirrored issues will be overwritten by the next sync from the source
+- 💡 Best practice: Edit issues on their origin instance, use mirrors as read-only copies
 
 ---
 

@@ -353,3 +353,147 @@ async def test_seconds_to_duration():
     assert IssueSyncEngine._seconds_to_duration(5400) == "1h30m"
     assert IssueSyncEngine._seconds_to_duration(0) == "0m"
     assert IssueSyncEngine._seconds_to_duration(90) == "1m"
+
+
+@pytest.mark.asyncio
+async def test_sync_engine_loop_prevention(mock_config, mock_mirror, mock_instances, mock_pair):
+    """Test that issues with Mirrored-From label pointing to target are skipped.
+
+    This prevents infinite loops in bidirectional mirroring setups (A→B and B→A).
+    If an issue on B has label 'Mirrored-From::instance-A', it originated from A
+    and should not be synced back to A by the B→A sync.
+    """
+    source, target = mock_instances
+    db = AsyncMock()
+
+    # Mock db.execute to return empty result for IssueMapping check
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=mock_result)
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine = IssueSyncEngine(
+            db=db,
+            config=mock_config,
+            mirror=mock_mirror,
+            source_instance=source,
+            target_instance=target,
+            instance_pair=mock_pair
+        )
+
+        # Verify the originated_from_target_label is set correctly
+        # Target instance ID is 2, so label should be Mirrored-From::instance-2
+        assert engine.originated_from_target_label == "Mirrored-From::instance-2"
+
+        # Source issue that originated from target (has the target's Mirrored-From label)
+        # This simulates an issue on source that was originally mirrored from target
+        source_issue_from_target = {
+            "id": 500,
+            "iid": 50,
+            "title": "Issue that came from target",
+            "description": "This issue was synced from target to source",
+            "labels": ["bug", "Mirrored-From::instance-2"],  # Has target's label
+            "web_url": "https://gitlab-source.example.com/group/source/-/issues/50",
+        }
+
+        # Native source issue (no Mirrored-From label)
+        native_source_issue = {
+            "id": 501,
+            "iid": 51,
+            "title": "Native issue on source",
+            "description": "This issue was created natively on source",
+            "labels": ["feature"],  # No Mirrored-From label
+            "web_url": "https://gitlab-source.example.com/group/source/-/issues/51",
+        }
+
+        stats = {
+            "issues_processed": 0,
+            "issues_created": 0,
+            "issues_updated": 0,
+            "issues_skipped": 0,
+            "issues_failed": 0,
+            "errors": [],
+        }
+
+        # Test: Issue with target's Mirrored-From label should be skipped
+        await engine._sync_issue(source_issue_from_target, stats)
+
+        assert stats["issues_processed"] == 1
+        assert stats["issues_skipped"] == 1
+        assert stats["issues_created"] == 0
+        # Database should NOT be queried for mapping since we skip early
+        # (The db.execute call for IssueMapping should not happen)
+
+        # Reset stats
+        stats = {
+            "issues_processed": 0,
+            "issues_created": 0,
+            "issues_updated": 0,
+            "issues_skipped": 0,
+            "issues_failed": 0,
+            "errors": [],
+        }
+
+        # Test: Native issue should proceed to mapping check
+        # We'll mock the full flow for this test
+        with patch.object(engine, '_create_target_issue', new_callable=AsyncMock) as mock_create:
+            await engine._sync_issue(native_source_issue, stats)
+
+            assert stats["issues_processed"] == 1
+            # Should proceed past loop prevention check
+            # Since no mapping exists, it should try to create
+            assert mock_create.called or stats["issues_created"] == 1 or stats["issues_skipped"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sync_engine_loop_prevention_with_different_label(mock_config, mock_mirror, mock_instances, mock_pair):
+    """Test that issues with a DIFFERENT Mirrored-From label are NOT skipped.
+
+    An issue with Mirrored-From::instance-3 (a third instance) should still be synced,
+    only Mirrored-From::instance-{target_id} should be skipped.
+    """
+    source, target = mock_instances
+    db = AsyncMock()
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine = IssueSyncEngine(
+            db=db,
+            config=mock_config,
+            mirror=mock_mirror,
+            source_instance=source,
+            target_instance=target,
+            instance_pair=mock_pair
+        )
+
+        # Issue from a third instance (not source or target)
+        issue_from_third_instance = {
+            "id": 600,
+            "iid": 60,
+            "title": "Issue from third instance",
+            "description": "This came from a third GitLab",
+            "labels": ["bug", "Mirrored-From::instance-3"],  # Different instance ID
+            "web_url": "https://gitlab-source.example.com/group/source/-/issues/60",
+        }
+
+        stats = {
+            "issues_processed": 0,
+            "issues_created": 0,
+            "issues_updated": 0,
+            "issues_skipped": 0,
+            "issues_failed": 0,
+            "errors": [],
+        }
+
+        # Mock db.execute to return empty result (no existing mapping)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=mock_result)
+
+        with patch.object(engine, '_create_target_issue', new_callable=AsyncMock) as mock_create:
+            await engine._sync_issue(issue_from_third_instance, stats)
+
+            # Should NOT be skipped - the label is for instance-3, not instance-2 (target)
+            assert stats["issues_processed"] == 1
+            assert stats["issues_skipped"] == 0
+            # Should proceed to create since no mapping exists
+            assert mock_create.called
