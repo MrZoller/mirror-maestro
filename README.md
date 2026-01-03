@@ -99,7 +99,10 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 - **External Mirror Indicator**: See warning badges when selecting projects that already have mirrors configured on GitLab
 - **Import/Export**: Bulk import and export mirror settings with automatic rate limiting for large operations
 - **Backup & Restore**: Create complete backups of your database and encryption key; restore from backups to recover or migrate
-- **Rate Limiting**: Intelligent API rate limiting prevents overwhelming GitLab instances during batch operations
+- **Production-Ready Robustness**: All GitLab API operations use enterprise-grade patterns:
+  - Rate limiting prevents API quota exhaustion
+  - Retry logic with exponential backoff for transient errors
+  - Circuit breakers (per-instance) prevent cascading failures
 
 ### Modern Web Interface
 - **Comprehensive Dashboard**: Live statistics cards, health distribution charts (Chart.js), recent activity timeline, and quick actions
