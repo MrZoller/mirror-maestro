@@ -863,6 +863,16 @@ async def _create_mirror_internal(
             )
             gitlab_mirror_id = result.get("id")
     except HTTPException:
+        # Cleanup the token we created before re-raising
+        if gitlab_token_id:
+            try:
+                await _execute_gitlab_op(
+                    client=token_client,
+                    operation=lambda c: c.delete_project_access_token(token_project_id, gitlab_token_id),
+                    operation_name=f"delete_project_access_token({token_project_id}, {gitlab_token_id})",
+                )
+            except Exception:
+                logger.warning(f"Failed to cleanup token {gitlab_token_id} after mirror creation failed (HTTPException path)")
         raise
     except Exception as e:
         # Cleanup the token we created
