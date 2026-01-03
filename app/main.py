@@ -1,10 +1,13 @@
 from contextlib import asynccontextmanager
 import logging
+import time
+import uuid
 from importlib.metadata import version, PackageNotFoundError
 from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy import select
 
 from app.config import settings
@@ -12,6 +15,107 @@ from app.database import init_db, migrate_mirrors_to_auto_tokens, drop_legacy_gr
 from app.api import instances, pairs, mirrors, export, topology, dashboard, backup, search, health, auth, users, issue_mirrors
 from app.core.auth import verify_credentials, get_password_hash
 from app.core.issue_scheduler import scheduler
+from app.core.api_rate_limiter import limiter, rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+
+def configure_logging():
+    """Configure Python logging based on settings."""
+    log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+
+    # Configure root logger
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    # Set specific loggers
+    logging.getLogger("uvicorn.access").setLevel(log_level)
+    logging.getLogger("sqlalchemy.engine").setLevel(
+        logging.WARNING if log_level > logging.DEBUG else logging.INFO
+    )
+
+    logging.info(f"Logging configured at level: {settings.log_level.upper()}")
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to all responses."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+
+        # Prevent clickjacking
+        response.headers["X-Frame-Options"] = "DENY"
+
+        # Prevent MIME type sniffing
+        response.headers["X-Content-Type-Options"] = "nosniff"
+
+        # XSS protection (legacy but still useful)
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+
+        # Referrer policy
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        # Content Security Policy
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://d3js.org; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "connect-src 'self'; "
+            "font-src 'self'; "
+            "frame-ancestors 'none'"
+        )
+
+        # HSTS header (only in production with SSL)
+        if settings.environment == "production" and settings.ssl_enabled:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+
+        return response
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Log all HTTP requests with timing and correlation IDs."""
+
+    async def dispatch(self, request: Request, call_next):
+        # Generate request ID for correlation
+        request_id = str(uuid.uuid4())[:8]
+        request.state.request_id = request_id
+
+        # Skip logging for health checks and static files
+        path = request.url.path
+        if path.startswith("/static") or path in ("/health", "/api/health/quick"):
+            return await call_next(request)
+
+        start_time = time.time()
+        method = request.method
+        client_ip = request.client.host if request.client else "unknown"
+
+        try:
+            response = await call_next(request)
+            duration_ms = (time.time() - start_time) * 1000
+
+            # Log request details
+            logging.info(
+                f"[{request_id}] {method} {path} -> {response.status_code} "
+                f"({duration_ms:.1f}ms) from {client_ip}"
+            )
+
+            # Add request ID to response headers for debugging
+            response.headers["X-Request-ID"] = request_id
+
+            return response
+
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            logging.error(
+                f"[{request_id}] {method} {path} -> ERROR "
+                f"({duration_ms:.1f}ms) from {client_ip}: {e}"
+            )
+            raise
 
 
 # Get version from package metadata (pyproject.toml)
@@ -70,6 +174,13 @@ def _check_default_credentials():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle events for the application."""
+    # Configure logging first
+    configure_logging()
+
+    # Log startup information
+    logging.info(f"Starting {settings.app_title} v{__version__}")
+    logging.info(f"Environment: {settings.environment}")
+
     # Check for default credentials
     _check_default_credentials()
 
@@ -122,6 +233,14 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan
 )
+
+# Add middleware (order matters - first added = outermost)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+
+# Configure rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

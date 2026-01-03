@@ -1,8 +1,12 @@
 import base64
+import logging
 import os
+import stat
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
+
+logger = logging.getLogger(__name__)
 
 
 class Encryption:
@@ -35,11 +39,8 @@ class Encryption:
         if os.path.exists(key_file):
             with open(key_file, "rb") as f:
                 key = f.read().strip()
-            # Best-effort permission hardening for existing keys.
-            try:
-                os.chmod(key_file, 0o600)
-            except Exception:
-                pass
+            # Harden permissions for existing keys and verify
+            self._secure_key_file(key_file)
             # Validate early so callers get a clear error.
             Fernet(key)
             return key
@@ -48,12 +49,36 @@ class Encryption:
             key = Fernet.generate_key()
             with open(key_file, "wb") as f:
                 f.write(key)
-            # Set restrictive permissions
-            try:
-                os.chmod(key_file, 0o600)
-            except Exception:
-                pass
+            # Set restrictive permissions and verify
+            self._secure_key_file(key_file)
+            logger.info(f"Generated new encryption key at {key_file}")
             return key
+
+    def _secure_key_file(self, key_file: str) -> None:
+        """
+        Secure the encryption key file with restrictive permissions.
+
+        Logs warnings if permissions cannot be set or verified.
+        """
+        try:
+            os.chmod(key_file, 0o600)
+        except OSError as e:
+            logger.warning(
+                f"Could not set permissions on encryption key file {key_file}: {e}. "
+                f"Ensure the file is only readable by the application user."
+            )
+            return
+
+        # Verify permissions were set correctly
+        try:
+            current_mode = stat.S_IMODE(os.stat(key_file).st_mode)
+            if current_mode != 0o600:
+                logger.warning(
+                    f"Encryption key file {key_file} has permissions {oct(current_mode)} "
+                    f"instead of 0o600. This may expose the key to other users."
+                )
+        except OSError as e:
+            logger.warning(f"Could not verify permissions on encryption key file: {e}")
 
     def _get_cipher(self) -> Fernet:
         if self._cipher is None:
@@ -68,12 +93,14 @@ class Encryption:
 
     def decrypt(self, encrypted_data: str) -> str:
         """Decrypt a base64 encoded string."""
-        encrypted = base64.b64decode(encrypted_data.encode())
+        import binascii
         try:
+            encrypted = base64.b64decode(encrypted_data.encode())
             decrypted = self._get_cipher().decrypt(encrypted)
             return decrypted.decode()
-        except (InvalidToken, ValueError) as e:
-            # ValueError can come from base64 decode / invalid key construction.
+        except (InvalidToken, ValueError, binascii.Error) as e:
+            # binascii.Error for invalid base64, InvalidToken for bad ciphertext,
+            # ValueError from invalid key construction.
             raise ValueError("Failed to decrypt payload (invalid key or ciphertext)") from e
 
 
