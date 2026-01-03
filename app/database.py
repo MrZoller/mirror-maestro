@@ -6,7 +6,12 @@ from app.models import Base
 engine = create_async_engine(
     settings.database_url,
     echo=settings.log_level == "DEBUG",
-    future=True
+    future=True,
+    # Connection pool configuration for production resilience
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_pool_max_overflow,
+    pool_recycle=settings.db_pool_recycle,
+    pool_pre_ping=settings.db_pool_pre_ping,
 )
 
 AsyncSessionLocal = async_sessionmaker(
