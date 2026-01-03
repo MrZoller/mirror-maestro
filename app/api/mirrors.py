@@ -1484,7 +1484,7 @@ async def delete_mirror(
     gitlab_cleanup_failed, gitlab_error_msg, token_cleanup_failed, token_error_msg = await _cleanup_mirror_from_gitlab(mirror, db)
 
     # Always delete from database
-    db.delete(mirror)
+    await db.delete(mirror)
     await db.commit()
 
     # Return status with warnings if cleanup failed
