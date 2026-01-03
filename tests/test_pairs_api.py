@@ -6,8 +6,9 @@ from app.models import GitLabInstance, InstancePair, Mirror
 
 class FakeGitLabClient:
     """Mock GitLab client for tests."""
-    def __init__(self, url: str, encrypted_token: str):
-        pass
+    def __init__(self, url: str, encrypted_token: str, timeout: int = 60):
+        self.url = url
+        self.encrypted_token = encrypted_token
 
     def delete_mirror(self, project_id: int, mirror_id: int):
         """Mock delete_mirror for cleanup operations."""

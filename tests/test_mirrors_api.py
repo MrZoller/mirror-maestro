@@ -11,12 +11,29 @@ class FakeGitLabClient:
     trigger_calls = []
     delete_calls = []
     update_calls = []
+    token_create_calls = []
+    token_delete_calls = []
     project_mirrors = {}  # project_id -> list[dict]
 
-    def __init__(self, url: str, encrypted_token: str):
+    def __init__(self, url: str, encrypted_token: str, timeout: int = 60):
         self.url = url
         self.encrypted_token = encrypted_token
         self.__class__.inits.append((url, encrypted_token))
+
+    def create_project_access_token(
+        self,
+        project_id: int,
+        name: str,
+        scopes: list,
+        expires_at: str,
+        access_level: int = 40,
+    ):
+        self.__class__.token_create_calls.append((project_id, name, scopes, expires_at, access_level))
+        return {"id": 999, "name": name, "token": "fake-token-value", "scopes": scopes, "expires_at": expires_at}
+
+    def delete_project_access_token(self, project_id: int, token_id: int) -> bool:
+        self.__class__.token_delete_calls.append((project_id, token_id))
+        return True
 
     def create_pull_mirror(
         self,

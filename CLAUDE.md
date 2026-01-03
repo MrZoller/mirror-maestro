@@ -2322,6 +2322,70 @@ GITLAB_API_MAX_RETRIES=3
 GITLAB_API_DELAY_MS=200
 ```
 
+### Mirror Management Robustness
+
+**Aligned with Issue Syncing Patterns**:
+
+Mirror management API operations now use the same enterprise-grade robustness patterns as issue syncing. All GitLab API calls for mirror operations are routed through `MirrorGitLabService` which provides:
+
+**1. Rate Limiting**:
+- Configurable delay between operations (`GITLAB_API_DELAY_MS`)
+- Prevents overwhelming GitLab instances with burst requests
+- Shared settings with issue syncing for consistent behavior
+
+**2. Exponential Backoff Retry**:
+- Automatic retry on rate limit errors (HTTP 429)
+- Automatic retry on transient errors (connection failures, server errors)
+- Configurable max retries (`GITLAB_API_MAX_RETRIES`)
+- Backoff pattern: 1s, 2s, 4s, ...
+
+**3. Circuit Breakers**:
+- Per-GitLab-instance circuit breakers
+- Opens after configurable failure threshold (`CIRCUIT_BREAKER_FAILURE_THRESHOLD`)
+- Blocks requests when open, preventing cascading failures
+- Auto-recovery after timeout (`CIRCUIT_BREAKER_RECOVERY_TIMEOUT`)
+
+**4. Configurable Timeouts**:
+- API timeout via `GITLAB_API_TIMEOUT`
+- Passed to GitLabClient for all mirror operations
+
+**Architecture**:
+```
+MirrorGitLabService
+├── Circuit Breakers (per instance URL)
+├── Rate Limiter (shared)
+├── Retry Logic (exponential backoff)
+└── Batch Execution Support
+```
+
+**Key Files**:
+- `app/core/mirror_gitlab_service.py` - Service wrapper with robustness patterns
+- `app/api/mirrors.py` - Mirror API endpoints (uses service via `_execute_gitlab_op`)
+- `app/core/rate_limiter.py` - Shared rate limiter and circuit breaker classes
+
+**Usage Pattern**:
+```python
+# All GitLab API calls use the helper function
+result = await _execute_gitlab_op(
+    client=client,
+    operation=lambda c: c.create_push_mirror(...),
+    operation_name="create_push_mirror",
+)
+```
+
+**Error Handling**:
+- `HTTPException(503)` - Service unavailable (circuit open)
+- `HTTPException(429)` - Rate limit exceeded (retries exhausted)
+- `HTTPException(500)` - Other GitLab errors
+
+**Monitoring**:
+```python
+# Get metrics and circuit breaker states
+service = get_mirror_gitlab_service()
+metrics = service.get_metrics()
+cb_state = service.get_circuit_breaker_state("https://gitlab.example.com")
+```
+
 ---
 
 This guide should serve as your comprehensive reference when working on the GitLab Mirror Wizard codebase. Follow these patterns and conventions to maintain consistency and quality across the project.
