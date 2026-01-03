@@ -391,3 +391,309 @@ async def test_sync_existing_issues_can_be_enabled(client, sample_mirror):
     assert response.status_code == 201
     data = response.json()
     assert data["sync_existing_issues"] is True
+
+
+@pytest.mark.asyncio
+async def test_trigger_sync_conflict_same_config(client, sample_mirror, db_session):
+    """Test that triggering sync fails when a sync is already in progress for the same config."""
+    config = MirrorIssueConfig(
+        mirror_id=sample_mirror.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    db_session.add(config)
+    await db_session.commit()
+    await db_session.refresh(config)
+
+    # Create a running job for this config
+    running_job = IssueSyncJob(
+        mirror_issue_config_id=config.id,
+        job_type="manual",
+        status="running",
+        source_project_id=sample_mirror.source_project_id,
+        target_project_id=sample_mirror.target_project_id,
+    )
+    db_session.add(running_job)
+    await db_session.commit()
+    await db_session.refresh(running_job)
+
+    # Try to trigger another sync - should fail
+    response = await client.post(f"/api/issue-mirrors/{config.id}/trigger-sync")
+
+    assert response.status_code == 409
+    assert "already in progress" in response.json()["detail"].lower()
+    assert str(running_job.id) in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_sync_conflict_pending_job(client, sample_mirror, db_session):
+    """Test that triggering sync fails when a sync is pending for the same config."""
+    config = MirrorIssueConfig(
+        mirror_id=sample_mirror.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    db_session.add(config)
+    await db_session.commit()
+    await db_session.refresh(config)
+
+    # Create a pending job for this config
+    pending_job = IssueSyncJob(
+        mirror_issue_config_id=config.id,
+        job_type="scheduled",
+        status="pending",
+        source_project_id=sample_mirror.source_project_id,
+        target_project_id=sample_mirror.target_project_id,
+    )
+    db_session.add(pending_job)
+    await db_session.commit()
+    await db_session.refresh(pending_job)
+
+    # Try to trigger another sync - should fail
+    response = await client.post(f"/api/issue-mirrors/{config.id}/trigger-sync")
+
+    assert response.status_code == 409
+    assert "already in progress" in response.json()["detail"].lower()
+
+
+@pytest.fixture
+async def reverse_mirror_setup(db_session, sample_instances):
+    """Create reverse mirror setup for bidirectional conflict testing.
+
+    Creates:
+    - pair1: source→target (pull direction, meaning issues flow from source to target)
+    - pair2: target→source (pull direction, meaning issues flow from target to source)
+    - mirror1: source_project_id=100 → target_project_id=200
+    - mirror2: source_project_id=200 → target_project_id=100 (reverse)
+    """
+    source, target = sample_instances
+
+    # First pair: source→target
+    pair1 = InstancePair(
+        name="Pair A to B",
+        source_instance_id=source.id,
+        target_instance_id=target.id,
+        mirror_direction="pull"
+    )
+    db_session.add(pair1)
+    await db_session.commit()
+    await db_session.refresh(pair1)
+
+    # Second pair: target→source (reverse direction)
+    pair2 = InstancePair(
+        name="Pair B to A",
+        source_instance_id=target.id,
+        target_instance_id=source.id,
+        mirror_direction="pull"
+    )
+    db_session.add(pair2)
+    await db_session.commit()
+    await db_session.refresh(pair2)
+
+    # Mirror 1: project 100 → 200
+    mirror1 = Mirror(
+        instance_pair_id=pair1.id,
+        source_project_id=100,
+        source_project_path="group/project-a",
+        target_project_id=200,
+        target_project_path="group/project-b"
+    )
+    db_session.add(mirror1)
+    await db_session.commit()
+    await db_session.refresh(mirror1)
+
+    # Mirror 2: project 200 → 100 (reverse of mirror1)
+    mirror2 = Mirror(
+        instance_pair_id=pair2.id,
+        source_project_id=200,
+        source_project_path="group/project-b",
+        target_project_id=100,
+        target_project_path="group/project-a"
+    )
+    db_session.add(mirror2)
+    await db_session.commit()
+    await db_session.refresh(mirror2)
+
+    return {
+        "pair1": pair1,
+        "pair2": pair2,
+        "mirror1": mirror1,
+        "mirror2": mirror2,
+        "source_instance": source,
+        "target_instance": target,
+    }
+
+
+@pytest.mark.asyncio
+async def test_trigger_sync_bidirectional_conflict(client, reverse_mirror_setup, db_session):
+    """Test that bidirectional sync conflict is detected.
+
+    When A→B sync is running, attempting to start B→A sync should fail.
+    """
+    mirror1 = reverse_mirror_setup["mirror1"]  # 100→200
+    mirror2 = reverse_mirror_setup["mirror2"]  # 200→100 (reverse)
+
+    # Create configs for both mirrors
+    config1 = MirrorIssueConfig(
+        mirror_id=mirror1.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    config2 = MirrorIssueConfig(
+        mirror_id=mirror2.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    db_session.add_all([config1, config2])
+    await db_session.commit()
+    await db_session.refresh(config1)
+    await db_session.refresh(config2)
+
+    # Start a sync job for mirror1 (100→200)
+    running_job = IssueSyncJob(
+        mirror_issue_config_id=config1.id,
+        job_type="manual",
+        status="running",
+        source_project_id=mirror1.source_project_id,  # 100
+        target_project_id=mirror1.target_project_id,  # 200
+    )
+    db_session.add(running_job)
+    await db_session.commit()
+    await db_session.refresh(running_job)
+
+    # Try to trigger sync for mirror2 (200→100) - should fail due to bidirectional conflict
+    response = await client.post(f"/api/issue-mirrors/{config2.id}/trigger-sync")
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "bidirectional sync conflict" in detail.lower()
+    assert str(running_job.id) in detail
+
+
+@pytest.mark.asyncio
+async def test_trigger_sync_no_conflict_different_projects(client, db_session, sample_instances):
+    """Test that syncs on different projects don't conflict."""
+    source, target = sample_instances
+
+    # Create pair
+    pair = InstancePair(
+        name="Test Pair",
+        source_instance_id=source.id,
+        target_instance_id=target.id,
+        mirror_direction="pull"
+    )
+    db_session.add(pair)
+    await db_session.commit()
+    await db_session.refresh(pair)
+
+    # Create two mirrors for different projects
+    mirror1 = Mirror(
+        instance_pair_id=pair.id,
+        source_project_id=100,
+        source_project_path="group/project-a",
+        target_project_id=200,
+        target_project_path="group/project-b"
+    )
+    mirror2 = Mirror(
+        instance_pair_id=pair.id,
+        source_project_id=300,
+        source_project_path="group/project-c",
+        target_project_id=400,
+        target_project_path="group/project-d"
+    )
+    db_session.add_all([mirror1, mirror2])
+    await db_session.commit()
+    await db_session.refresh(mirror1)
+    await db_session.refresh(mirror2)
+
+    # Create configs for both mirrors
+    config1 = MirrorIssueConfig(
+        mirror_id=mirror1.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    config2 = MirrorIssueConfig(
+        mirror_id=mirror2.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    db_session.add_all([config1, config2])
+    await db_session.commit()
+    await db_session.refresh(config1)
+    await db_session.refresh(config2)
+
+    # Start a sync job for mirror1 (100→200)
+    running_job = IssueSyncJob(
+        mirror_issue_config_id=config1.id,
+        job_type="manual",
+        status="running",
+        source_project_id=mirror1.source_project_id,
+        target_project_id=mirror1.target_project_id,
+    )
+    db_session.add(running_job)
+    await db_session.commit()
+
+    # Triggering sync for mirror2 (300→400) should succeed since it's different projects
+    from unittest.mock import patch, AsyncMock
+
+    with patch('app.core.issue_sync.IssueSyncEngine') as MockEngine:
+        mock_engine = AsyncMock()
+        mock_engine.sync.return_value = {
+            "issues_processed": 0,
+            "issues_created": 0,
+            "issues_updated": 0,
+            "issues_skipped": 0,
+            "issues_failed": 0,
+            "errors": []
+        }
+        MockEngine.return_value = mock_engine
+
+        response = await client.post(f"/api/issue-mirrors/{config2.id}/trigger-sync")
+
+        # Should succeed - no conflict with different projects
+        assert response.status_code == 202
+        assert "job_id" in response.json()
+
+
+@pytest.mark.asyncio
+async def test_trigger_sync_completed_job_no_conflict(client, sample_mirror, db_session):
+    """Test that completed jobs don't block new syncs."""
+    config = MirrorIssueConfig(
+        mirror_id=sample_mirror.id,
+        enabled=True,
+        sync_interval_minutes=15
+    )
+    db_session.add(config)
+    await db_session.commit()
+    await db_session.refresh(config)
+
+    # Create a completed job for this config
+    completed_job = IssueSyncJob(
+        mirror_issue_config_id=config.id,
+        job_type="manual",
+        status="completed",
+        source_project_id=sample_mirror.source_project_id,
+        target_project_id=sample_mirror.target_project_id,
+    )
+    db_session.add(completed_job)
+    await db_session.commit()
+
+    # Triggering sync should succeed since previous job is completed
+    from unittest.mock import patch, AsyncMock
+
+    with patch('app.core.issue_sync.IssueSyncEngine') as MockEngine:
+        mock_engine = AsyncMock()
+        mock_engine.sync.return_value = {
+            "issues_processed": 0,
+            "issues_created": 0,
+            "issues_updated": 0,
+            "issues_skipped": 0,
+            "issues_failed": 0,
+            "errors": []
+        }
+        MockEngine.return_value = mock_engine
+
+        response = await client.post(f"/api/issue-mirrors/{config.id}/trigger-sync")
+
+        assert response.status_code == 202
+        assert "job_id" in response.json()

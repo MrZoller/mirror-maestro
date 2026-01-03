@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, Set
 
-from sqlalchemy import select
+from sqlalchemy import select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -18,6 +18,46 @@ from app.models import (
     IssueSyncJob,
 )
 from app.core.issue_sync import IssueSyncEngine
+
+
+async def check_bidirectional_sync_conflict(
+    db: AsyncSession,
+    source_project_id: int,
+    target_project_id: int,
+    exclude_config_id: Optional[int] = None
+) -> Optional[IssueSyncJob]:
+    """
+    Check if there's a running sync that conflicts with a bidirectional sync.
+
+    A conflict occurs when:
+    - There's a running sync FROM target TO source (reverse direction)
+
+    This prevents race conditions where A→B and B→A syncs run simultaneously,
+    which could cause issues to be created/updated inconsistently.
+
+    Args:
+        db: Database session
+        source_project_id: Source project ID for the sync we want to start
+        target_project_id: Target project ID for the sync we want to start
+        exclude_config_id: Optional config ID to exclude (for same-config checks)
+
+    Returns:
+        The conflicting job if found, None otherwise
+    """
+    # Check for reverse sync (target→source while we want source→target)
+    query = select(IssueSyncJob).where(
+        and_(
+            IssueSyncJob.status.in_(["pending", "running"]),
+            IssueSyncJob.source_project_id == target_project_id,
+            IssueSyncJob.target_project_id == source_project_id
+        )
+    )
+
+    if exclude_config_id is not None:
+        query = query.where(IssueSyncJob.mirror_issue_config_id != exclude_config_id)
+
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
 
 
 logger = logging.getLogger(__name__)
@@ -147,6 +187,16 @@ class IssueScheduler:
         """Sync a single issue mirror configuration."""
         logger.info(f"Starting sync for issue mirror config {config.id}")
 
+        # Load mirror info first to get project IDs for conflict detection
+        mirror_result = await db.execute(
+            select(Mirror).where(Mirror.id == config.mirror_id)
+        )
+        mirror = mirror_result.scalar_one_or_none()
+
+        if not mirror:
+            logger.error(f"Mirror {config.mirror_id} not found for config {config.id}")
+            return
+
         # Check if there's already a running or pending sync for this config
         existing_job_result = await db.execute(
             select(IssueSyncJob).where(
@@ -163,27 +213,41 @@ class IssueScheduler:
             )
             return
 
-        # Create sync job
+        # Check for bidirectional sync conflict
+        # This prevents A→B and B→A syncs from running simultaneously
+        conflicting_job = await check_bidirectional_sync_conflict(
+            db,
+            source_project_id=mirror.source_project_id,
+            target_project_id=mirror.target_project_id,
+            exclude_config_id=config.id
+        )
+
+        if conflicting_job:
+            logger.info(
+                f"Skipping sync for config {config.id} - bidirectional sync conflict detected. "
+                f"Reverse sync job {conflicting_job.id} is in progress "
+                f"(syncing {conflicting_job.source_project_id}→{conflicting_job.target_project_id}). "
+                f"Will retry on next schedule."
+            )
+            # Update next_sync_at to retry soon (in 1 minute)
+            config.next_sync_at = datetime.utcnow() + timedelta(minutes=1)
+            await db.commit()
+            return
+
+        # Create sync job with project tracking for conflict detection
         job = IssueSyncJob(
             mirror_issue_config_id=config.id,
             job_type="scheduled",
             status="running",
             started_at=datetime.utcnow(),
+            source_project_id=mirror.source_project_id,
+            target_project_id=mirror.target_project_id,
         )
         db.add(job)
         await db.commit()
         await db.refresh(job)
 
         try:
-            # Load related entities
-            mirror_result = await db.execute(
-                select(Mirror).where(Mirror.id == config.mirror_id)
-            )
-            mirror = mirror_result.scalar_one_or_none()
-
-            if not mirror:
-                raise ValueError(f"Mirror {config.mirror_id} not found")
-
             pair_result = await db.execute(
                 select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
             )
