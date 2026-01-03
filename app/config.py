@@ -1,3 +1,5 @@
+from typing import Optional
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,15 +28,24 @@ class Settings(BaseSettings):
     # If True, use database users instead of single auth_username/auth_password
     multi_user_enabled: bool = False
     # JWT secret key is managed by jwt_secret_manager - it's auto-generated and persisted
-    # Can be overridden by setting JWT_SECRET_KEY environment variable
+    # Can be overridden by setting JWT_SECRET_KEY or JWT_SECRET_KEY_PATH environment variables
+    jwt_secret_key_env: Optional[str] = Field(default=None, validation_alias="JWT_SECRET_KEY")
+    jwt_secret_key_path_env: Optional[str] = Field(default=None, validation_alias="JWT_SECRET_KEY_PATH")
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = 24
 
     @property
     def jwt_secret_key(self) -> str:
-        """Get the JWT secret key from the secret manager."""
+        """Get the JWT secret key from the secret manager.
+
+        Passes Pydantic-loaded values from .env to the manager so it can honor
+        JWT_SECRET_KEY and JWT_SECRET_KEY_PATH set in .env files.
+        """
         from app.core.jwt_secret import jwt_secret_manager
-        return jwt_secret_manager.get_secret()
+        return jwt_secret_manager.get_secret(
+            env_secret=self.jwt_secret_key_env,
+            env_path=self.jwt_secret_key_path_env
+        )
 
     # Initial admin user (created on first startup if multi_user_enabled)
     initial_admin_username: str = "admin"
