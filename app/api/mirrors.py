@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, TypeVar, Callable, Any
 import re
 import logging
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,12 +10,73 @@ from datetime import datetime, timedelta
 from app.database import get_db
 from app.models import Mirror, InstancePair, GitLabInstance
 from app.core.auth import verify_credentials
-from app.core.gitlab_client import GitLabClient
+from app.core.gitlab_client import (
+    GitLabClient,
+    GitLabClientError,
+    GitLabConnectionError,
+    GitLabRateLimitError,
+)
 from app.core.encryption import encryption
+from app.core.mirror_gitlab_service import get_mirror_gitlab_service
 from urllib.parse import urlparse, quote
+
+T = TypeVar('T')
 
 # Token expiration: 1 year from creation
 TOKEN_EXPIRY_DAYS = 365
+
+logger = logging.getLogger(__name__)
+
+
+async def _execute_gitlab_op(
+    client: GitLabClient,
+    operation: Callable[[GitLabClient], T],
+    operation_name: str,
+) -> T:
+    """
+    Execute a GitLab operation with rate limiting, retry, and circuit breaker.
+
+    This helper wraps all GitLab API calls with enterprise-grade robustness:
+    - Rate limiting (configurable delay between operations)
+    - Exponential backoff retry on rate limit errors
+    - Circuit breaker to prevent cascading failures
+
+    Args:
+        client: The GitLabClient to use
+        operation: A callable that takes the client and returns the result
+        operation_name: Descriptive name for logging
+
+    Returns:
+        The result of the operation
+
+    Raises:
+        HTTPException: If the operation fails after retries
+    """
+    service = get_mirror_gitlab_service()
+    try:
+        return await service.execute(
+            client=client,
+            operation=operation,
+            operation_name=operation_name,
+        )
+    except GitLabConnectionError as e:
+        logger.error(f"{operation_name} failed - connection error: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"GitLab service unavailable: {e}"
+        )
+    except GitLabRateLimitError as e:
+        logger.error(f"{operation_name} failed - rate limit exceeded: {e}")
+        raise HTTPException(
+            status_code=429,
+            detail=f"GitLab rate limit exceeded. Please try again later."
+        )
+    except GitLabClientError as e:
+        logger.error(f"{operation_name} failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"GitLab operation failed: {e}"
+        )
 
 
 router = APIRouter(prefix="/api/mirrors", tags=["mirrors"])
@@ -694,24 +755,31 @@ async def _create_mirror_internal(
     encrypted_token = None
     gitlab_token_id = None
     token_name = None
+    token_client = GitLabClient(token_instance.url, token_instance.encrypted_token)
 
     try:
-        token_client = GitLabClient(token_instance.url, token_instance.encrypted_token)
         # Use a unique token name that includes a timestamp for uniqueness
         token_name = f"mirror-maestro-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-        token_info = token_client.create_project_access_token(
-            project_id=token_project_id,
-            name=token_name,
-            scopes=token_scopes,
-            expires_at=token_expires_str,
+        token_info = await _execute_gitlab_op(
+            client=token_client,
+            operation=lambda c: c.create_project_access_token(
+                project_id=token_project_id,
+                name=token_name,
+                scopes=token_scopes,
+                expires_at=token_expires_str,
+            ),
+            operation_name=f"create_project_access_token({token_project_id})",
         )
         gitlab_token_id = token_info.get("id")
         plaintext_token = token_info.get("token")
         if plaintext_token:
             encrypted_token = encryption.encrypt(plaintext_token)
-        logging.info(f"Created project access token '{token_name}' on project {token_project_id}")
+        logger.info(f"Created project access token '{token_name}' on project {token_project_id}")
+    except HTTPException:
+        # Rate limit or service unavailable - let it propagate
+        raise
     except Exception as e:
-        logging.warning(f"Failed to create project access token: {str(e)}. Mirror will be created without token.")
+        logger.warning(f"Failed to create project access token: {str(e)}. Mirror will be created without token.")
         # Continue without token - mirror may still work if project is public or using SSH
 
     # Build authenticated URL using the new token
@@ -733,12 +801,16 @@ async def _create_mirror_internal(
         if direction == "push":
             # For push mirrors, configure on source to push to target
             client = GitLabClient(source_instance.url, source_instance.encrypted_token)
-            result = client.create_push_mirror(
-                mirror_data.source_project_id,
-                remote_url,
-                enabled=mirror_data.enabled,
-                keep_divergent_refs=not overwrite_diverged,
-                only_protected_branches=only_protected,
+            result = await _execute_gitlab_op(
+                client=client,
+                operation=lambda c: c.create_push_mirror(
+                    mirror_data.source_project_id,
+                    remote_url,
+                    enabled=mirror_data.enabled,
+                    keep_divergent_refs=not overwrite_diverged,
+                    only_protected_branches=only_protected,
+                ),
+                operation_name=f"create_push_mirror({mirror_data.source_project_id})",
             )
             gitlab_mirror_id = result.get("id")
         else:  # pull
@@ -746,15 +818,23 @@ async def _create_mirror_internal(
             client = GitLabClient(target_instance.url, target_instance.encrypted_token)
 
             # GitLab effectively supports only one pull mirror per project.
-            existing = client.get_project_mirrors(mirror_data.target_project_id)
+            existing = await _execute_gitlab_op(
+                client=client,
+                operation=lambda c: c.get_project_mirrors(mirror_data.target_project_id),
+                operation_name=f"get_project_mirrors({mirror_data.target_project_id})",
+            )
             existing_pull = [m for m in (existing or []) if str(m.get("mirror_direction") or "").lower() == "pull"]
             if existing_pull:
                 # Cleanup the token we just created
                 if gitlab_token_id:
                     try:
-                        token_client.delete_project_access_token(token_project_id, gitlab_token_id)
+                        await _execute_gitlab_op(
+                            client=token_client,
+                            operation=lambda c: c.delete_project_access_token(token_project_id, gitlab_token_id),
+                            operation_name=f"delete_project_access_token({token_project_id}, {gitlab_token_id})",
+                        )
                     except Exception:
-                        logging.warning(f"Failed to cleanup token {gitlab_token_id} after mirror conflict")
+                        logger.warning(f"Failed to cleanup token {gitlab_token_id} after mirror conflict")
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -767,15 +847,19 @@ async def _create_mirror_internal(
                     },
                 )
 
-            result = client.create_pull_mirror(
-                mirror_data.target_project_id,
-                remote_url,
-                enabled=mirror_data.enabled,
-                only_protected_branches=only_protected,
-                keep_divergent_refs=not overwrite_diverged,
-                trigger_builds=trigger_builds,
-                mirror_branch_regex=branch_regex,
-                mirror_user_id=target_instance.api_user_id,
+            result = await _execute_gitlab_op(
+                client=client,
+                operation=lambda c: c.create_pull_mirror(
+                    mirror_data.target_project_id,
+                    remote_url,
+                    enabled=mirror_data.enabled,
+                    only_protected_branches=only_protected,
+                    keep_divergent_refs=not overwrite_diverged,
+                    trigger_builds=trigger_builds,
+                    mirror_branch_regex=branch_regex,
+                    mirror_user_id=target_instance.api_user_id,
+                ),
+                operation_name=f"create_pull_mirror({mirror_data.target_project_id})",
             )
             gitlab_mirror_id = result.get("id")
     except HTTPException:
@@ -784,10 +868,14 @@ async def _create_mirror_internal(
         # Cleanup the token we created
         if gitlab_token_id:
             try:
-                token_client.delete_project_access_token(token_project_id, gitlab_token_id)
+                await _execute_gitlab_op(
+                    client=token_client,
+                    operation=lambda c: c.delete_project_access_token(token_project_id, gitlab_token_id),
+                    operation_name=f"delete_project_access_token({token_project_id}, {gitlab_token_id})",
+                )
             except Exception:
-                logging.warning(f"Failed to cleanup token {gitlab_token_id} after mirror creation failed")
-        logging.error(f"Failed to create mirror in GitLab: {str(e)}")
+                logger.warning(f"Failed to cleanup token {gitlab_token_id} after mirror creation failed")
+        logger.error(f"Failed to create mirror in GitLab: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail="Failed to create mirror in GitLab. Check server logs for details."
@@ -825,7 +913,7 @@ async def _create_mirror_internal(
         # Rollback the failed transaction
         await db.rollback()
 
-        logging.warning(f"Database commit failed. Attempting cleanup...")
+        logger.warning(f"Database commit failed. Attempting cleanup...")
 
         # Cleanup: Delete the GitLab mirror that was just created
         if gitlab_mirror_id:
@@ -833,20 +921,28 @@ async def _create_mirror_internal(
                 cleanup_instance = source_instance if direction == "push" else target_instance
                 cleanup_project_id = mirror_data.source_project_id if direction == "push" else mirror_data.target_project_id
                 cleanup_client = GitLabClient(cleanup_instance.url, cleanup_instance.encrypted_token)
-                cleanup_client.delete_mirror(cleanup_project_id, gitlab_mirror_id)
-                logging.info(f"Successfully cleaned up orphaned GitLab mirror {gitlab_mirror_id}")
+                await _execute_gitlab_op(
+                    client=cleanup_client,
+                    operation=lambda c: c.delete_mirror(cleanup_project_id, gitlab_mirror_id),
+                    operation_name=f"delete_mirror({cleanup_project_id}, {gitlab_mirror_id})",
+                )
+                logger.info(f"Successfully cleaned up orphaned GitLab mirror {gitlab_mirror_id}")
             except Exception as cleanup_error:
-                logging.error(f"Failed to cleanup GitLab mirror {gitlab_mirror_id}: {str(cleanup_error)}")
+                logger.error(f"Failed to cleanup GitLab mirror {gitlab_mirror_id}: {str(cleanup_error)}")
 
         # Cleanup: Delete the project access token
         if gitlab_token_id:
             try:
-                token_client.delete_project_access_token(token_project_id, gitlab_token_id)
-                logging.info(f"Successfully cleaned up orphaned token {gitlab_token_id}")
+                await _execute_gitlab_op(
+                    client=token_client,
+                    operation=lambda c: c.delete_project_access_token(token_project_id, gitlab_token_id),
+                    operation_name=f"delete_project_access_token({token_project_id}, {gitlab_token_id})",
+                )
+                logger.info(f"Successfully cleaned up orphaned token {gitlab_token_id}")
             except Exception as cleanup_error:
-                logging.error(f"Failed to cleanup token {gitlab_token_id}: {str(cleanup_error)}")
+                logger.error(f"Failed to cleanup token {gitlab_token_id}: {str(cleanup_error)}")
 
-        logging.error(f"Failed to save mirror to database: {str(db_error)}")
+        logger.error(f"Failed to save mirror to database: {str(db_error)}")
         raise HTTPException(
             status_code=500,
             detail="Failed to save mirror to database. GitLab resources have been cleaned up."
@@ -976,7 +1072,11 @@ async def preflight_mirror(
     owner_instance = source_instance if direction == "push" else target_instance
 
     client = GitLabClient(owner_instance.url, owner_instance.encrypted_token)
-    existing = client.get_project_mirrors(owner_project_id) or []
+    existing = await _execute_gitlab_op(
+        client=client,
+        operation=lambda c: c.get_project_mirrors(owner_project_id) or [],
+        operation_name=f"get_project_mirrors({owner_project_id})",
+    )
     same_dir = [m for m in existing if str(m.get("mirror_direction") or "").lower() == direction]
 
     return MirrorPreflightResponse(
@@ -1013,7 +1113,11 @@ async def remove_existing_gitlab_mirrors(
     owner_instance = source_instance if direction == "push" else target_instance
 
     client = GitLabClient(owner_instance.url, owner_instance.encrypted_token)
-    existing = client.get_project_mirrors(owner_project_id) or []
+    existing = await _execute_gitlab_op(
+        client=client,
+        operation=lambda c: c.get_project_mirrors(owner_project_id) or [],
+        operation_name=f"get_project_mirrors({owner_project_id})",
+    )
     same_dir = [m for m in existing if str(m.get("mirror_direction") or "").lower() == direction]
 
     wanted = set(req.remote_mirror_ids or [])
@@ -1029,11 +1133,16 @@ async def remove_existing_gitlab_mirrors(
     deleted_ids: list[int] = []
     for mid in to_delete:
         try:
-            client.delete_mirror(owner_project_id, mid)
+            await _execute_gitlab_op(
+                client=client,
+                operation=lambda c, mirror_id=mid: c.delete_mirror(owner_project_id, mirror_id),
+                operation_name=f"delete_mirror({owner_project_id}, {mid})",
+            )
             deleted_ids.append(mid)
+        except HTTPException:
+            raise
         except Exception as e:
-            import logging
-            logging.error(f"Failed to delete existing mirror {mid} in GitLab: {str(e)}")
+            logger.error(f"Failed to delete existing mirror {mid} in GitLab: {str(e)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to delete existing mirror {mid} in GitLab. Check server logs for details."
@@ -1175,16 +1284,20 @@ async def update_mirror(
 
             # Update the mirror in GitLab
             client = GitLabClient(instance.url, instance.encrypted_token)
-            client.update_mirror(
-                project_id=project_id,
-                mirror_id=mirror.mirror_id,
-                enabled=mirror.enabled,
-                only_protected_branches=only_protected,
-                keep_divergent_refs=not overwrite_diverged,
-                trigger_builds=trigger_builds if direction == "pull" else None,
-                mirror_branch_regex=branch_regex if direction == "pull" else None,
-                mirror_user_id=instance.api_user_id if direction == "pull" else None,
-                mirror_direction=direction,
+            await _execute_gitlab_op(
+                client=client,
+                operation=lambda c: c.update_mirror(
+                    project_id=project_id,
+                    mirror_id=mirror.mirror_id,
+                    enabled=mirror.enabled,
+                    only_protected_branches=only_protected,
+                    keep_divergent_refs=not overwrite_diverged,
+                    trigger_builds=trigger_builds if direction == "pull" else None,
+                    mirror_branch_regex=branch_regex if direction == "pull" else None,
+                    mirror_user_id=instance.api_user_id if direction == "pull" else None,
+                    mirror_direction=direction,
+                ),
+                operation_name=f"update_mirror({project_id}, {mirror.mirror_id})",
             )
 
         # Only commit if all operations succeeded
@@ -1197,8 +1310,7 @@ async def update_mirror(
     except Exception as e:
         # Rollback DB changes if GitLab update or commit fails
         await db.rollback()
-        import logging
-        logging.error(f"Failed to update mirror: {str(e)}")
+        logger.error(f"Failed to update mirror: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail="Failed to update mirror. Database changes have been rolled back."
@@ -1272,26 +1384,26 @@ async def _cleanup_mirror_from_gitlab(
                 instance = instance_result.scalar_one_or_none()
 
                 if instance:
-                    import logging
-                    logging.info(f"Attempting to delete GitLab mirror {mirror.mirror_id} from project {project_id} on {instance.url}")
+                    logger.info(f"Attempting to delete GitLab mirror {mirror.mirror_id} from project {project_id} on {instance.url}")
                     client = GitLabClient(instance.url, instance.encrypted_token)
-                    client.delete_mirror(project_id, mirror.mirror_id)
-                    logging.info(f"Successfully deleted GitLab mirror {mirror.mirror_id}")
+                    await _execute_gitlab_op(
+                        client=client,
+                        operation=lambda c: c.delete_mirror(project_id, mirror.mirror_id),
+                        operation_name=f"delete_mirror({project_id}, {mirror.mirror_id})",
+                    )
+                    logger.info(f"Successfully deleted GitLab mirror {mirror.mirror_id}")
                 else:
-                    import logging
-                    logging.warning(f"GitLab instance not found for mirror {mirror.id}, skipping GitLab cleanup")
+                    logger.warning(f"GitLab instance not found for mirror {mirror.id}, skipping GitLab cleanup")
                     gitlab_cleanup_failed = True
                     gitlab_error_msg = "GitLab instance not found"
             else:
-                import logging
-                logging.warning(f"Instance pair not found for mirror {mirror.id}, skipping GitLab cleanup")
+                logger.warning(f"Instance pair not found for mirror {mirror.id}, skipping GitLab cleanup")
                 gitlab_cleanup_failed = True
                 gitlab_error_msg = "Instance pair not found"
     except Exception as e:
         # Log the error but continue
-        import logging
         project_id_str = str(mirror.source_project_id if hasattr(mirror, 'source_project_id') else 'unknown')
-        logging.error(f"Failed to delete mirror {mirror.mirror_id} from GitLab (project {project_id_str}): {str(e)}")
+        logger.error(f"Failed to delete mirror {mirror.mirror_id} from GitLab (project {project_id_str}): {str(e)}")
         gitlab_cleanup_failed = True
         gitlab_error_msg = str(e)
 
@@ -1318,19 +1430,20 @@ async def _cleanup_mirror_from_gitlab(
                 token_instance = instance_result.scalar_one_or_none()
 
                 if token_instance:
-                    import logging
-                    logging.info(f"Deleting project access token {mirror.gitlab_token_id} from project {mirror.token_project_id}")
+                    logger.info(f"Deleting project access token {mirror.gitlab_token_id} from project {mirror.token_project_id}")
                     token_client = GitLabClient(token_instance.url, token_instance.encrypted_token)
-                    token_client.delete_project_access_token(mirror.token_project_id, mirror.gitlab_token_id)
-                    logging.info(f"Successfully deleted project access token {mirror.gitlab_token_id}")
+                    await _execute_gitlab_op(
+                        client=token_client,
+                        operation=lambda c: c.delete_project_access_token(mirror.token_project_id, mirror.gitlab_token_id),
+                        operation_name=f"delete_project_access_token({mirror.token_project_id}, {mirror.gitlab_token_id})",
+                    )
+                    logger.info(f"Successfully deleted project access token {mirror.gitlab_token_id}")
                 else:
-                    import logging
-                    logging.warning(f"Token instance not found for mirror {mirror.id}, token may be orphaned")
+                    logger.warning(f"Token instance not found for mirror {mirror.id}, token may be orphaned")
                     token_cleanup_failed = True
                     token_error_msg = "Token instance not found"
         except Exception as e:
-            import logging
-            logging.error(f"Failed to delete project access token {mirror.gitlab_token_id}: {str(e)}")
+            logger.error(f"Failed to delete project access token {mirror.gitlab_token_id}: {str(e)}")
             token_cleanup_failed = True
             token_error_msg = str(e)
 
@@ -1416,16 +1529,21 @@ async def trigger_mirror_update(
 
     try:
         client = GitLabClient(instance.url, instance.encrypted_token)
-        client.trigger_mirror_update(project_id, mirror.mirror_id)
+        await _execute_gitlab_op(
+            client=client,
+            operation=lambda c: c.trigger_mirror_update(project_id, mirror.mirror_id),
+            operation_name=f"trigger_mirror_update({project_id}, {mirror.mirror_id})",
+        )
 
         # Update status
         mirror.last_update_status = "updating"
         await db.commit()
 
         return {"status": "update_triggered"}
+    except HTTPException:
+        raise
     except Exception as e:
-        import logging
-        logging.error(f"Failed to trigger update: {str(e)}")
+        logger.error(f"Failed to trigger update: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail="Failed to trigger mirror update. Check server logs for details."
@@ -1444,8 +1562,6 @@ async def rotate_mirror_token(
     This creates a new token and updates the mirror configuration in GitLab.
     The old token is automatically revoked.
     """
-    import logging
-
     result = await db.execute(
         select(Mirror).where(Mirror.id == mirror_id)
     )
@@ -1504,25 +1620,35 @@ async def rotate_mirror_token(
     # Delete old token if it exists
     if mirror.gitlab_token_id and mirror.token_project_id:
         try:
-            logging.info(f"Deleting old token {mirror.gitlab_token_id} from project {mirror.token_project_id}")
-            token_client.delete_project_access_token(mirror.token_project_id, mirror.gitlab_token_id)
+            logger.info(f"Deleting old token {mirror.gitlab_token_id} from project {mirror.token_project_id}")
+            await _execute_gitlab_op(
+                client=token_client,
+                operation=lambda c: c.delete_project_access_token(mirror.token_project_id, mirror.gitlab_token_id),
+                operation_name=f"delete_project_access_token({mirror.token_project_id}, {mirror.gitlab_token_id})",
+            )
         except Exception as e:
-            logging.warning(f"Failed to delete old token (may already be expired/deleted): {str(e)}")
+            logger.warning(f"Failed to delete old token (may already be expired/deleted): {str(e)}")
 
     # Create new token
     token_name = f"mirror-maestro-{mirror.id}"
     expires_at = (datetime.utcnow() + timedelta(days=TOKEN_EXPIRY_DAYS)).strftime("%Y-%m-%d")
 
     try:
-        token_result = token_client.create_project_access_token(
-            project_id=token_project_id,
-            name=token_name,
-            scopes=scopes,
-            expires_at=expires_at,
-            access_level=40,  # Maintainer
+        token_result = await _execute_gitlab_op(
+            client=token_client,
+            operation=lambda c: c.create_project_access_token(
+                project_id=token_project_id,
+                name=token_name,
+                scopes=scopes,
+                expires_at=expires_at,
+                access_level=40,  # Maintainer
+            ),
+            operation_name=f"create_project_access_token({token_project_id})",
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error(f"Failed to create new token: {str(e)}")
+        logger.error(f"Failed to create new token: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create new project access token: {str(e)}"
@@ -1543,17 +1669,21 @@ async def rotate_mirror_token(
             # Get current effective settings
             effective_settings = _resolve_effective_settings(mirror, pair)
 
-            mirror_client.update_mirror(
-                project_id=mirror_project_id,
-                mirror_id=mirror.mirror_id,
-                url=authenticated_url,
-                enabled=True,
-                only_protected_branches=effective_settings.get("only_mirror_protected_branches", False),
-                keep_divergent_refs=not effective_settings.get("mirror_overwrite_diverged", False),
+            await _execute_gitlab_op(
+                client=mirror_client,
+                operation=lambda c: c.update_mirror(
+                    project_id=mirror_project_id,
+                    mirror_id=mirror.mirror_id,
+                    url=authenticated_url,
+                    enabled=True,
+                    only_protected_branches=effective_settings.get("only_mirror_protected_branches", False),
+                    keep_divergent_refs=not effective_settings.get("mirror_overwrite_diverged", False),
+                ),
+                operation_name=f"update_mirror({mirror_project_id}, {mirror.mirror_id})",
             )
-            logging.info(f"Updated mirror {mirror.mirror_id} with new token")
+            logger.info(f"Updated mirror {mirror.mirror_id} with new token")
         except Exception as e:
-            logging.error(f"Failed to update mirror with new token: {str(e)}")
+            logger.error(f"Failed to update mirror with new token: {str(e)}")
             # Token was created but mirror update failed - still save the token
             # so user can manually fix if needed
 
@@ -1644,7 +1774,20 @@ async def _verify_single_mirror(
     # Get mirrors from GitLab
     try:
         client = GitLabClient(owner_instance.url, owner_instance.encrypted_token)
-        gitlab_mirrors = client.get_project_mirrors(owner_project_id) or []
+        gitlab_mirrors = await _execute_gitlab_op(
+            client=client,
+            operation=lambda c: c.get_project_mirrors(owner_project_id) or [],
+            operation_name=f"get_project_mirrors({owner_project_id})",
+        )
+    except HTTPException as e:
+        return MirrorVerifyResponse(
+            mirror_id=mirror.id,
+            status="error",
+            orphan=False,
+            drift=[],
+            gitlab_mirror=None,
+            error=f"Failed to fetch GitLab mirrors: {e.detail}",
+        )
     except Exception as e:
         return MirrorVerifyResponse(
             mirror_id=mirror.id,
