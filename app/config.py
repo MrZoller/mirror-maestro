@@ -1,5 +1,6 @@
+import logging
 from typing import Optional
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +12,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False
     )
+
+    # Environment mode (development, staging, production)
+    # In production mode, stricter validation is enforced
+    environment: str = "development"
 
     # Server Configuration
     host: str = "0.0.0.0"
@@ -97,6 +102,67 @@ class Settings(BaseSettings):
 
     # Stale job cleanup
     stale_job_timeout_minutes: int = 60  # Jobs running longer than this are considered stale and will be marked as failed
+
+    @field_validator('environment')
+    @classmethod
+    def validate_environment(cls, v: str) -> str:
+        """Validate environment is one of the allowed values."""
+        allowed = {'development', 'staging', 'production'}
+        if v.lower() not in allowed:
+            raise ValueError(f"environment must be one of: {', '.join(allowed)}")
+        return v.lower()
+
+    @field_validator('db_pool_size')
+    @classmethod
+    def validate_db_pool_size(cls, v: int) -> int:
+        """Ensure database pool size is positive."""
+        if v <= 0:
+            raise ValueError("db_pool_size must be positive")
+        return v
+
+    @field_validator('gitlab_api_delay_ms')
+    @classmethod
+    def validate_gitlab_api_delay(cls, v: int) -> int:
+        """Ensure GitLab API delay is non-negative."""
+        if v < 0:
+            raise ValueError("gitlab_api_delay_ms cannot be negative")
+        return v
+
+    @model_validator(mode='after')
+    def validate_production_credentials(self) -> 'Settings':
+        """
+        In production mode, require that default credentials are changed.
+        This prevents accidental deployment with insecure defaults.
+        """
+        if self.environment != 'production':
+            return self
+
+        errors = []
+
+        # Check legacy auth password
+        if self.auth_enabled and self.auth_password == 'changeme':
+            errors.append(
+                "AUTH_PASSWORD must be changed from default 'changeme' in production mode"
+            )
+
+        # Check multi-user admin password
+        if self.multi_user_enabled and self.initial_admin_password == 'changeme':
+            errors.append(
+                "INITIAL_ADMIN_PASSWORD must be changed from default 'changeme' in production mode"
+            )
+
+        # Check database URL for default credentials
+        if 'postgres:postgres@' in self.database_url:
+            errors.append(
+                "DATABASE_URL contains default credentials (postgres:postgres). "
+                "Please use secure credentials in production mode"
+            )
+
+        if errors:
+            error_msg = "Production mode security validation failed:\n  - " + "\n  - ".join(errors)
+            raise ValueError(error_msg)
+
+        return self
 
 
 settings = Settings()
