@@ -5,6 +5,7 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)
+![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)
 
 ## Screenshots
 
@@ -158,7 +159,54 @@ mirror-maestro/
 
 ## Quick Start
 
-### Using Docker (Recommended)
+### Using Published Docker Image (Recommended)
+
+The easiest way to run Mirror Maestro is using the pre-built Docker image from GitHub Container Registry:
+
+1. **Pull the image**
+   ```bash
+   docker pull ghcr.io/mrzoller/mirror-maestro:latest
+   ```
+
+2. **Create configuration files**
+   ```bash
+   # Create directories
+   mkdir -p mirror-maestro && cd mirror-maestro
+   mkdir -p data ssl nginx
+
+   # Download docker-compose and example config
+   curl -O https://raw.githubusercontent.com/MrZoller/mirror-maestro/main/docker-compose.yml
+   curl -O https://raw.githubusercontent.com/MrZoller/mirror-maestro/main/.env.example
+   curl -o nginx/nginx.conf https://raw.githubusercontent.com/MrZoller/mirror-maestro/main/nginx/templates/default.conf.template
+
+   # Configure environment
+   cp .env.example .env
+   # Edit .env with your preferred settings
+   ```
+
+3. **Create docker-compose.override.yml** to use the published image:
+   ```yaml
+   version: '3.8'
+   services:
+     app:
+       image: ghcr.io/mrzoller/mirror-maestro:latest
+   ```
+
+4. **Start the application**
+   ```bash
+   docker-compose up -d
+   ```
+
+5. **Access the web interface**
+   Open your browser to `http://localhost` (or `http://localhost:8000` if not using nginx)
+
+   Default credentials (if auth is enabled):
+   - Username: `admin`
+   - Password: `changeme`
+
+### Using Docker with Local Build
+
+If you prefer to build the image locally:
 
 1. **Clone the repository**
    ```bash
@@ -178,7 +226,7 @@ mirror-maestro/
    ```
 
 4. **Access the web interface**
-   Open your browser to `http://localhost:8000`
+   Open your browser to `http://localhost`
 
    Default credentials (if auth is enabled):
    - Username: `admin`
