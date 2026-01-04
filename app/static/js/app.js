@@ -2017,6 +2017,7 @@ async function rotateMirrorToken(mirrorId) {
         await loadMirrors();
     } catch (error) {
         console.error('Failed to rotate token:', error);
+        showMessage(`Failed to rotate token: ${error.message || 'Unknown error'}`, 'error');
     }
 }
 
