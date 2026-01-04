@@ -213,7 +213,9 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/change-password")
+@limiter.limit(AUTH_RATE_LIMIT)
 async def change_password(
+    request: Request,
     password_data: ChangePasswordRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
