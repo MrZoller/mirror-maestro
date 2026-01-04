@@ -2,6 +2,7 @@ import base64
 import logging
 import os
 import stat
+import threading
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -16,6 +17,7 @@ class Encryption:
         # Lazily initialized to avoid filesystem writes at import time.
         self._key: Optional[bytes] = None
         self._cipher: Optional[Fernet] = None
+        self._lock = threading.Lock()
 
     def _get_or_create_key(self) -> bytes:
         """Get or create an encryption key."""
@@ -81,9 +83,13 @@ class Encryption:
             logger.warning(f"Could not verify permissions on encryption key file: {e}")
 
     def _get_cipher(self) -> Fernet:
+        # Double-checked locking pattern for thread-safe lazy initialization
         if self._cipher is None:
-            self._key = self._get_or_create_key()
-            self._cipher = Fernet(self._key)
+            with self._lock:
+                # Re-check after acquiring lock (another thread may have initialized it)
+                if self._cipher is None:
+                    self._key = self._get_or_create_key()
+                    self._cipher = Fernet(self._key)
         return self._cipher
 
     def encrypt(self, data: str) -> str:

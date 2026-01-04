@@ -1,5 +1,7 @@
 from typing import List
 import logging
+import socket
+import ipaddress
 from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, delete, or_
@@ -17,6 +19,78 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/instances", tags=["instances"])
+
+
+def _is_private_ip(ip_str: str) -> bool:
+    """
+    Check if an IP address is in a private/reserved range.
+
+    Prevents SSRF attacks by blocking requests to internal networks.
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        # Check for private, loopback, link-local, reserved, and multicast
+        return (
+            ip.is_private or
+            ip.is_loopback or
+            ip.is_link_local or
+            ip.is_reserved or
+            ip.is_multicast or
+            # Cloud metadata endpoints
+            ip_str.startswith("169.254.") or  # AWS/Azure/GCP metadata
+            ip_str == "100.100.100.200"  # Alibaba Cloud metadata
+        )
+    except ValueError:
+        # Invalid IP - treat as potentially dangerous
+        return True
+
+
+def _validate_url_for_ssrf_sync(url: str) -> None:
+    """
+    Validate a URL to prevent SSRF attacks (synchronous version for Pydantic validators).
+
+    Args:
+        url: URL to validate.
+
+    Raises:
+        ValueError: If URL is potentially dangerous (private IP, bad scheme, etc.)
+    """
+    parsed = urlparse(url)
+
+    # Only allow http/https schemes
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL has no hostname")
+
+    # Block obviously dangerous hostnames
+    dangerous_hostnames = {
+        "localhost", "127.0.0.1", "::1", "0.0.0.0",
+        "metadata.google.internal",  # GCP metadata
+        "169.254.169.254",  # AWS/Azure/GCP metadata IP
+    }
+    if hostname.lower() in dangerous_hostnames:
+        raise ValueError(f"Hostname '{hostname}' is not allowed for security reasons")
+
+    # Validate port range if specified
+    if parsed.port is not None:
+        if not (1 <= parsed.port <= 65535):
+            raise ValueError(f"Invalid port {parsed.port}. Port must be between 1 and 65535")
+
+    # Resolve hostname and check if it points to a private IP
+    try:
+        addr_info = socket.getaddrinfo(hostname, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+        for family, socktype, proto, canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            if _is_private_ip(ip_str):
+                raise ValueError(
+                    f"Hostname '{hostname}' resolves to private IP address '{ip_str}'. "
+                    "URLs pointing to internal networks are not allowed for security reasons"
+                )
+    except socket.gaierror as e:
+        raise ValueError(f"Could not resolve hostname '{hostname}': {e}")
 
 
 class GitLabInstanceCreate(BaseModel):
@@ -39,19 +113,15 @@ class GitLabInstanceCreate(BaseModel):
     @field_validator('url')
     @classmethod
     def validate_url(cls, v):
-        """Validate GitLab instance URL format."""
+        """Validate GitLab instance URL format and check for SSRF vulnerabilities."""
         if not v or not v.strip():
             raise ValueError("Instance URL cannot be empty")
         v = v.strip()
         # Add scheme if missing for validation
         test_url = v if '://' in v else f'https://{v}'
         try:
-            parsed = urlparse(test_url)
-            # Validate scheme is http or https only
-            if parsed.scheme not in ('http', 'https'):
-                raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed")
-            if not parsed.hostname:
-                raise ValueError("Invalid URL: no hostname found")
+            # Perform SSRF validation (includes scheme and hostname checks)
+            _validate_url_for_ssrf_sync(test_url)
             # Return original value (normalization happens in the API logic)
             return v
         except ValueError:
@@ -89,19 +159,15 @@ class GitLabInstanceUpdate(BaseModel):
     @field_validator('url')
     @classmethod
     def validate_url(cls, v):
-        """Validate GitLab instance URL if provided."""
+        """Validate GitLab instance URL if provided and check for SSRF vulnerabilities."""
         if v is not None:
             if not v.strip():
                 raise ValueError("Instance URL cannot be empty")
             v = v.strip()
             test_url = v if '://' in v else f'https://{v}'
             try:
-                parsed = urlparse(test_url)
-                # Validate scheme is http or https only
-                if parsed.scheme not in ('http', 'https'):
-                    raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed")
-                if not parsed.hostname:
-                    raise ValueError("Invalid URL: no hostname found")
+                # Perform SSRF validation (includes scheme and hostname checks)
+                _validate_url_for_ssrf_sync(test_url)
                 return v
             except ValueError:
                 raise
@@ -460,8 +526,8 @@ async def delete_instance(
 async def get_instance_projects(
     instance_id: int,
     search: str | None = None,
-    per_page: int = 50,
-    page: int = 1,
+    per_page: int = Query(default=50, ge=1, le=100, description="Number of results per page (1-100)"),
+    page: int = Query(default=1, ge=1, description="Page number (must be >= 1)"),
     get_all: bool = False,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
@@ -477,9 +543,6 @@ async def get_instance_projects(
 
     try:
         client = GitLabClient(instance.url, instance.encrypted_token)
-        # Clamp pagination to keep requests bounded.
-        per_page = max(1, min(int(per_page), 100))
-        page = max(1, int(page))
         projects = client.get_projects(search=search, per_page=per_page, page=page, get_all=get_all)
         return {"projects": projects}
     except Exception as e:
@@ -495,8 +558,8 @@ async def get_instance_projects(
 async def get_instance_groups(
     instance_id: int,
     search: str | None = None,
-    per_page: int = 50,
-    page: int = 1,
+    per_page: int = Query(default=50, ge=1, le=100, description="Number of results per page (1-100)"),
+    page: int = Query(default=1, ge=1, description="Page number (must be >= 1)"),
     get_all: bool = False,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
@@ -512,8 +575,6 @@ async def get_instance_groups(
 
     try:
         client = GitLabClient(instance.url, instance.encrypted_token)
-        per_page = max(1, min(int(per_page), 100))
-        page = max(1, int(page))
         groups = client.get_groups(search=search, per_page=per_page, page=page, get_all=get_all)
         return {"groups": groups}
     except Exception as e:

@@ -27,7 +27,7 @@ class UserCreate(BaseModel):
     """Request to create a new user."""
     username: str
     password: str
-    email: Optional[str] = None
+    email: Optional[EmailStr] = None
     is_admin: bool = False
 
     @field_validator('username')
@@ -51,7 +51,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     """Request to update a user."""
-    email: Optional[str] = None
+    email: Optional[EmailStr] = None
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
