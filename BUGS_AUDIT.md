@@ -1,7 +1,7 @@
 # Mirror Maestro - Comprehensive Bug Audit
 
 **Started**: 2026-01-04
-**Status**: COMPLETED (Session 3)
+**Status**: COMPLETED (Session 4)
 **Last Updated**: 2026-01-04
 
 ## Audit Methodology
@@ -39,8 +39,9 @@
 | File | Reviewed | Issues Found | Issues Fixed |
 |------|----------|--------------|--------------|
 | `instances.py` | ✅ | 1 MEDIUM | 1 |
+| `auth.py` (api) | ✅ | 2 HIGH | 2 |
 | `pairs.py` | ✅ | 0 | 0 |
-| `mirrors.py` | ✅ | 2 CRITICAL | 2 |
+| `mirrors.py` | ✅ | 3 (2 CRITICAL, 1 HIGH) | 3 |
 | `issue_mirrors.py` | ✅ | 1 HIGH | 1 |
 | `users.py` | ✅ | 0 | 0 |
 | `auth.py` | ✅ | 0 | 0 |
@@ -55,7 +56,7 @@
 
 | File | Reviewed | Issues Found | Issues Fixed |
 |------|----------|--------------|--------------|
-| `auth.py` | ✅ | 1 CRITICAL | 1 |
+| `auth.py` | ✅ | 2 (1 CRITICAL, 1 HIGH) | 2 |
 | `encryption.py` | ✅ | 0 | 0 |
 | `gitlab_client.py` | ✅ | 0 | 0 |
 | `issue_sync.py` | ✅ | 5 (2 CRITICAL, 2 HIGH, 1 MEDIUM) | 5 |
@@ -71,7 +72,7 @@
 |------|----------|--------------|--------------|
 | `models.py` | ✅ | 1 HIGH | 1 |
 | `database.py` | ✅ | 0 | 0 |
-| `config.py` | ✅ | 0 | 0 |
+| `config.py` | ✅ | 4 HIGH | 4 |
 | `main.py` | ✅ | 0 | 0 |
 
 ### Frontend
@@ -192,6 +193,18 @@
 - Proper error logging
 
 **Status**: ✅ FIXED (Session 3)
+
+#### 8. Token exposed in error logs
+
+**File**: `app/api/mirrors.py`
+
+**Problem**: The `rotate_mirror_token` function logged the entire `token_result` dictionary when GitLab API returned an incomplete response, exposing the plaintext token value in logs.
+
+**Impact**: Anyone with log access could retrieve plaintext GitLab API tokens.
+
+**Fix**: Changed to log only the missing field names and response keys without exposing the actual token value.
+
+**Status**: ✅ FIXED (Session 4)
 
 ### HIGH
 
@@ -314,6 +327,58 @@
 
 **Status**: ✅ FIXED (Session 3)
 
+#### 11. Non-constant-time credential comparison
+
+**File**: `app/api/auth.py`
+
+**Problem**: The login endpoint used Python's `==` operator for username/password comparison in legacy mode, which is vulnerable to timing attacks.
+
+**Impact**: Attackers could determine valid credentials by measuring response time differences.
+
+**Fix**: Changed to use `secrets.compare_digest()` for constant-time comparison.
+
+**Status**: ✅ FIXED (Session 4)
+
+#### 12. User enumeration via timing attack (login endpoint)
+
+**File**: `app/api/auth.py`
+
+**Problem**: When a user doesn't exist, the OR condition short-circuits before password verification. This creates a ~100ms timing difference (bcrypt verification time) that reveals user existence.
+
+**Impact**: Attackers can enumerate valid usernames by measuring login response times.
+
+**Fix**: Always perform password verification using a dummy hash when user doesn't exist, ensuring constant-time behavior.
+
+**Status**: ✅ FIXED (Session 4)
+
+#### 13. User enumeration via timing attack (Basic Auth)
+
+**File**: `app/core/auth.py`
+
+**Problem**: Same timing attack vulnerability as the login endpoint, affecting Basic Auth in multi-user mode.
+
+**Impact**: User enumeration through any API endpoint requiring authentication.
+
+**Fix**: Same constant-time fix using dummy hash verification.
+
+**Status**: ✅ FIXED (Session 4)
+
+#### 14. Missing configuration validators
+
+**File**: `app/config.py`
+
+**Problem**: Several configuration settings lacked validation:
+- `jwt_algorithm` - no validation of supported algorithms
+- `jwt_expiration_hours` - no bounds checking
+- `log_level` - no validation of valid Python log levels
+- `port` - no validation of valid port range
+
+**Impact**: Invalid configurations could cause runtime errors or security issues.
+
+**Fix**: Added field validators for all four settings with proper bounds and allowed value checking.
+
+**Status**: ✅ FIXED (Session 4)
+
 ### MEDIUM
 
 #### 1. Orphaned issue search limited to page 1
@@ -368,7 +433,22 @@
 
 ---
 
-## Issues Fixed This Session (Session 3)
+## Issues Fixed This Session (Session 4)
+
+| # | Severity | File | Description |
+|---|----------|------|-------------|
+| 1 | CRITICAL | `app/api/mirrors.py` | Token exposed in error logs |
+| 2 | HIGH | `app/api/auth.py` | Non-constant-time credential comparison |
+| 3 | HIGH | `app/api/auth.py` | User enumeration via timing attack |
+| 4 | HIGH | `app/core/auth.py` | User enumeration in Basic Auth |
+| 5 | HIGH | `app/config.py` | Missing JWT algorithm validator |
+| 6 | HIGH | `app/config.py` | Missing JWT expiration validator |
+| 7 | HIGH | `app/config.py` | Missing log level validator |
+| 8 | HIGH | `app/config.py` | Missing port validator |
+
+---
+
+## Issues Fixed Session 3
 
 | # | Severity | File | Description |
 |---|----------|------|-------------|
@@ -421,18 +501,19 @@ Based on git history, these areas have been addressed in prior sessions:
 
 ## Summary
 
-- **Total Issues Found**: 23
-- **Critical**: 7 ✅ (all fixed)
-- **High**: 11 ✅ (all fixed)
+- **Total Issues Found**: 31
+- **Critical**: 8 ✅ (all fixed)
+- **High**: 18 ✅ (all fixed)
 - **Medium**: 4 ✅ (all fixed)
 - **Low**: 0
-- **Issues Fixed**: 23
+- **Issues Fixed**: 31
 - **Remaining**: 0
 
 ### By Session
 - **Session 1**: 1 issue fixed (1 CRITICAL)
 - **Session 2**: 11 issues fixed (4 CRITICAL, 5 HIGH, 2 MEDIUM)
 - **Session 3**: 9 issues fixed (2 CRITICAL, 5 HIGH, 2 MEDIUM)
+- **Session 4**: 8 issues fixed (1 CRITICAL, 7 HIGH)
 
 ---
 

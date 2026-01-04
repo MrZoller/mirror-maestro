@@ -168,7 +168,14 @@ async def _verify_basic_credentials_multi_user(
     )
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(credentials.password, user.hashed_password):
+    # Always perform password verification to prevent timing-based user enumeration.
+    # If user doesn't exist, verify against a dummy hash to maintain constant time.
+    # This prevents attackers from determining valid usernames by timing differences.
+    DUMMY_HASH = "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.E/fN.xwU3jG3Iy"
+    password_to_verify = user.hashed_password if user else DUMMY_HASH
+    password_valid = verify_password(credentials.password, password_to_verify)
+
+    if user is None or not password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
