@@ -9,6 +9,8 @@ database-agnostic.
 """
 import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 import json
 import shutil
@@ -447,16 +449,18 @@ def _validate_backup_archive(archive_path: Path) -> Dict:
             }
 
     except tarfile.TarError as e:
+        logger.error(f"Tar archive error during validation: {e}")
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid or corrupt backup archive: {str(e)}"
+            detail="Invalid or corrupt backup archive. Please check the file format."
         )
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Unexpected error during backup validation: {e}", exc_info=True)
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to validate backup: {str(e)}"
+            detail="Failed to validate backup. Please check the file format and try again."
         )
 
 
@@ -545,9 +549,10 @@ async def restore_backup(
             try:
                 _safe_tar_extract(tar, extract_path)
             except ValueError as e:
+                logger.error(f"Security validation failed during extraction: {e}")
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid backup archive: {str(e)}"
+                    detail="Invalid backup archive: security validation failed."
                 )
 
         # Load and validate database JSON
@@ -564,18 +569,20 @@ async def restore_backup(
                     detail=f"Invalid backup. Missing tables: {', '.join(missing_tables)}"
                 )
         except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in database backup: {e}")
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid or corrupt database backup: {str(e)}"
+                detail="Invalid or corrupt database backup: JSON parsing failed."
             )
 
         # Import data into database
         try:
             counts = await _import_table_data(db, db_data)
         except Exception as e:
+            logger.error(f"Failed to restore database: {e}", exc_info=True)
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to restore database: {str(e)}"
+                detail="Failed to restore database. Please check the backup file integrity and try again."
             )
 
         # Restore encryption key
