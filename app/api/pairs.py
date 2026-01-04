@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from typing import List, Optional
 import re
 import logging
@@ -14,6 +15,46 @@ from app.core.rate_limiter import RateLimiter, BatchOperationTracker
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _is_token_expired(expires_at: datetime | None) -> bool:
+    """Check if a token has expired based on its expiration date."""
+    if expires_at is None:
+        return False
+    return expires_at <= datetime.utcnow()
+
+
+# Maximum allowed regex pattern length to prevent resource exhaustion
+MAX_REGEX_LENGTH = 500
+
+
+def _validate_regex_safety(pattern: str) -> None:
+    """
+    Validate a regex pattern for safety against ReDoS attacks.
+
+    Checks for:
+    - Maximum pattern length
+    - Nested quantifiers that can cause catastrophic backtracking
+    - Valid regex syntax
+
+    Raises:
+        ValueError: If pattern is unsafe or invalid
+    """
+    if len(pattern) > MAX_REGEX_LENGTH:
+        raise ValueError(f"Regex pattern too long (max {MAX_REGEX_LENGTH} characters)")
+
+    # Check for common ReDoS patterns (nested quantifiers)
+    # Patterns like (a+)+, (a*)+, (a+)*, etc. can cause catastrophic backtracking
+    redos_patterns = [
+        r'\([^)]*[+*][^)]*\)[+*]',  # (something+)+ or (something*)* etc
+        r'\([^)]*\|[^)]*\)[+*]',    # (a|b)+ with alternation can be problematic
+    ]
+    for danger_pattern in redos_patterns:
+        if re.search(danger_pattern, pattern):
+            raise ValueError(
+                "Regex pattern contains potentially dangerous nested quantifiers. "
+                "Please simplify the pattern to avoid performance issues."
+            )
 
 
 router = APIRouter(prefix="/api/pairs", tags=["pairs"])
@@ -52,8 +93,11 @@ class InstancePairCreate(BaseModel):
     @field_validator('mirror_branch_regex')
     @classmethod
     def validate_branch_regex(cls, v):
-        """Validate that branch regex is valid regex syntax."""
+        """Validate that branch regex is valid and safe."""
         if v is not None and v.strip():
+            # Check for ReDoS vulnerabilities first
+            _validate_regex_safety(v)
+            # Then verify it compiles
             try:
                 re.compile(v)
             except re.error as e:
@@ -113,8 +157,11 @@ class InstancePairUpdate(BaseModel):
     @field_validator('mirror_branch_regex')
     @classmethod
     def validate_branch_regex(cls, v):
-        """Validate that branch regex is valid regex syntax if provided."""
+        """Validate that branch regex is valid and safe if provided."""
         if v is not None and v.strip():
+            # Check for ReDoS vulnerabilities first
+            _validate_regex_safety(v)
+            # Then verify it compiles
             try:
                 re.compile(v)
             except re.error as e:
@@ -624,6 +671,14 @@ async def sync_all_mirrors(
             logger.warning(f"Skipping mirror {mirror.id}: not configured in GitLab")
             skipped += 1
             tracker.record_success()  # Count as processed but don't track as error
+            continue
+
+        # Skip if mirror token has expired
+        if _is_token_expired(mirror.mirror_token_expires_at):
+            error_msg = f"{mirror_identifier}: Mirror token has expired. Please rotate the token."
+            logger.warning(f"Skipping mirror {mirror.id}: token expired")
+            errors.append(error_msg)
+            tracker.record_failure(error_msg)
             continue
 
         try:

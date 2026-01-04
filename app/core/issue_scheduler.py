@@ -189,11 +189,18 @@ class IssueScheduler:
         logger.info(f"Waiting for {active_count} active sync job(s) to complete (timeout: {settings.sync_shutdown_timeout}s)...")
 
         try:
-            await asyncio.wait_for(
+            results = await asyncio.wait_for(
                 asyncio.gather(*tasks_snapshot, return_exceptions=True),
                 timeout=settings.sync_shutdown_timeout
             )
-            logger.info("All sync jobs completed gracefully")
+            # Check for and log any exceptions from the gathered tasks
+            exceptions = [r for r in results if isinstance(r, Exception)]
+            if exceptions:
+                for exc in exceptions:
+                    logger.error(f"Sync task exception during shutdown: {exc}")
+                logger.warning(f"All sync jobs finished, but {len(exceptions)} task(s) raised exceptions")
+            else:
+                logger.info("All sync jobs completed gracefully")
         except asyncio.TimeoutError:
             remaining = [t for t in tasks_snapshot if not t.done()]
             logger.warning(
