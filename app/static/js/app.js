@@ -473,18 +473,27 @@ function initTabs() {
             document.getElementById(targetId).classList.add('active');
 
             // Load data when switching to specific tabs
-            if (targetId === 'mirrors-tab') {
-                loadMirrors();
-            } else if (targetId === 'topology-tab') {
-                if (typeof window.initTopologyTab === 'function') {
-                    window.initTopologyTab();
+            if (targetId === 'dashboard-tab') {
+                // Start live polling when entering dashboard
+                loadDashboard();
+                startLivePolling();
+            } else {
+                // Stop live polling when leaving dashboard
+                stopLivePolling();
+
+                if (targetId === 'mirrors-tab') {
+                    loadMirrors();
+                } else if (targetId === 'topology-tab') {
+                    if (typeof window.initTopologyTab === 'function') {
+                        window.initTopologyTab();
+                    }
+                } else if (targetId === 'backup-tab') {
+                    loadBackupStats();
+                } else if (targetId === 'settings-tab') {
+                    loadUsers();
+                } else if (targetId === 'about-tab') {
+                    loadAboutInfo();
                 }
-            } else if (targetId === 'backup-tab') {
-                loadBackupStats();
-            } else if (targetId === 'settings-tab') {
-                loadUsers();
-            } else if (targetId === 'about-tab') {
-                loadAboutInfo();
             }
         });
     });
@@ -1173,11 +1182,24 @@ function renderPairsDistribution(pairs) {
 // ----------------------------
 
 function startLivePolling() {
+    // Clear any existing interval first
+    if (livePollingInterval) {
+        clearInterval(livePollingInterval);
+        livePollingInterval = null;
+    }
+
     // Poll every 30 seconds
     livePollingInterval = setInterval(updateLiveStats, 30000);
 
     // Initial update
     updateLiveStats();
+}
+
+function stopLivePolling() {
+    if (livePollingInterval) {
+        clearInterval(livePollingInterval);
+        livePollingInterval = null;
+    }
 }
 
 async function updateLiveStats() {
