@@ -150,9 +150,18 @@ async def create_user(
         is_active=True
     )
     db.add(user)
-    await db.commit()
-    await db.refresh(user)
+    try:
+        await db.commit()
+        await db.refresh(user)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create user: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create user"
+        )
 
+    logger.info(f"User '{user.username}' created by admin '{admin.username}'")
     return UserResponse.model_validate(user)
 
 
@@ -243,8 +252,16 @@ async def update_user(
     for field, value in update_data.items():
         setattr(user, field, value)
 
-    await db.commit()
-    await db.refresh(user)
+    try:
+        await db.commit()
+        await db.refresh(user)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to update user {user_id}: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user"
+        )
 
     return UserResponse.model_validate(user)
 
@@ -291,4 +308,14 @@ async def delete_user(
         )
 
     await db.delete(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to delete user {user_id}: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user"
+        )
+
+    logger.warning(f"User '{user.username}' (ID:{user_id}) deleted by admin '{admin.username}'")
