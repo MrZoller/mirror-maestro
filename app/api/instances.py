@@ -202,8 +202,8 @@ async def create_instance(
         u = client.get_current_user()
         token_user_id = u.get("id")
         token_username = u.get("username")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to fetch token user info (non-critical): {e}")
 
     # Create the instance
     db_instance = GitLabInstance(

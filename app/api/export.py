@@ -247,15 +247,19 @@ async def import_pair_mirrors(
             # Look up project IDs from paths via GitLab API
             try:
                 source_project = source_client.get_project_by_path(mirror_data.source_project_path)
-                source_project_id = source_project["id"]
+                source_project_id = source_project.get("id")
+                if source_project_id is None:
+                    raise ValueError("GitLab API returned project without 'id' field")
             except Exception as e:
-                raise Exception(f"Source project '{mirror_data.source_project_path}' not found: {str(e)}")
+                raise ValueError(f"Source project '{mirror_data.source_project_path}' not found: {str(e)}")
 
             try:
                 target_project = target_client.get_project_by_path(mirror_data.target_project_path)
-                target_project_id = target_project["id"]
+                target_project_id = target_project.get("id")
+                if target_project_id is None:
+                    raise ValueError("GitLab API returned project without 'id' field")
             except Exception as e:
-                raise Exception(f"Target project '{mirror_data.target_project_path}' not found: {str(e)}")
+                raise ValueError(f"Target project '{mirror_data.target_project_path}' not found: {str(e)}")
 
             # Convert MirrorExport to MirrorCreate with looked-up IDs
             mirror_create = MirrorCreate(
