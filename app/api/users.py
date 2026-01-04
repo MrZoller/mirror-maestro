@@ -3,6 +3,7 @@ User management API endpoints.
 
 Admin-only endpoints for managing users in multi-user mode.
 """
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -19,6 +20,8 @@ from app.core.auth import (
 )
 from app.database import get_db
 from app.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
