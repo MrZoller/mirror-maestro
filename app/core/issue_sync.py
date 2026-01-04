@@ -2,8 +2,10 @@
 
 import asyncio
 import hashlib
+import ipaddress
 import logging
 import re
+import socket
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple, Any
 from urllib.parse import urlparse
@@ -185,12 +187,107 @@ def extract_mirror_urls_from_description(description: Optional[str]) -> Set[str]
     return urls
 
 
-async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0) -> Optional[bytes]:
+def _is_private_ip(ip_str: str) -> bool:
     """
-    Download a file from a URL with retry logic and size limits.
+    Check if an IP address is in a private/reserved range.
+
+    Prevents SSRF attacks by blocking requests to internal networks.
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        # Check for private, loopback, link-local, reserved, and multicast
+        return (
+            ip.is_private or
+            ip.is_loopback or
+            ip.is_link_local or
+            ip.is_reserved or
+            ip.is_multicast or
+            # Cloud metadata endpoints
+            ip_str.startswith("169.254.") or  # AWS/Azure/GCP metadata
+            ip_str == "100.100.100.200"  # Alibaba Cloud metadata
+        )
+    except ValueError:
+        # Invalid IP - treat as potentially dangerous
+        return True
+
+
+async def _validate_url_for_ssrf(url: str) -> None:
+    """
+    Validate a URL to prevent SSRF attacks.
+
+    Uses async DNS resolution to avoid blocking the event loop.
 
     Args:
-        url: URL to download from.
+        url: URL to validate.
+
+    Raises:
+        ValueError: If URL is potentially dangerous (private IP, bad scheme, etc.)
+    """
+    parsed = urlparse(url)
+
+    # Only allow http/https schemes
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Only http/https allowed.")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL has no hostname")
+
+    # Block obviously dangerous hostnames
+    dangerous_hostnames = {
+        "localhost", "127.0.0.1", "::1", "0.0.0.0",
+        "metadata.google.internal",  # GCP metadata
+        "169.254.169.254",  # AWS/Azure/GCP metadata IP
+    }
+    if hostname.lower() in dangerous_hostnames:
+        raise ValueError(f"Hostname '{hostname}' is not allowed")
+
+    # Resolve hostname asynchronously and check if it points to a private IP
+    try:
+        # Use async DNS resolution to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        addr_info = await loop.getaddrinfo(hostname, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+        for family, socktype, proto, canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            if _is_private_ip(ip_str):
+                raise ValueError(
+                    f"Hostname '{hostname}' resolves to private IP '{ip_str}'. "
+                    "Requests to internal networks are not allowed."
+                )
+    except socket.gaierror as e:
+        raise ValueError(f"Could not resolve hostname '{hostname}': {e}")
+
+
+def _parse_content_length(header_value: Optional[str]) -> Optional[int]:
+    """
+    Safely parse Content-Length header value.
+
+    Args:
+        header_value: Raw header value (may be None or invalid).
+
+    Returns:
+        Parsed integer or None if invalid/missing.
+    """
+    if not header_value:
+        return None
+    try:
+        size = int(header_value)
+        # Reject negative or unreasonably large values (10GB limit)
+        if size < 0 or size > 10 * 1024 * 1024 * 1024:
+            logger.warning(f"Content-Length value out of range: {size}")
+            return None
+        return size
+    except (ValueError, TypeError):
+        logger.warning(f"Invalid Content-Length header: {header_value}")
+        return None
+
+
+async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0) -> Optional[bytes]:
+    """
+    Download a file from a URL with retry logic, size limits, and SSRF protection.
+
+    Args:
+        url: URL to download from (must be http/https, not pointing to private IPs).
         max_retries: Maximum number of retry attempts (default: 3).
         max_size_bytes: Maximum file size in bytes (0 = unlimited).
 
@@ -198,24 +295,68 @@ async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0)
         File content as bytes, or None if download failed after all retries.
 
     Raises:
-        ValueError: If file size exceeds max_size_bytes.
+        ValueError: If URL is invalid/dangerous or file size exceeds max_size_bytes.
     """
+    # SSRF protection: validate URL before making request
+    await _validate_url_for_ssrf(url)
+
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    url,
-                    follow_redirects=True,
-                    timeout=settings.attachment_download_timeout
-                )
+            # Use manual redirect handling to validate each redirect URL for SSRF
+            # Configure connection pool limits to prevent resource exhaustion
+            limits = httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+            )
+            timeout = httpx.Timeout(
+                timeout=float(settings.attachment_download_timeout),
+                connect=10.0,  # Connection timeout
+            )
+            async with httpx.AsyncClient(
+                follow_redirects=False,
+                limits=limits,
+                timeout=timeout,
+            ) as client:
+                current_url = url
+                max_redirects = 10
+                redirect_count = 0
+
+                while True:
+                    response = await client.get(current_url)
+
+                    # Handle redirects manually to validate each redirect URL
+                    if response.is_redirect and redirect_count < max_redirects:
+                        redirect_url = response.headers.get("location")
+                        if not redirect_url:
+                            raise ValueError("Redirect response missing Location header")
+
+                        # Make redirect URL absolute if relative
+                        if redirect_url.startswith("/"):
+                            from urllib.parse import urlparse, urlunparse
+                            parsed = urlparse(current_url)
+                            redirect_url = urlunparse((parsed.scheme, parsed.netloc, redirect_url, "", "", ""))
+                        elif not redirect_url.startswith(("http://", "https://")):
+                            raise ValueError(f"Invalid redirect URL: {redirect_url}")
+
+                        # SSRF validation on redirect URL (prevents SSRF bypass via redirect)
+                        await _validate_url_for_ssrf(redirect_url)
+
+                        current_url = redirect_url
+                        redirect_count += 1
+                        continue
+
+                    if response.is_redirect and redirect_count >= max_redirects:
+                        raise ValueError(f"Too many redirects (max: {max_redirects})")
+
+                    break
+
                 response.raise_for_status()
 
-                # Check content length before downloading
-                content_length = response.headers.get('content-length')
-                if content_length and max_size_bytes > 0:
-                    size_bytes = int(content_length)
-                    if size_bytes > max_size_bytes:
-                        size_mb = size_bytes / (1024 * 1024)
+                # Safely parse content length
+                content_length = _parse_content_length(response.headers.get('content-length'))
+                if content_length is not None and max_size_bytes > 0:
+                    if content_length > max_size_bytes:
+                        size_mb = content_length / (1024 * 1024)
                         max_mb = max_size_bytes / (1024 * 1024)
                         raise ValueError(
                             f"File size ({size_mb:.2f}MB) exceeds maximum allowed size ({max_mb:.2f}MB)"
@@ -233,7 +374,7 @@ async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0)
 
                 return content
         except ValueError:
-            # Don't retry size limit errors
+            # Don't retry validation/size limit errors
             raise
         except Exception as e:
             if attempt < max_retries - 1:
@@ -373,16 +514,13 @@ class IssueSyncEngine:
 
             # Execute the operation with retry logic and circuit breaker
             if circuit_breaker:
-                # Check circuit breaker state manually (since it's sync but we need async execution)
-                if circuit_breaker.state == "OPEN":
-                    if circuit_breaker._should_attempt_reset():
-                        circuit_breaker.state = "HALF_OPEN"
-                        logger.info("Circuit breaker entering HALF_OPEN state, testing recovery")
-                    else:
-                        raise Exception(
-                            f"Circuit breaker is OPEN. Service unavailable. "
-                            f"Will retry after {circuit_breaker.recovery_timeout}s cooldown."
-                        )
+                # Thread-safe check of circuit breaker state with automatic HALF_OPEN transition
+                current_state, is_available = circuit_breaker.check_and_transition()
+                if not is_available:
+                    raise Exception(
+                        f"Circuit breaker is OPEN. Service unavailable. "
+                        f"Will retry after {circuit_breaker.recovery_timeout}s cooldown."
+                    )
 
                 try:
                     # Execute with retry logic (async)
@@ -390,12 +528,14 @@ class IssueSyncEngine:
                         operation,
                         operation_name=operation_name
                     )
-                    # Mark success on circuit breaker
-                    circuit_breaker._on_success()
+                    # Mark success on circuit breaker (thread-safe)
+                    with circuit_breaker._lock:
+                        circuit_breaker._on_success()
                     return result
                 except Exception as e:
-                    # Mark failure on circuit breaker
-                    circuit_breaker._on_failure()
+                    # Mark failure on circuit breaker (thread-safe)
+                    with circuit_breaker._lock:
+                        circuit_breaker._on_failure()
                     raise
             else:
                 # No circuit breaker, just use retry logic
@@ -498,15 +638,28 @@ class IssueSyncEngine:
                             "error": str(e)
                         })
 
-                # Checkpoint: Update config with progress
+                # Checkpoint: Update config with progress timestamp only
+                # Note: Do NOT set last_sync_status here - only the final outcome should set it
+                # Setting "in_progress" here caused status to get stuck if post-sync commit failed
                 try:
                     self.config.last_sync_at = datetime.utcnow()
-                    self.config.last_sync_status = "in_progress"
                     await self.db.commit()
                     logger.debug(f"Progress checkpoint saved: {batch_end}/{total_issues} issues processed")
                 except Exception as checkpoint_error:
                     logger.warning(f"Failed to save progress checkpoint: {checkpoint_error}")
                     # Continue processing - checkpoint failure is not critical
+
+            # Set final sync status before returning to caller
+            # This ensures status is correct even if caller's commit fails
+            if stats["issues_failed"] > 0 and stats["issues_created"] + stats["issues_updated"] > 0:
+                self.config.last_sync_status = "partial"
+            elif stats["issues_failed"] > 0:
+                self.config.last_sync_status = "failed"
+            else:
+                self.config.last_sync_status = "success"
+
+            self.config.last_sync_error = None
+            await self.db.commit()
 
             logger.info(
                 f"Issue sync completed: {stats['issues_created']} created, "
@@ -527,8 +680,17 @@ class IssueSyncEngine:
         stats: Dict[str, Any]
     ) -> None:
         """Sync a single issue from source to target."""
-        source_issue_id = source_issue["id"]
-        source_issue_iid = source_issue["iid"]
+        source_issue_id = source_issue.get("id")
+        source_issue_iid = source_issue.get("iid")
+
+        # Validate required fields from GitLab API response
+        if source_issue_id is None or source_issue_iid is None:
+            logger.error(
+                f"Invalid issue from GitLab API: missing 'id' or 'iid'. "
+                f"Keys present: {list(source_issue.keys())}"
+            )
+            stats["issues_failed"] += 1
+            return
 
         stats["issues_processed"] += 1
 
@@ -554,7 +716,9 @@ class IssueSyncEngine:
         mapping = result.scalar_one_or_none()
 
         # Compute content hash for change detection
-        content_to_hash = f"{source_issue['title']}|||{source_issue.get('description', '')}"
+        source_title = source_issue.get('title', '')
+        source_description = source_issue.get('description', '')
+        content_to_hash = f"{source_title}|||{source_description}"
         current_hash = compute_content_hash(content_to_hash)
 
         if mapping:
@@ -588,19 +752,27 @@ class IssueSyncEngine:
         Checks if the issue already exists on target (orphaned from previous failed sync)
         before creating a new one.
         """
-        source_issue_id = source_issue["id"]
-        source_issue_iid = source_issue["iid"]
+        # Validate required fields from source issue
+        source_issue_id = source_issue.get("id")
+        source_issue_iid = source_issue.get("iid")
+        source_issue_title = source_issue.get("title", "Untitled Issue")
+        source_issue_state = source_issue.get("state", "opened")
+
+        if source_issue_id is None or source_issue_iid is None:
+            raise ValueError(f"Invalid source issue: missing 'id' or 'iid' field")
 
         # Idempotency check: search for existing issue with same source reference
         # This prevents creating duplicates if DB commit failed but GitLab creation succeeded
         existing_target_issue = await self._find_existing_target_issue(source_issue_id, source_issue_iid)
         if existing_target_issue:
+            target_issue_id = existing_target_issue.get("id")
+            target_issue_iid = existing_target_issue.get("iid")
+            if target_issue_id is None or target_issue_iid is None:
+                raise ValueError(f"Invalid existing target issue: missing 'id' or 'iid' field")
             logger.info(
-                f"Found orphaned issue {existing_target_issue['iid']} for source issue {source_issue_iid}. "
+                f"Found orphaned issue {target_issue_iid} for source issue {source_issue_iid}. "
                 "Reusing and updating it with current source content."
             )
-            target_issue_id = existing_target_issue["id"]
-            target_issue_iid = existing_target_issue["iid"]
 
             # Update the orphaned issue with current source content
             # to ensure it's in sync before marking the mapping as synced
@@ -621,7 +793,7 @@ class IssueSyncEngine:
                 f"update_orphaned_issue_{target_issue_iid}",
                 self.mirror.target_project_id,
                 target_issue_iid,
-                title=source_issue["title"],
+                title=source_issue_title,
                 description=description,
                 labels=labels,
                 weight=source_issue.get("weight") if self.config.sync_weight else None,
@@ -650,14 +822,16 @@ class IssueSyncEngine:
                 self.target_client.create_issue,
                 f"create_issue_{source_issue_iid}",
                 self.mirror.target_project_id,
-                title=source_issue["title"],
+                title=source_issue_title,
                 description=description,
                 labels=labels,
                 weight=source_issue.get("weight") if self.config.sync_weight else None,
             )
 
-            target_issue_id = target_issue["id"]
-            target_issue_iid = target_issue["iid"]
+            target_issue_id = target_issue.get("id")
+            target_issue_iid = target_issue.get("iid")
+            if target_issue_id is None or target_issue_iid is None:
+                raise ValueError(f"GitLab create_issue returned invalid response: missing 'id' or 'iid'")
 
             logger.info(
                 f"Created target issue {target_issue_iid} for source issue {source_issue_iid}"
@@ -668,7 +842,7 @@ class IssueSyncEngine:
             await self._sync_time_tracking(source_issue, target_issue_iid)
 
         # Close target issue if source is closed
-        if source_issue["state"] == "closed" and self.config.sync_closed_issues:
+        if source_issue_state == "closed" and self.config.sync_closed_issues:
             await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
                 f"close_issue_{target_issue_iid}",
@@ -677,8 +851,8 @@ class IssueSyncEngine:
                 state_event="close"
             )
 
-        # Create issue mapping with transaction safety
-        # Use a savepoint so we can rollback if comment sync fails
+        # Create issue mapping with initial status "pending" until all operations complete
+        # This prevents incorrect "synced" status if post-creation operations fail
         mapping = IssueMapping(
             mirror_issue_config_id=self.config.id,
             source_issue_id=source_issue_id,
@@ -690,7 +864,7 @@ class IssueSyncEngine:
             last_synced_at=datetime.utcnow(),
             source_updated_at=self._parse_datetime(source_issue.get("updated_at")),
             target_updated_at=datetime.utcnow(),
-            sync_status="synced",
+            sync_status="pending",  # Start as pending, update to synced only on full success
             source_content_hash=content_hash,
         )
         self.db.add(mapping)
@@ -703,6 +877,10 @@ class IssueSyncEngine:
             # Sync comments if enabled (uses mapping.id for foreign key)
             if self.config.sync_comments:
                 await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+
+            # All operations succeeded - mark as fully synced
+            mapping.sync_status = "synced"
+            await self.db.commit()
 
         except Exception as e:
             # If post-creation sync fails, log warning but don't fail entire sync
@@ -725,7 +903,15 @@ class IssueSyncEngine:
         content_hash: str
     ) -> None:
         """Update an existing issue on target instance."""
-        source_issue_iid = source_issue["iid"]
+        # Validate required fields from source issue
+        source_issue_id = source_issue.get("id")
+        source_issue_iid = source_issue.get("iid")
+        source_issue_title = source_issue.get("title", "Untitled Issue")
+        source_issue_state = source_issue.get("state", "opened")
+
+        if source_issue_id is None or source_issue_iid is None:
+            raise ValueError(f"Invalid source issue: missing 'id' or 'iid' field")
+
         target_issue_iid = mapping.target_issue_iid
 
         # Prepare labels
@@ -738,7 +924,7 @@ class IssueSyncEngine:
         if self.config.sync_attachments:
             description = await self._sync_attachments_in_description(
                 description,
-                source_issue["id"],
+                source_issue_id,
                 mapping.id,
             )
 
@@ -748,7 +934,7 @@ class IssueSyncEngine:
             f"update_issue_{target_issue_iid}",
             self.mirror.target_project_id,
             target_issue_iid,
-            title=source_issue["title"],
+            title=source_issue_title,
             description=description,
             labels=labels,
             weight=source_issue.get("weight") if self.config.sync_weight else None,
@@ -763,7 +949,7 @@ class IssueSyncEngine:
             await self._sync_time_tracking(source_issue, target_issue_iid)
 
         # Sync state (open/closed) with retry logic
-        if source_issue["state"] == "closed" and self.config.sync_closed_issues:
+        if source_issue_state == "closed" and self.config.sync_closed_issues:
             await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
                 f"close_issue_{target_issue_iid}",
@@ -771,7 +957,7 @@ class IssueSyncEngine:
                 target_issue_iid,
                 state_event="close"
             )
-        elif source_issue["state"] == "opened":
+        elif source_issue_state == "opened":
             await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
                 f"reopen_issue_{target_issue_iid}",
@@ -780,12 +966,12 @@ class IssueSyncEngine:
                 state_event="reopen"
             )
 
-        # Update mapping with transaction safety
+        # Update mapping - initially set to pending until post-update operations complete
         mapping.source_content_hash = content_hash
         mapping.last_synced_at = datetime.utcnow()
         mapping.source_updated_at = self._parse_datetime(source_issue.get("updated_at"))
         mapping.target_updated_at = datetime.utcnow()
-        mapping.sync_status = "synced"
+        mapping.sync_status = "pending"  # Will be updated to "synced" on full success
 
         try:
             await self.db.commit()
@@ -793,6 +979,10 @@ class IssueSyncEngine:
             # Sync comments if enabled
             if self.config.sync_comments:
                 await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+
+            # All operations succeeded - mark as fully synced
+            mapping.sync_status = "synced"
+            await self.db.commit()
 
         except Exception as e:
             # If post-update sync fails, log warning but don't fail entire sync
@@ -838,11 +1028,16 @@ class IssueSyncEngine:
         main_content, _ = extract_footer(original_description)
 
         # Build new footer
+        source_issue_iid = source_issue.get("iid")
+        source_web_url = source_issue.get("web_url", "")
+        if source_issue_iid is None:
+            raise ValueError("Cannot prepare description: source issue missing 'iid' field")
+
         footer = build_footer(
             source_instance_url=self.source_instance.url,
             source_project_path=self.mirror.source_project_path,
-            source_issue_iid=source_issue["iid"],
-            source_web_url=source_issue["web_url"],
+            source_issue_iid=source_issue_iid,
+            source_web_url=source_web_url,
             milestone=source_issue.get("milestone"),
             iteration=source_issue.get("iteration"),
             epic=source_issue.get("epic"),
@@ -930,7 +1125,13 @@ class IssueSyncEngine:
         mappings_to_update = []
 
         for source_note in source_notes:
-            source_note_id = source_note["id"]
+            source_note_id = source_note.get("id")
+            if source_note_id is None:
+                logger.warning(
+                    f"Skipping note with missing 'id'. Keys present: {list(source_note.keys())}"
+                )
+                continue
+
             source_note_body = source_note.get("body", "")
             content_hash = compute_content_hash(source_note_body)
 
@@ -965,11 +1166,20 @@ class IssueSyncEngine:
                     source_note_body
                 )
 
+                # Validate response from GitLab API
+                target_note_id = target_note.get("id") if isinstance(target_note, dict) else None
+                if target_note_id is None:
+                    logger.error(
+                        f"Failed to create comment: GitLab API returned invalid response. "
+                        f"Response type: {type(target_note).__name__}"
+                    )
+                    continue
+
                 # Create mapping (will be added to DB in batch)
                 mapping = CommentMapping(
                     issue_mapping_id=issue_mapping_id,
                     source_note_id=source_note_id,
-                    target_note_id=target_note["id"],
+                    target_note_id=target_note_id,
                     last_synced_at=datetime.utcnow(),
                     source_content_hash=content_hash,
                 )
@@ -1134,7 +1344,11 @@ class IssueSyncEngine:
 
             # Check each issue against database mappings
             for issue in target_issues:
-                target_issue_id = issue["id"]
+                target_issue_id = issue.get("id")
+                target_issue_iid = issue.get("iid")
+                if target_issue_id is None:
+                    logger.warning("Skipping issue with missing 'id' field during cleanup")
+                    continue
 
                 # Check if mapping exists
                 result = await self.db.execute(
@@ -1148,7 +1362,7 @@ class IssueSyncEngine:
                 if not mapping:
                     stats["orphaned_issues_found"] += 1
                     logger.warning(
-                        f"Found orphaned issue {issue['iid']} on target - "
+                        f"Found orphaned issue {target_issue_iid} on target - "
                         "exists on GitLab but not in database"
                     )
 
@@ -1230,7 +1444,8 @@ class IssueSyncEngine:
         """
         try:
             # Search for issues with our Mirrored-From label
-            # Note: This is a simple search - in production you might want to cache these
+            # Search all pages (up to max limit) to avoid missing orphaned issues
+            # that may have moved beyond page 1 due to pagination order changes
             target_issues = await self._execute_gitlab_api_call(
                 self.target_client.get_issues,
                 f"search_existing_issue_{source_issue_iid}",
@@ -1238,16 +1453,29 @@ class IssueSyncEngine:
                 labels=self.mirror_from_label,
                 state="all",
                 per_page=100,
-                get_all=False,  # Only search first page for performance
+                get_all=True,  # Search all pages to find orphaned issues
             )
+
+            # Limit the number of issues we check to prevent performance issues
+            max_issues_to_check = settings.max_issues_per_sync
+            issues_checked = 0
 
             # Look for issue with matching source reference in description
             source_ref = f"{self.mirror.source_project_path}#{source_issue_iid}"
             for issue in target_issues:
+                if issues_checked >= max_issues_to_check:
+                    logger.warning(
+                        f"Searched {max_issues_to_check} issues without finding match for source #{source_issue_iid}. "
+                        f"Consider increasing max_issues_per_sync if orphans are expected."
+                    )
+                    break
+
                 description = issue.get("description", "")
                 if source_ref in description and MIRROR_FOOTER_MARKER in description:
-                    logger.debug(f"Found existing target issue {issue['iid']} for source {source_issue_iid}")
+                    logger.debug(f"Found existing target issue {issue.get('iid')} for source {source_issue_iid}")
                     return issue
+
+                issues_checked += 1
 
             return None
         except Exception as e:
@@ -1262,8 +1490,15 @@ class IssueSyncEngine:
             "load_target_labels",
             self.mirror.target_project_id
         )
-        self.target_labels_cache = {label["name"]: label for label in labels}
-        logger.debug(f"Loaded {len(labels)} labels into cache")
+        # Safely build cache, skipping any malformed labels
+        self.target_labels_cache = {}
+        for label in labels:
+            label_name = label.get("name") if isinstance(label, dict) else None
+            if label_name:
+                self.target_labels_cache[label_name] = label
+            else:
+                logger.warning(f"Skipping label with missing 'name': {type(label).__name__}")
+        logger.debug(f"Loaded {len(self.target_labels_cache)} labels into cache")
 
     async def _ensure_mirror_from_label(self) -> None:
         """Ensure the Mirrored-From label exists on target project."""
@@ -1304,5 +1539,5 @@ class IssueSyncEngine:
             return None
         try:
             return datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
-        except Exception:
+        except (ValueError, TypeError):
             return None

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import Optional, Set
 
@@ -24,6 +25,8 @@ async def check_bidirectional_sync_conflict(
     db: AsyncSession,
     source_project_id: int,
     target_project_id: int,
+    source_instance_id: int,
+    target_instance_id: int,
     exclude_config_id: Optional[int] = None
 ) -> Optional[IssueSyncJob]:
     """
@@ -31,6 +34,7 @@ async def check_bidirectional_sync_conflict(
 
     A conflict occurs when:
     - There's a running sync FROM target TO source (reverse direction)
+    - On the SAME GitLab instances (project IDs are only unique per instance)
 
     This prevents race conditions where A→B and B→A syncs run simultaneously,
     which could cause issues to be created/updated inconsistently.
@@ -39,17 +43,24 @@ async def check_bidirectional_sync_conflict(
         db: Database session
         source_project_id: Source project ID for the sync we want to start
         target_project_id: Target project ID for the sync we want to start
+        source_instance_id: Source GitLab instance ID
+        target_instance_id: Target GitLab instance ID
         exclude_config_id: Optional config ID to exclude (for same-config checks)
 
     Returns:
         The conflicting job if found, None otherwise
     """
     # Check for reverse sync (target→source while we want source→target)
+    # Must also match instance IDs since project IDs are only unique per instance
     query = select(IssueSyncJob).where(
         and_(
             IssueSyncJob.status.in_(["pending", "running"]),
+            # Reverse direction: their source is our target, their target is our source
             IssueSyncJob.source_project_id == target_project_id,
-            IssueSyncJob.target_project_id == source_project_id
+            IssueSyncJob.target_project_id == source_project_id,
+            # Also check instance IDs to ensure we're comparing same projects
+            IssueSyncJob.source_instance_id == target_instance_id,
+            IssueSyncJob.target_instance_id == source_instance_id
         )
     )
 
@@ -131,6 +142,7 @@ class IssueScheduler:
         self.running = False
         self.task: Optional[asyncio.Task] = None
         self.active_sync_tasks: Set[asyncio.Task] = set()
+        self._active_sync_tasks_lock = threading.Lock()
         self.shutdown_event = asyncio.Event()
 
     async def start(self):
@@ -166,26 +178,38 @@ class IssueScheduler:
             except asyncio.CancelledError:
                 pass
 
-        # Wait for active sync tasks to complete
-        if self.active_sync_tasks:
-            active_count = len(self.active_sync_tasks)
-            logger.info(f"Waiting for {active_count} active sync job(s) to complete (timeout: {settings.sync_shutdown_timeout}s)...")
+        # Wait for active sync tasks to complete (take snapshot under lock)
+        with self._active_sync_tasks_lock:
+            if not self.active_sync_tasks:
+                logger.info("Issue sync scheduler stopped")
+                return
+            tasks_snapshot = list(self.active_sync_tasks)
 
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(*self.active_sync_tasks, return_exceptions=True),
-                    timeout=settings.sync_shutdown_timeout
-                )
+        active_count = len(tasks_snapshot)
+        logger.info(f"Waiting for {active_count} active sync job(s) to complete (timeout: {settings.sync_shutdown_timeout}s)...")
+
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks_snapshot, return_exceptions=True),
+                timeout=settings.sync_shutdown_timeout
+            )
+            # Check for and log any exceptions from the gathered tasks
+            exceptions = [r for r in results if isinstance(r, Exception)]
+            if exceptions:
+                for exc in exceptions:
+                    logger.error(f"Sync task exception during shutdown: {exc}")
+                logger.warning(f"All sync jobs finished, but {len(exceptions)} task(s) raised exceptions")
+            else:
                 logger.info("All sync jobs completed gracefully")
-            except asyncio.TimeoutError:
-                logger.warning(
-                    f"Timeout waiting for sync jobs to complete after {settings.sync_shutdown_timeout}s. "
-                    f"{len(self.active_sync_tasks)} job(s) may have been interrupted."
-                )
-                # Cancel remaining tasks
-                for task in self.active_sync_tasks:
-                    if not task.done():
-                        task.cancel()
+        except asyncio.TimeoutError:
+            remaining = [t for t in tasks_snapshot if not t.done()]
+            logger.warning(
+                f"Timeout waiting for sync jobs to complete after {settings.sync_shutdown_timeout}s. "
+                f"{len(remaining)} job(s) may have been interrupted."
+            )
+            # Cancel remaining tasks
+            for task in remaining:
+                task.cancel()
 
         logger.info("Issue sync scheduler stopped")
 
@@ -226,8 +250,15 @@ class IssueScheduler:
             for config in configs:
                 # Spawn sync as a background task and track it
                 task = asyncio.create_task(self._sync_config_wrapper(config.id))
-                self.active_sync_tasks.add(task)
-                task.add_done_callback(self.active_sync_tasks.discard)
+
+                # Thread-safe add/remove from task set
+                def remove_task(t, lock=self._active_sync_tasks_lock, tasks=self.active_sync_tasks):
+                    with lock:
+                        tasks.discard(t)
+
+                with self._active_sync_tasks_lock:
+                    self.active_sync_tasks.add(task)
+                task.add_done_callback(remove_task)
 
     async def _sync_config_wrapper(self, config_id: int):
         """Wrapper to sync a config with its own database session."""
@@ -260,6 +291,24 @@ class IssueScheduler:
             logger.error(f"Mirror {config.mirror_id} not found for config {config.id}")
             return
 
+        # Load instance pair early - needed for conflict detection with instance context
+        pair_result = await db.execute(
+            select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+        )
+        pair = pair_result.scalar_one_or_none()
+
+        if not pair:
+            logger.error(f"Instance pair {mirror.instance_pair_id} not found for config {config.id}")
+            return
+
+        # Determine source and target instance IDs based on mirror direction
+        if pair.mirror_direction == "pull":
+            source_instance_id = pair.source_instance_id
+            target_instance_id = pair.target_instance_id
+        else:  # push
+            source_instance_id = pair.target_instance_id
+            target_instance_id = pair.source_instance_id
+
         # Check if there's already a running or pending sync for this config
         existing_job_result = await db.execute(
             select(IssueSyncJob).where(
@@ -278,10 +327,13 @@ class IssueScheduler:
 
         # Check for bidirectional sync conflict
         # This prevents A→B and B→A syncs from running simultaneously
+        # Instance IDs are required because project IDs are only unique per GitLab instance
         conflicting_job = await check_bidirectional_sync_conflict(
             db,
             source_project_id=mirror.source_project_id,
             target_project_id=mirror.target_project_id,
+            source_instance_id=source_instance_id,
+            target_instance_id=target_instance_id,
             exclude_config_id=config.id
         )
 
@@ -297,7 +349,7 @@ class IssueScheduler:
             await db.commit()
             return
 
-        # Create sync job with project tracking for conflict detection
+        # Create sync job with project and instance tracking for conflict detection
         job = IssueSyncJob(
             mirror_issue_config_id=config.id,
             job_type="scheduled",
@@ -305,28 +357,14 @@ class IssueScheduler:
             started_at=datetime.utcnow(),
             source_project_id=mirror.source_project_id,
             target_project_id=mirror.target_project_id,
+            source_instance_id=source_instance_id,
+            target_instance_id=target_instance_id,
         )
         db.add(job)
         await db.commit()
         await db.refresh(job)
 
         try:
-            pair_result = await db.execute(
-                select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
-            )
-            pair = pair_result.scalar_one_or_none()
-
-            if not pair:
-                raise ValueError(f"Instance pair {mirror.instance_pair_id} not found")
-
-            # Determine source and target based on mirror direction
-            if pair.mirror_direction == "pull":
-                source_instance_id = pair.source_instance_id
-                target_instance_id = pair.target_instance_id
-            else:  # push
-                source_instance_id = pair.target_instance_id
-                target_instance_id = pair.source_instance_id
-
             source_instance_result = await db.execute(
                 select(GitLabInstance).where(GitLabInstance.id == source_instance_id)
             )

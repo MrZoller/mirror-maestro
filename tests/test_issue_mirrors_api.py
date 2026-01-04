@@ -550,12 +550,17 @@ async def test_trigger_sync_bidirectional_conflict(client, reverse_mirror_setup,
     await db_session.refresh(config2)
 
     # Start a sync job for mirror1 (100→200)
+    # Must include instance IDs for conflict detection to work
+    source_instance = reverse_mirror_setup["source_instance"]
+    target_instance = reverse_mirror_setup["target_instance"]
     running_job = IssueSyncJob(
         mirror_issue_config_id=config1.id,
         job_type="manual",
         status="running",
         source_project_id=mirror1.source_project_id,  # 100
         target_project_id=mirror1.target_project_id,  # 200
+        source_instance_id=source_instance.id,
+        target_instance_id=target_instance.id,
     )
     db_session.add(running_job)
     await db_session.commit()

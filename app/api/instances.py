@@ -1,7 +1,7 @@
 from typing import List
 import logging
 from urllib.parse import urlparse
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -47,10 +47,15 @@ class GitLabInstanceCreate(BaseModel):
         test_url = v if '://' in v else f'https://{v}'
         try:
             parsed = urlparse(test_url)
+            # Validate scheme is http or https only
+            if parsed.scheme not in ('http', 'https'):
+                raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed")
             if not parsed.hostname:
                 raise ValueError("Invalid URL: no hostname found")
             # Return original value (normalization happens in the API logic)
             return v
+        except ValueError:
+            raise
         except Exception as e:
             raise ValueError(f"Invalid URL format: {str(e)}")
 
@@ -92,9 +97,14 @@ class GitLabInstanceUpdate(BaseModel):
             test_url = v if '://' in v else f'https://{v}'
             try:
                 parsed = urlparse(test_url)
+                # Validate scheme is http or https only
+                if parsed.scheme not in ('http', 'https'):
+                    raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed")
                 if not parsed.hostname:
                     raise ValueError("Invalid URL: no hostname found")
                 return v
+            except ValueError:
+                raise
             except Exception as e:
                 raise ValueError(f"Invalid URL format: {str(e)}")
         return v
@@ -123,7 +133,7 @@ class GitLabInstanceResponse(BaseModel):
 
 @router.get("", response_model=List[GitLabInstanceResponse])
 async def list_instances(
-    search: str | None = None,
+    search: str | None = Query(default=None, max_length=500),
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
@@ -192,8 +202,8 @@ async def create_instance(
         u = client.get_current_user()
         token_user_id = u.get("id")
         token_username = u.get("username")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to fetch token user info (non-critical): {e}")
 
     # Create the instance
     db_instance = GitLabInstance(

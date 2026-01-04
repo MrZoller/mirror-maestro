@@ -138,11 +138,17 @@ async def migrate_mirrors_to_auto_tokens():
                     access_level=40,  # Maintainer
                 )
 
+                # Validate token response contains required fields
+                token_value = token_result.get("token")
+                token_id = token_result.get("id")
+                if not token_value or token_id is None:
+                    raise ValueError(f"GitLab token creation returned invalid response: missing 'token' or 'id'")
+
                 # Store token info
-                mirror.encrypted_mirror_token = encryption.encrypt(token_result["token"])
+                mirror.encrypted_mirror_token = encryption.encrypt(token_value)
                 mirror.mirror_token_name = token_name
                 mirror.mirror_token_expires_at = datetime.strptime(expires_at, "%Y-%m-%d")
-                mirror.gitlab_token_id = token_result["id"]
+                mirror.gitlab_token_id = token_id
                 mirror.token_project_id = token_project_id
 
                 # Update GitLab mirror with new authenticated URL if mirror exists
@@ -150,7 +156,7 @@ async def migrate_mirrors_to_auto_tokens():
                     # Build authenticated URL
                     parsed = urlparse(token_instance.url)
                     username = quote(token_name, safe="")
-                    password = quote(token_result["token"], safe="")
+                    password = quote(token_value, safe="")
                     authenticated_url = f"{parsed.scheme}://{username}:{password}@{parsed.netloc}/{token_project_path}.git"
 
                     # Get mirror instance and update
