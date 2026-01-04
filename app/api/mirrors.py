@@ -1039,7 +1039,7 @@ async def _create_mirror_internal(
     return db_mirror
 
 
-@router.post("", response_model=MirrorResponse)
+@router.post("", response_model=MirrorResponse, status_code=201)
 async def create_mirror(
     mirror: MirrorCreate,
     db: AsyncSession = Depends(get_db),
