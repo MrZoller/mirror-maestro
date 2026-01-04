@@ -1,6 +1,9 @@
+import logging
 import os
 import secrets
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class JWTSecretManager:
@@ -43,8 +46,11 @@ class JWTSecretManager:
             # Best-effort permission hardening for existing keys.
             try:
                 os.chmod(key_file, 0o600)
-            except Exception:
-                pass
+            except OSError as e:
+                logger.warning(
+                    f"Could not set restrictive permissions (0600) on JWT secret file '{key_file}': {e}. "
+                    f"Consider manually securing this file to prevent unauthorized access."
+                )
             return secret
         else:
             # Generate a new secret key
@@ -54,8 +60,11 @@ class JWTSecretManager:
             # Set restrictive permissions
             try:
                 os.chmod(key_file, 0o600)
-            except Exception:
-                pass
+            except OSError as e:
+                logger.warning(
+                    f"Could not set restrictive permissions (0600) on new JWT secret file '{key_file}': {e}. "
+                    f"Consider manually securing this file to prevent unauthorized access."
+                )
             return secret
 
     def get_secret(self, env_secret: Optional[str] = None, env_path: Optional[str] = None) -> str:

@@ -9,6 +9,8 @@ database-agnostic.
 """
 import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 import json
 import shutil
@@ -45,6 +47,56 @@ def _get_encryption_key_path() -> Path:
     import os
     key_file = os.getenv("ENCRYPTION_KEY_PATH") or "./data/encryption.key"
     return Path(key_file).resolve()
+
+
+def _safe_tar_extract(tar: tarfile.TarFile, extract_path: Path) -> None:
+    """
+    Safely extract tar archive members, preventing path traversal attacks.
+
+    Validates each member to ensure:
+    - No absolute paths
+    - No path traversal (../)
+    - No symbolic links pointing outside extract directory
+    - Final resolved path is within extract_path
+
+    Args:
+        tar: Open TarFile object to extract from
+        extract_path: Directory to extract files into
+
+    Raises:
+        ValueError: If a member has a malicious path
+    """
+    extract_path = extract_path.resolve()
+
+    for member in tar.getmembers():
+        # Normalize and check the member path
+        member_path = Path(member.name)
+
+        # Reject absolute paths
+        if member_path.is_absolute():
+            raise ValueError(f"Absolute path in archive rejected: {member.name}")
+
+        # Reject path traversal attempts
+        if ".." in member_path.parts:
+            raise ValueError(f"Path traversal attempt rejected: {member.name}")
+
+        # Compute the final resolved path
+        target_path = (extract_path / member_path).resolve()
+
+        # Ensure the target is within the extract directory
+        try:
+            target_path.relative_to(extract_path)
+        except ValueError:
+            raise ValueError(f"Path escapes extract directory: {member.name}")
+
+        # Reject symlinks that could point outside
+        if member.issym() or member.islnk():
+            link_target = Path(member.linkname)
+            if link_target.is_absolute() or ".." in link_target.parts:
+                raise ValueError(f"Suspicious symlink rejected: {member.name} -> {member.linkname}")
+
+    # All members validated, now extract
+    tar.extractall(extract_path)
 
 
 def _model_to_dict(obj: Any) -> Dict:
@@ -245,9 +297,9 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
                 {"max_id": max_id}
             )
         await db.commit()
-    except Exception:
-        # Sequence reset is PostgreSQL-specific, ignore errors for other DBs
-        pass
+    except Exception as e:
+        # Sequence reset is PostgreSQL-specific; log for debugging but continue
+        logger.debug(f"Sequence reset skipped (not PostgreSQL or not supported): {e}")
 
     return counts
 
@@ -387,7 +439,10 @@ def _validate_backup_archive(archive_path: Path) -> Dict:
             if "backup_metadata.json" in members:
                 metadata_file = tar.extractfile("backup_metadata.json")
                 if metadata_file:
-                    metadata = json.loads(metadata_file.read().decode())
+                    try:
+                        metadata = json.loads(metadata_file.read().decode())
+                    finally:
+                        metadata_file.close()
 
             return {
                 "valid": True,
@@ -397,16 +452,18 @@ def _validate_backup_archive(archive_path: Path) -> Dict:
             }
 
     except tarfile.TarError as e:
+        logger.error(f"Tar archive error during validation: {e}")
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid or corrupt backup archive: {str(e)}"
+            detail="Invalid or corrupt backup archive. Please check the file format."
         )
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Unexpected error during backup validation: {e}", exc_info=True)
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to validate backup: {str(e)}"
+            detail="Failed to validate backup. Please check the file format and try again."
         )
 
 
@@ -492,7 +549,14 @@ async def restore_backup(
         extract_path.mkdir()
 
         with tarfile.open(upload_path, "r:gz") as tar:
-            tar.extractall(extract_path)
+            try:
+                _safe_tar_extract(tar, extract_path)
+            except ValueError as e:
+                logger.error(f"Security validation failed during extraction: {e}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid backup archive: security validation failed."
+                )
 
         # Load and validate database JSON
         db_json_path = extract_path / "database.json"
@@ -508,18 +572,20 @@ async def restore_backup(
                     detail=f"Invalid backup. Missing tables: {', '.join(missing_tables)}"
                 )
         except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in database backup: {e}")
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid or corrupt database backup: {str(e)}"
+                detail="Invalid or corrupt database backup: JSON parsing failed."
             )
 
         # Import data into database
         try:
             counts = await _import_table_data(db, db_data)
         except Exception as e:
+            logger.error(f"Failed to restore database: {e}", exc_info=True)
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to restore database: {str(e)}"
+                detail="Failed to restore database. Please check the backup file integrity and try again."
             )
 
         # Restore encryption key
@@ -571,8 +637,9 @@ async def get_backup_stats(
     try:
         result = await db.execute(text("SELECT pg_database_size(current_database())"))
         db_size = result.scalar() or 0
-    except Exception:
-        # Fallback if query fails
+    except Exception as e:
+        # Not PostgreSQL or function not available; log and continue with 0
+        logger.debug(f"Could not retrieve database size (not PostgreSQL or not supported): {e}")
         db_size = 0
 
     return {

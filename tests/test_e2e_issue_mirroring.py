@@ -656,22 +656,25 @@ async def test_attachment_size_limit_enforcement(db_session):
     if max_size_mb > 0:
         max_size_bytes = max_size_mb * 1024 * 1024
 
-        with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
-            # Mock response with file exceeding limit
-            mock_response = Mock()
-            mock_response.headers = {'content-length': str(max_size_bytes + 1024)}
-            mock_response.raise_for_status = Mock()
+        # Mock SSRF validation (it's now async and does DNS lookups)
+        with patch('app.core.issue_sync._validate_url_for_ssrf', new_callable=AsyncMock) as mock_ssrf:
+            with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
+                # Mock response with file exceeding limit
+                mock_response = Mock()
+                mock_response.headers = {'content-length': str(max_size_bytes + 1024)}
+                mock_response.raise_for_status = Mock()
+                mock_response.is_redirect = False
 
-            mock_client = Mock()
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
+                mock_client = Mock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=None)
 
-            MockClient.return_value = mock_client
+                MockClient.return_value = mock_client
 
-            # Should raise ValueError for size limit
-            with pytest.raises(ValueError, match="exceeds maximum allowed size"):
-                await download_file("http://example.com/large.pdf", max_size_bytes=max_size_bytes)
+                # Should raise ValueError for size limit
+                with pytest.raises(ValueError, match="exceeds maximum allowed size"):
+                    await download_file("http://example.com/large.pdf", max_size_bytes=max_size_bytes)
 
 
 @pytest.mark.asyncio

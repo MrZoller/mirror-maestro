@@ -7,6 +7,7 @@ with too many API requests in rapid succession.
 
 import asyncio
 import logging
+import threading
 from typing import Callable, TypeVar, Any
 from datetime import datetime
 
@@ -172,6 +173,7 @@ class CircuitBreaker:
         self.success_count = 0  # Track consecutive successes in HALF_OPEN state
         self.last_failure_time: datetime | None = None
         self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+        self._lock = threading.Lock()  # Protects state modifications
 
     def call(self, func, *args, **kwargs):
         """
@@ -187,24 +189,27 @@ class CircuitBreaker:
         Raises:
             Exception: If circuit is OPEN or function fails
         """
-        if self.state == "OPEN":
-            # Check if recovery timeout has elapsed
-            if self._should_attempt_reset():
-                self.state = "HALF_OPEN"
-                self.success_count = 0  # Reset success count for new recovery attempt
-                logger.info("Circuit breaker entering HALF_OPEN state, testing recovery")
-            else:
-                raise Exception(
-                    f"Circuit breaker is OPEN. Service unavailable. "
-                    f"Will retry after {self.recovery_timeout}s cooldown."
-                )
+        with self._lock:
+            if self.state == "OPEN":
+                # Check if recovery timeout has elapsed
+                if self._should_attempt_reset():
+                    self.state = "HALF_OPEN"
+                    self.success_count = 0  # Reset success count for new recovery attempt
+                    logger.info("Circuit breaker entering HALF_OPEN state, testing recovery")
+                else:
+                    raise Exception(
+                        f"Circuit breaker is OPEN. Service unavailable. "
+                        f"Will retry after {self.recovery_timeout}s cooldown."
+                    )
 
         try:
             result = func(*args, **kwargs)
-            self._on_success()
+            with self._lock:
+                self._on_success()
             return result
         except self.expected_exception as e:
-            self._on_failure()
+            with self._lock:
+                self._on_failure()
             raise
 
     def _should_attempt_reset(self) -> bool:
@@ -256,15 +261,48 @@ class CircuitBreaker:
             )
 
     def get_state(self) -> dict[str, Any]:
-        """Get current circuit breaker state."""
-        return {
-            "state": self.state,
-            "failure_count": self.failure_count,
-            "success_count": self.success_count,
-            "success_threshold": self.success_threshold,
-            "last_failure_time": self.last_failure_time.isoformat() if self.last_failure_time else None,
-            "recovery_timeout": self.recovery_timeout
-        }
+        """Get current circuit breaker state (thread-safe)."""
+        with self._lock:
+            return {
+                "state": self.state,
+                "failure_count": self.failure_count,
+                "success_count": self.success_count,
+                "success_threshold": self.success_threshold,
+                "last_failure_time": self.last_failure_time.isoformat() if self.last_failure_time else None,
+                "recovery_timeout": self.recovery_timeout
+            }
+
+    def check_and_transition(self) -> tuple[str, bool]:
+        """
+        Thread-safe check of circuit state with automatic HALF_OPEN transition.
+
+        Returns:
+            Tuple of (current_state, is_available) where is_available indicates
+            if requests can proceed (True for CLOSED and HALF_OPEN).
+        """
+        with self._lock:
+            if self.state == "OPEN":
+                if self._should_attempt_reset():
+                    self.state = "HALF_OPEN"
+                    self.success_count = 0
+                    logger.info("Circuit breaker entering HALF_OPEN state, testing recovery")
+                    return ("HALF_OPEN", True)
+                return ("OPEN", False)
+            return (self.state, True)
+
+    def reset(self) -> None:
+        """
+        Manually reset circuit breaker to CLOSED state (thread-safe).
+
+        Use this for manual intervention when the underlying service is known
+        to be available again.
+        """
+        with self._lock:
+            self.state = "CLOSED"
+            self.failure_count = 0
+            self.success_count = 0
+            self.last_failure_time = None
+            logger.info("Circuit breaker manually reset to CLOSED state")
 
 
 class BatchOperationTracker:

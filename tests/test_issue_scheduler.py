@@ -50,8 +50,9 @@ async def sample_pair(db_session, sample_instances):
 
 
 @pytest.fixture
-async def sample_mirror(db_session, sample_pair):
+async def sample_mirror(db_session, sample_pair, sample_instances):
     """Create sample mirror."""
+    source, target = sample_instances
     mirror = Mirror(
         instance_pair_id=sample_pair.id,
         source_project_id=100,
@@ -62,6 +63,9 @@ async def sample_mirror(db_session, sample_pair):
     db_session.add(mirror)
     await db_session.commit()
     await db_session.refresh(mirror)
+    # Return mirror with instance IDs for convenience
+    mirror._source_instance_id = source.id
+    mirror._target_instance_id = target.id
     return mirror
 
 
@@ -71,7 +75,9 @@ async def test_no_conflict_when_no_jobs(db_session, sample_mirror):
     conflict = await check_bidirectional_sync_conflict(
         db_session,
         source_project_id=100,
-        target_project_id=200
+        target_project_id=200,
+        source_instance_id=sample_mirror._source_instance_id,
+        target_instance_id=sample_mirror._target_instance_id
     )
     assert conflict is None
 
@@ -103,7 +109,9 @@ async def test_no_conflict_when_same_direction(db_session, sample_mirror):
     conflict = await check_bidirectional_sync_conflict(
         db_session,
         source_project_id=100,
-        target_project_id=200
+        target_project_id=200,
+        source_instance_id=sample_mirror._source_instance_id,
+        target_instance_id=sample_mirror._target_instance_id
     )
     # No conflict because it's the same direction, not reverse
     assert conflict is None
@@ -121,23 +129,28 @@ async def test_conflict_detected_for_reverse_direction(db_session, sample_mirror
     await db_session.commit()
     await db_session.refresh(config)
 
-    # Create a running job 100→200
+    # Create a running job 100→200 (with instance IDs for conflict detection)
     job = IssueSyncJob(
         mirror_issue_config_id=config.id,
         job_type="manual",
         status="running",
         source_project_id=100,
         target_project_id=200,
+        source_instance_id=sample_mirror._source_instance_id,
+        target_instance_id=sample_mirror._target_instance_id,
     )
     db_session.add(job)
     await db_session.commit()
     await db_session.refresh(job)
 
     # Check for conflict trying to sync 200→100 (reverse direction)
+    # Note: When checking reverse, we swap source/target instance IDs too
     conflict = await check_bidirectional_sync_conflict(
         db_session,
         source_project_id=200,
-        target_project_id=100
+        target_project_id=100,
+        source_instance_id=sample_mirror._target_instance_id,
+        target_instance_id=sample_mirror._source_instance_id
     )
     assert conflict is not None
     assert conflict.id == job.id
@@ -155,13 +168,15 @@ async def test_conflict_detected_for_pending_job(db_session, sample_mirror):
     await db_session.commit()
     await db_session.refresh(config)
 
-    # Create a pending job 100→200
+    # Create a pending job 100→200 (with instance IDs for conflict detection)
     job = IssueSyncJob(
         mirror_issue_config_id=config.id,
         job_type="scheduled",
         status="pending",
         source_project_id=100,
         target_project_id=200,
+        source_instance_id=sample_mirror._source_instance_id,
+        target_instance_id=sample_mirror._target_instance_id,
     )
     db_session.add(job)
     await db_session.commit()
@@ -171,7 +186,9 @@ async def test_conflict_detected_for_pending_job(db_session, sample_mirror):
     conflict = await check_bidirectional_sync_conflict(
         db_session,
         source_project_id=200,
-        target_project_id=100
+        target_project_id=100,
+        source_instance_id=sample_mirror._target_instance_id,
+        target_instance_id=sample_mirror._source_instance_id
     )
     assert conflict is not None
     assert conflict.id == job.id
@@ -204,7 +221,9 @@ async def test_no_conflict_for_completed_job(db_session, sample_mirror):
     conflict = await check_bidirectional_sync_conflict(
         db_session,
         source_project_id=200,
-        target_project_id=100
+        target_project_id=100,
+        source_instance_id=sample_mirror._target_instance_id,
+        target_instance_id=sample_mirror._source_instance_id
     )
     # No conflict because the job is completed
     assert conflict is None
@@ -237,7 +256,9 @@ async def test_no_conflict_for_failed_job(db_session, sample_mirror):
     conflict = await check_bidirectional_sync_conflict(
         db_session,
         source_project_id=200,
-        target_project_id=100
+        target_project_id=100,
+        source_instance_id=sample_mirror._target_instance_id,
+        target_instance_id=sample_mirror._source_instance_id
     )
     # No conflict because the job is failed
     assert conflict is None
@@ -272,6 +293,8 @@ async def test_exclude_config_id(db_session, sample_mirror):
         db_session,
         source_project_id=200,
         target_project_id=100,
+        source_instance_id=sample_mirror._target_instance_id,
+        target_instance_id=sample_mirror._source_instance_id,
         exclude_config_id=config.id
     )
     # No conflict because we excluded this config
@@ -302,10 +325,13 @@ async def test_no_conflict_for_different_projects(db_session, sample_mirror):
     await db_session.commit()
 
     # Check for conflict trying to sync 300→400 (completely different projects)
+    # Using same instance IDs - projects are different but instances are the same
     conflict = await check_bidirectional_sync_conflict(
         db_session,
         source_project_id=300,
-        target_project_id=400
+        target_project_id=400,
+        source_instance_id=sample_mirror._source_instance_id,
+        target_instance_id=sample_mirror._target_instance_id
     )
     assert conflict is None
 
