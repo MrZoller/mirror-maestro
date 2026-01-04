@@ -261,6 +261,16 @@ async def create_pair(
     _: str = Depends(verify_credentials)
 ):
     """Create a new instance pair."""
+    # Check if pair with same name already exists
+    existing_result = await db.execute(
+        select(InstancePair).where(InstancePair.name == pair.name)
+    )
+    if existing_result.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Instance pair with name '{pair.name}' already exists. Please choose a different name."
+        )
+
     # Validate that both instances exist
     source_result = await db.execute(
         select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id)
