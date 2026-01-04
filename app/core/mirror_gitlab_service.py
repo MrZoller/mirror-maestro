@@ -8,6 +8,7 @@ the robustness patterns used in issue syncing.
 
 import asyncio
 import logging
+import threading
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 from functools import wraps
 
@@ -84,19 +85,21 @@ class MirrorGitLabService:
 
         # Circuit breakers per GitLab instance URL
         self._circuit_breakers: Dict[str, CircuitBreaker] = {}
+        self._circuit_breakers_lock = threading.Lock()
 
         # Track metrics
         self.rate_limiter.start_tracking()
 
     def _get_circuit_breaker(self, instance_url: str) -> CircuitBreaker:
-        """Get or create a circuit breaker for a GitLab instance."""
-        if instance_url not in self._circuit_breakers:
-            self._circuit_breakers[instance_url] = CircuitBreaker(
-                failure_threshold=self.circuit_breaker_threshold,
-                recovery_timeout=self.circuit_breaker_recovery,
-                expected_exception=GitLabClientError,
-            )
-        return self._circuit_breakers[instance_url]
+        """Get or create a circuit breaker for a GitLab instance (thread-safe)."""
+        with self._circuit_breakers_lock:
+            if instance_url not in self._circuit_breakers:
+                self._circuit_breakers[instance_url] = CircuitBreaker(
+                    failure_threshold=self.circuit_breaker_threshold,
+                    recovery_timeout=self.circuit_breaker_recovery,
+                    expected_exception=GitLabClientError,
+                )
+            return self._circuit_breakers[instance_url]
 
     async def execute(
         self,
@@ -121,16 +124,13 @@ class MirrorGitLabService:
         # Get circuit breaker for this instance
         circuit_breaker = self._get_circuit_breaker(client.url)
 
-        # Check if circuit is open
-        if circuit_breaker.state == "OPEN":
-            if circuit_breaker._should_attempt_reset():
-                circuit_breaker.state = "HALF_OPEN"
-                logger.info(f"Circuit breaker for {client.url} entering HALF_OPEN state")
-            else:
-                raise GitLabConnectionError(
-                    f"{operation_name}: Circuit breaker is OPEN for {client.url}. "
-                    f"Service unavailable. Will retry after {self.circuit_breaker_recovery}s cooldown."
-                )
+        # Check circuit state using thread-safe method
+        state, is_available = circuit_breaker.check_and_transition()
+        if not is_available:
+            raise GitLabConnectionError(
+                f"{operation_name}: Circuit breaker is OPEN for {client.url}. "
+                f"Service unavailable. Will retry after {self.circuit_breaker_recovery}s cooldown."
+            )
 
         # Apply rate limiting delay
         await self.rate_limiter.delay()
@@ -253,26 +253,31 @@ class MirrorGitLabService:
         return {"state": "CLOSED", "failure_count": 0}
 
     def reset_circuit_breaker(self, instance_url: str) -> bool:
-        """Manually reset a circuit breaker to CLOSED state."""
-        if instance_url in self._circuit_breakers:
+        """Manually reset a circuit breaker to CLOSED state (thread-safe)."""
+        with self._circuit_breakers_lock:
+            if instance_url not in self._circuit_breakers:
+                return False
             cb = self._circuit_breakers[instance_url]
-            cb.state = "CLOSED"
-            cb.failure_count = 0
-            cb.last_failure_time = None
-            logger.info(f"Circuit breaker for {instance_url} manually reset to CLOSED")
-            return True
-        return False
+
+        # Use the CircuitBreaker's public reset method for proper encapsulation
+        cb.reset()
+        logger.info(f"Circuit breaker for {instance_url} manually reset to CLOSED")
+        return True
 
 
 # Singleton instance for use across the application
 _mirror_gitlab_service: Optional[MirrorGitLabService] = None
+_mirror_gitlab_service_lock = threading.Lock()
 
 
 def get_mirror_gitlab_service() -> MirrorGitLabService:
-    """Get the singleton MirrorGitLabService instance."""
+    """Get the singleton MirrorGitLabService instance (thread-safe)."""
     global _mirror_gitlab_service
     if _mirror_gitlab_service is None:
-        _mirror_gitlab_service = MirrorGitLabService()
+        with _mirror_gitlab_service_lock:
+            # Double-check inside lock to prevent race condition
+            if _mirror_gitlab_service is None:
+                _mirror_gitlab_service = MirrorGitLabService()
     return _mirror_gitlab_service
 
 
