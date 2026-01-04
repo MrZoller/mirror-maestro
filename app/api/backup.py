@@ -47,6 +47,56 @@ def _get_encryption_key_path() -> Path:
     return Path(key_file).resolve()
 
 
+def _safe_tar_extract(tar: tarfile.TarFile, extract_path: Path) -> None:
+    """
+    Safely extract tar archive members, preventing path traversal attacks.
+
+    Validates each member to ensure:
+    - No absolute paths
+    - No path traversal (../)
+    - No symbolic links pointing outside extract directory
+    - Final resolved path is within extract_path
+
+    Args:
+        tar: Open TarFile object to extract from
+        extract_path: Directory to extract files into
+
+    Raises:
+        ValueError: If a member has a malicious path
+    """
+    extract_path = extract_path.resolve()
+
+    for member in tar.getmembers():
+        # Normalize and check the member path
+        member_path = Path(member.name)
+
+        # Reject absolute paths
+        if member_path.is_absolute():
+            raise ValueError(f"Absolute path in archive rejected: {member.name}")
+
+        # Reject path traversal attempts
+        if ".." in member_path.parts:
+            raise ValueError(f"Path traversal attempt rejected: {member.name}")
+
+        # Compute the final resolved path
+        target_path = (extract_path / member_path).resolve()
+
+        # Ensure the target is within the extract directory
+        try:
+            target_path.relative_to(extract_path)
+        except ValueError:
+            raise ValueError(f"Path escapes extract directory: {member.name}")
+
+        # Reject symlinks that could point outside
+        if member.issym() or member.islnk():
+            link_target = Path(member.linkname)
+            if link_target.is_absolute() or ".." in link_target.parts:
+                raise ValueError(f"Suspicious symlink rejected: {member.name} -> {member.linkname}")
+
+    # All members validated, now extract
+    tar.extractall(extract_path)
+
+
 def _model_to_dict(obj: Any) -> Dict:
     """Convert SQLAlchemy model instance to dictionary."""
     result = {}
@@ -492,7 +542,13 @@ async def restore_backup(
         extract_path.mkdir()
 
         with tarfile.open(upload_path, "r:gz") as tar:
-            tar.extractall(extract_path)
+            try:
+                _safe_tar_extract(tar, extract_path)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid backup archive: {str(e)}"
+                )
 
         # Load and validate database JSON
         db_json_path = extract_path / "database.json"

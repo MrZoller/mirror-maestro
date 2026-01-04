@@ -84,13 +84,18 @@ def decode_access_token(token: str) -> Optional[TokenData]:
         username: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         is_admin: bool = payload.get("is_admin", False)
-        exp = datetime.fromtimestamp(payload.get("exp"))
+        exp_timestamp = payload.get("exp")
 
-        if username is None or user_id is None:
+        if username is None or user_id is None or exp_timestamp is None:
             return None
 
+        exp = datetime.fromtimestamp(exp_timestamp)
         return TokenData(username=username, user_id=user_id, is_admin=is_admin, exp=exp)
-    except JWTError:
+    except (JWTError, TypeError, ValueError, OSError):
+        # JWTError: Invalid token
+        # TypeError: exp_timestamp is not a number
+        # ValueError: exp_timestamp is out of range for timestamp
+        # OSError: exp_timestamp is out of range for platform
         return None
 
 

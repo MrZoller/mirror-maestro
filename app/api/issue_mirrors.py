@@ -1,6 +1,7 @@
 """API endpoints for managing issue mirror configurations."""
 
 import asyncio
+import threading
 from datetime import datetime
 from typing import List, Optional, Set
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/api/issue-mirrors", tags=["issue-mirrors"])
 
 # Track manual sync tasks globally for graceful shutdown
 manual_sync_tasks: Set[asyncio.Task] = set()
+_manual_sync_tasks_lock = threading.Lock()
 
 
 async def wait_for_manual_syncs(timeout: int = 300):
@@ -30,12 +32,12 @@ async def wait_for_manual_syncs(timeout: int = 300):
 
     logger = logging.getLogger(__name__)
 
-    if not manual_sync_tasks:
-        return
+    # Take a snapshot under the lock to avoid race conditions
+    with _manual_sync_tasks_lock:
+        if not manual_sync_tasks:
+            return
+        tasks_snapshot = list(manual_sync_tasks)
 
-    # Take a snapshot of the current tasks to avoid "Set changed size during iteration"
-    # since tasks may complete and be removed by their done callback while we're waiting
-    tasks_snapshot = list(manual_sync_tasks)
     active_count = len(tasks_snapshot)
     logger.info(f"Waiting for {active_count} manual sync task(s) to complete (timeout: {timeout}s)...")
 
@@ -479,8 +481,15 @@ async def trigger_sync(
 
     # Start background task and track it for graceful shutdown
     task = asyncio.create_task(run_sync())
-    manual_sync_tasks.add(task)
-    task.add_done_callback(manual_sync_tasks.discard)
+
+    # Thread-safe add/remove from task set
+    def remove_task(t):
+        with _manual_sync_tasks_lock:
+            manual_sync_tasks.discard(t)
+
+    with _manual_sync_tasks_lock:
+        manual_sync_tasks.add(task)
+    task.add_done_callback(remove_task)
 
     return {
         "message": "Sync triggered",
