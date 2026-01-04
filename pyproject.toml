@@ -1,6 +1,6 @@
 [project]
 name = "mirror-maestro"
-version = "1.0.0"
+version = "1.1.0"
 description = "Orchestrate GitLab mirrors across multiple instance pairs with precision"
 authors = [{name = "MrZoller"}]
 requires-python = ">=3.11"
@@ -19,6 +19,8 @@ dependencies = [
     "cryptography>=43.0.1",
     "bcrypt>=4.0.0",
     "python-jose[cryptography]>=3.3.0",
+    "slowapi>=0.1.9",
+    "alembic>=1.13.1",
 ]
 
 [project.optional-dependencies]

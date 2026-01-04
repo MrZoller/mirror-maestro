@@ -6,7 +6,7 @@ Provides login, logout, and current user info endpoints.
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,7 @@ from app.core.auth import (
     verify_password,
     CurrentUser,
 )
+from app.core.api_rate_limiter import limiter, AUTH_RATE_LIMIT
 from app.database import get_db
 from app.models import User
 
@@ -74,7 +75,9 @@ async def get_auth_mode():
 
 
 @router.post("/login", response_model=LoginResponse)
+@limiter.limit(AUTH_RATE_LIMIT)
 async def login(
+    request: Request,
     login_data: LoginRequest,
     db: AsyncSession = Depends(get_db)
 ):
