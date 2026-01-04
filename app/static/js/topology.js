@@ -36,12 +36,30 @@
     return { showPull, showPush, includeDisabled };
   }
 
+  /**
+   * Update the topology details panel.
+   *
+   * SECURITY WARNING: This function uses innerHTML which can cause XSS vulnerabilities
+   * if bodyHtml contains unescaped user data. ALWAYS escape user-controlled data with
+   * the esc() function before including it in template literals passed to this function.
+   *
+   * Current implementation: All callers properly escape user data with esc(). If adding
+   * new calls to this function, ensure ALL user data is escaped.
+   *
+   * Future improvement: Consider using DOMPurify or refactoring to use textContent
+   * for user data and createElement for structural HTML.
+   *
+   * @param {string} title - Panel title (automatically escaped via textContent)
+   * @param {string} subtitle - Panel subtitle (automatically escaped via textContent)
+   * @param {string} bodyHtml - Pre-escaped HTML content. MUST escape all user data with esc()
+   */
   function setPanel(title, subtitle, bodyHtml) {
     const t = byId("topology-panel-title");
     const st = byId("topology-panel-subtitle");
     const b = byId("topology-panel-body");
     if (t) t.textContent = title;
     if (st) st.textContent = subtitle;
+    // XSS Risk: innerHTML requires all user data in bodyHtml to be pre-escaped with esc()
     if (b) b.innerHTML = bodyHtml;
   }
 
@@ -357,7 +375,12 @@
     tooltip.className = "topology-tooltip hidden";
     canvas.appendChild(tooltip);
 
+    /**
+     * Display tooltip at specified position.
+     * SECURITY WARNING: Uses innerHTML - ensure all user data is escaped with esc()
+     */
     const setTooltip = (html, x, y) => {
+      // XSS Risk: innerHTML requires all user data in html to be pre-escaped with esc()
       tooltip.innerHTML = html;
       tooltip.classList.remove("hidden");
       const pad = 12;

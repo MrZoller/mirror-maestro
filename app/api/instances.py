@@ -243,6 +243,16 @@ async def create_instance(
     _: str = Depends(verify_credentials)
 ):
     """Create a new GitLab instance."""
+    # Check if instance with same name already exists
+    existing_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.name == instance.name)
+    )
+    if existing_result.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Instance with name '{instance.name}' already exists. Please choose a different name."
+        )
+
     # Encrypt the token
     encrypted_token = encryption.encrypt(instance.token)
 
