@@ -1669,8 +1669,17 @@ async def rotate_mirror_token(
             detail=f"Failed to create new project access token: {str(e)}"
         )
 
+    # Validate token result
+    new_token_value = token_result.get("token")
+    new_token_id = token_result.get("id")
+    if not new_token_value or new_token_id is None:
+        logger.error(f"GitLab API returned incomplete token response: {token_result}")
+        raise HTTPException(
+            status_code=500,
+            detail="GitLab API returned incomplete token response (missing 'token' or 'id')"
+        )
+
     # Build new authenticated URL
-    new_token_value = token_result["token"]
     authenticated_url = build_authenticated_url(
         token_instance,
         token_project_path,
@@ -1706,7 +1715,7 @@ async def rotate_mirror_token(
     mirror.encrypted_mirror_token = encryption.encrypt(new_token_value)
     mirror.mirror_token_name = token_name
     mirror.mirror_token_expires_at = datetime.strptime(expires_at, "%Y-%m-%d")
-    mirror.gitlab_token_id = token_result["id"]
+    mirror.gitlab_token_id = new_token_id
     mirror.token_project_id = token_project_id
 
     await db.commit()
