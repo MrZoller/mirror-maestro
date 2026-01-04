@@ -1,7 +1,7 @@
 # Mirror Maestro - Comprehensive Bug Audit
 
 **Started**: 2026-01-04
-**Status**: COMPLETED (Session 8)
+**Status**: COMPLETED (Session 9)
 **Last Updated**: 2026-01-04
 
 ## Audit Methodology
@@ -656,14 +656,35 @@ Session 8 focused on database transaction safety and security audit logging usin
 
 ---
 
+## Issues Fixed Session 9
+
+Session 9 focused on configuration consistency and proper timeout handling for GitLab API operations.
+
+### HIGH Issues Fixed
+
+| # | File | Description |
+|---|------|-------------|
+| 1 | `app/database.py` | Added timeout parameter to 2 GitLabClient instantiations (token migration) |
+| 2 | `app/api/health.py` | Added timeout parameter to GitLabClient instantiation (health checks) |
+| 3 | `app/api/instances.py` | Added timeout parameter to 5 GitLabClient instantiations |
+| 4 | `app/api/pairs.py` | Added timeout parameter to GitLabClient instantiation (batch sync) |
+| 5 | `app/api/export.py` | Added timeout parameter to 2 GitLabClient instantiations |
+| 6 | `app/api/mirrors.py` | Added settings import + timeout parameter to 13 GitLabClient instantiations |
+| 7 | `CLAUDE.md` | Updated 2 documentation examples with timeout parameter |
+| 8 | `app/config.py` | Added encryption_key_env and encryption_key_path Pydantic Settings fields |
+| 9 | `app/core/encryption.py` | Modified _get_or_create_key() to use Pydantic Settings as default |
+| 10 | `app/api/backup.py` | Replaced 3 os.getenv() calls with settings access |
+
+---
+
 ## Summary
 
-- **Total Issues Found**: 97
+- **Total Issues Found**: 107
 - **Critical**: 29 ✅ (all fixed)
-- **High**: 49 ✅ (all fixed)
+- **High**: 59 ✅ (all fixed)
 - **Medium**: 18 ✅ (all fixed)
 - **Low**: 1 ✅ (all fixed)
-- **Issues Fixed**: 97
+- **Issues Fixed**: 107
 - **Remaining**: 0
 
 ### By Session
@@ -675,6 +696,7 @@ Session 8 focused on database transaction safety and security audit logging usin
 - **Session 6**: 20 issues fixed (4 CRITICAL, 15 HIGH, 1 MEDIUM) - Deep dive on dict access, error handling, resource limits
 - **Session 7**: 14 issues fixed (2 CRITICAL, 5 HIGH, 6 MEDIUM, 1 LOW) - Parallel agent analysis on race conditions, SSRF, input validation
 - **Session 8**: 16 issues fixed (8 CRITICAL, 2 CRITICAL security, 6 MEDIUM) - Database transaction safety, security audit logging
+- **Session 9**: 10 issues fixed (10 HIGH) - GitLab timeout configuration, Pydantic Settings migration
 
 ---
 
@@ -714,6 +736,8 @@ Session 8 focused on database transaction safety and security audit logging usin
 32. **Authentication failure logging**: Log all authentication and authorization failures for security monitoring
 33. **Credential redaction**: Never log full tokens or passwords - use redaction functions to show only partial values
 34. **Security audit events**: Log user management operations (create, update, delete) with actor information
+35. **GitLab API timeout consistency**: Always pass timeout parameter to GitLabClient from settings.gitlab_api_timeout
+36. **Pydantic Settings for all config**: Use Pydantic Settings instead of os.getenv() for all configuration values
 
 ---
 
