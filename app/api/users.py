@@ -51,6 +51,14 @@ class UserCreate(BaseModel):
             raise ValueError('Password must be at least 8 characters')
         return v
 
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[EmailStr]) -> Optional[EmailStr]:
+        """Validate email length matches database constraint."""
+        if v is not None and len(str(v)) > 255:
+            raise ValueError('Email must be at most 255 characters')
+        return v
+
 
 class UserUpdate(BaseModel):
     """Request to update a user."""
@@ -64,6 +72,14 @@ class UserUpdate(BaseModel):
     def validate_password(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and len(v) < 8:
             raise ValueError('Password must be at least 8 characters')
+        return v
+
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[EmailStr]) -> Optional[EmailStr]:
+        """Validate email length matches database constraint."""
+        if v is not None and len(str(v)) > 255:
+            raise ValueError('Email must be at most 255 characters')
         return v
 
 

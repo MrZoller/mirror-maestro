@@ -212,13 +212,16 @@ class MirrorCreate(BaseModel):
     @field_validator('source_project_path', 'target_project_path')
     @classmethod
     def validate_project_path(cls, v):
-        """Validate GitLab project path format."""
+        """Validate GitLab project path format and length."""
         if not v or not v.strip():
             raise ValueError("Project path cannot be empty")
         # Remove leading/trailing slashes
         v = v.strip().strip('/')
         if not v:
             raise ValueError("Project path cannot be empty")
+        # Check length matches database constraint
+        if len(v) > 500:
+            raise ValueError("Project path must be at most 500 characters")
         # GitLab paths should be namespace/project or namespace/subgroup/project
         if not re.match(r'^[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)+$', v):
             raise ValueError("Invalid GitLab project path format. Expected: 'namespace/project' or 'namespace/subgroup/project'")
@@ -239,12 +242,15 @@ class MirrorPreflight(BaseModel):
     @field_validator('source_project_path', 'target_project_path')
     @classmethod
     def validate_project_path(cls, v):
-        """Validate GitLab project path format."""
+        """Validate GitLab project path format and length."""
         if not v or not v.strip():
             raise ValueError("Project path cannot be empty")
         v = v.strip().strip('/')
         if not v:
             raise ValueError("Project path cannot be empty")
+        # Check length matches database constraint
+        if len(v) > 500:
+            raise ValueError("Project path must be at most 500 characters")
         if not re.match(r'^[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)+$', v):
             raise ValueError("Invalid GitLab project path format. Expected: 'namespace/project' or 'namespace/subgroup/project'")
         return v
