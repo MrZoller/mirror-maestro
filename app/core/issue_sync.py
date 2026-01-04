@@ -498,15 +498,28 @@ class IssueSyncEngine:
                             "error": str(e)
                         })
 
-                # Checkpoint: Update config with progress
+                # Checkpoint: Update config with progress timestamp only
+                # Note: Do NOT set last_sync_status here - only the final outcome should set it
+                # Setting "in_progress" here caused status to get stuck if post-sync commit failed
                 try:
                     self.config.last_sync_at = datetime.utcnow()
-                    self.config.last_sync_status = "in_progress"
                     await self.db.commit()
                     logger.debug(f"Progress checkpoint saved: {batch_end}/{total_issues} issues processed")
                 except Exception as checkpoint_error:
                     logger.warning(f"Failed to save progress checkpoint: {checkpoint_error}")
                     # Continue processing - checkpoint failure is not critical
+
+            # Set final sync status before returning to caller
+            # This ensures status is correct even if caller's commit fails
+            if stats["issues_failed"] > 0 and stats["issues_created"] + stats["issues_updated"] > 0:
+                self.config.last_sync_status = "partial"
+            elif stats["issues_failed"] > 0:
+                self.config.last_sync_status = "failed"
+            else:
+                self.config.last_sync_status = "success"
+
+            self.config.last_sync_error = None
+            await self.db.commit()
 
             logger.info(
                 f"Issue sync completed: {stats['issues_created']} created, "
@@ -677,8 +690,8 @@ class IssueSyncEngine:
                 state_event="close"
             )
 
-        # Create issue mapping with transaction safety
-        # Use a savepoint so we can rollback if comment sync fails
+        # Create issue mapping with initial status "pending" until all operations complete
+        # This prevents incorrect "synced" status if post-creation operations fail
         mapping = IssueMapping(
             mirror_issue_config_id=self.config.id,
             source_issue_id=source_issue_id,
@@ -690,7 +703,7 @@ class IssueSyncEngine:
             last_synced_at=datetime.utcnow(),
             source_updated_at=self._parse_datetime(source_issue.get("updated_at")),
             target_updated_at=datetime.utcnow(),
-            sync_status="synced",
+            sync_status="pending",  # Start as pending, update to synced only on full success
             source_content_hash=content_hash,
         )
         self.db.add(mapping)
@@ -703,6 +716,10 @@ class IssueSyncEngine:
             # Sync comments if enabled (uses mapping.id for foreign key)
             if self.config.sync_comments:
                 await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+
+            # All operations succeeded - mark as fully synced
+            mapping.sync_status = "synced"
+            await self.db.commit()
 
         except Exception as e:
             # If post-creation sync fails, log warning but don't fail entire sync
@@ -780,12 +797,12 @@ class IssueSyncEngine:
                 state_event="reopen"
             )
 
-        # Update mapping with transaction safety
+        # Update mapping - initially set to pending until post-update operations complete
         mapping.source_content_hash = content_hash
         mapping.last_synced_at = datetime.utcnow()
         mapping.source_updated_at = self._parse_datetime(source_issue.get("updated_at"))
         mapping.target_updated_at = datetime.utcnow()
-        mapping.sync_status = "synced"
+        mapping.sync_status = "pending"  # Will be updated to "synced" on full success
 
         try:
             await self.db.commit()
@@ -793,6 +810,10 @@ class IssueSyncEngine:
             # Sync comments if enabled
             if self.config.sync_comments:
                 await self._sync_comments(source_issue_iid, target_issue_iid, mapping.id)
+
+            # All operations succeeded - mark as fully synced
+            mapping.sync_status = "synced"
+            await self.db.commit()
 
         except Exception as e:
             # If post-update sync fails, log warning but don't fail entire sync
@@ -1230,7 +1251,8 @@ class IssueSyncEngine:
         """
         try:
             # Search for issues with our Mirrored-From label
-            # Note: This is a simple search - in production you might want to cache these
+            # Search all pages (up to max limit) to avoid missing orphaned issues
+            # that may have moved beyond page 1 due to pagination order changes
             target_issues = await self._execute_gitlab_api_call(
                 self.target_client.get_issues,
                 f"search_existing_issue_{source_issue_iid}",
@@ -1238,16 +1260,29 @@ class IssueSyncEngine:
                 labels=self.mirror_from_label,
                 state="all",
                 per_page=100,
-                get_all=False,  # Only search first page for performance
+                get_all=True,  # Search all pages to find orphaned issues
             )
+
+            # Limit the number of issues we check to prevent performance issues
+            max_issues_to_check = settings.max_issues_per_sync
+            issues_checked = 0
 
             # Look for issue with matching source reference in description
             source_ref = f"{self.mirror.source_project_path}#{source_issue_iid}"
             for issue in target_issues:
+                if issues_checked >= max_issues_to_check:
+                    logger.warning(
+                        f"Searched {max_issues_to_check} issues without finding match for source #{source_issue_iid}. "
+                        f"Consider increasing max_issues_per_sync if orphans are expected."
+                    )
+                    break
+
                 description = issue.get("description", "")
                 if source_ref in description and MIRROR_FOOTER_MARKER in description:
-                    logger.debug(f"Found existing target issue {issue['iid']} for source {source_issue_iid}")
+                    logger.debug(f"Found existing target issue {issue.get('iid')} for source {source_issue_iid}")
                     return issue
+
+                issues_checked += 1
 
             return None
         except Exception as e:
