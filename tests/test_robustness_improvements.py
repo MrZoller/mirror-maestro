@@ -689,26 +689,29 @@ async def test_download_file_within_size_limit():
     """Test downloading file within size limit."""
     from app.core.issue_sync import download_file
 
-    # Mock a small file
-    with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
-        mock_response = Mock()
-        mock_response.headers = {'content-length': '1024'}  # 1KB
-        mock_response.content = b'x' * 1024
-        mock_response.raise_for_status = Mock()
+    # Mock SSRF validation (it's now async and does DNS lookups)
+    with patch('app.core.issue_sync._validate_url_for_ssrf', new_callable=AsyncMock) as mock_ssrf:
+        # Mock a small file
+        with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
+            mock_response = Mock()
+            mock_response.headers = {'content-length': '1024'}  # 1KB
+            mock_response.content = b'x' * 1024
+            mock_response.raise_for_status = Mock()
+            mock_response.is_redirect = False
 
-        mock_client = Mock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client = Mock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
 
-        MockClient.return_value = mock_client
+            MockClient.return_value = mock_client
 
-        # Download with 1MB limit
-        max_size = 1024 * 1024  # 1MB
-        content = await download_file("http://example.com/file.txt", max_size_bytes=max_size)
+            # Download with 1MB limit
+            max_size = 1024 * 1024  # 1MB
+            content = await download_file("http://example.com/file.txt", max_size_bytes=max_size)
 
-        assert content == mock_response.content
-        assert len(content) == 1024
+            assert content == mock_response.content
+            assert len(content) == 1024
 
 
 @pytest.mark.asyncio
@@ -716,22 +719,25 @@ async def test_download_file_exceeds_size_limit_header():
     """Test downloading file that exceeds size limit (detected via header)."""
     from app.core.issue_sync import download_file
 
-    with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
-        mock_response = Mock()
-        mock_response.headers = {'content-length': str(200 * 1024 * 1024)}  # 200MB
-        mock_response.raise_for_status = Mock()
+    # Mock SSRF validation (it's now async and does DNS lookups)
+    with patch('app.core.issue_sync._validate_url_for_ssrf', new_callable=AsyncMock) as mock_ssrf:
+        with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
+            mock_response = Mock()
+            mock_response.headers = {'content-length': str(200 * 1024 * 1024)}  # 200MB
+            mock_response.raise_for_status = Mock()
+            mock_response.is_redirect = False
 
-        mock_client = Mock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client = Mock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
 
-        MockClient.return_value = mock_client
+            MockClient.return_value = mock_client
 
-        # Download with 100MB limit
-        max_size = 100 * 1024 * 1024
-        with pytest.raises(ValueError, match="exceeds maximum allowed size"):
-            await download_file("http://example.com/huge.txt", max_size_bytes=max_size)
+            # Download with 100MB limit
+            max_size = 100 * 1024 * 1024
+            with pytest.raises(ValueError, match="exceeds maximum allowed size"):
+                await download_file("http://example.com/huge.txt", max_size_bytes=max_size)
 
 
 @pytest.mark.asyncio
@@ -739,24 +745,27 @@ async def test_download_file_exceeds_size_limit_content():
     """Test downloading file that exceeds size limit (detected from actual content)."""
     from app.core.issue_sync import download_file
 
-    with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
-        # No content-length header
-        mock_response = Mock()
-        mock_response.headers = {}
-        mock_response.content = b'x' * (200 * 1024 * 1024)  # 200MB
-        mock_response.raise_for_status = Mock()
+    # Mock SSRF validation (it's now async and does DNS lookups)
+    with patch('app.core.issue_sync._validate_url_for_ssrf', new_callable=AsyncMock) as mock_ssrf:
+        with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
+            # No content-length header
+            mock_response = Mock()
+            mock_response.headers = {}
+            mock_response.content = b'x' * (200 * 1024 * 1024)  # 200MB
+            mock_response.raise_for_status = Mock()
+            mock_response.is_redirect = False
 
-        mock_client = Mock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client = Mock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
 
-        MockClient.return_value = mock_client
+            MockClient.return_value = mock_client
 
-        # Download with 100MB limit
-        max_size = 100 * 1024 * 1024
-        with pytest.raises(ValueError, match="exceeds maximum allowed size"):
-            await download_file("http://example.com/huge.txt", max_size_bytes=max_size)
+            # Download with 100MB limit
+            max_size = 100 * 1024 * 1024
+            with pytest.raises(ValueError, match="exceeds maximum allowed size"):
+                await download_file("http://example.com/huge.txt", max_size_bytes=max_size)
 
 
 @pytest.mark.asyncio
@@ -764,23 +773,26 @@ async def test_download_file_unlimited_size():
     """Test downloading file with unlimited size (max_size_bytes=0)."""
     from app.core.issue_sync import download_file
 
-    with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
-        mock_response = Mock()
-        mock_response.headers = {'content-length': str(500 * 1024 * 1024)}  # 500MB
-        mock_response.content = b'x' * (500 * 1024 * 1024)
-        mock_response.raise_for_status = Mock()
+    # Mock SSRF validation (it's now async and does DNS lookups)
+    with patch('app.core.issue_sync._validate_url_for_ssrf', new_callable=AsyncMock) as mock_ssrf:
+        with patch('app.core.issue_sync.httpx.AsyncClient') as MockClient:
+            mock_response = Mock()
+            mock_response.headers = {'content-length': str(500 * 1024 * 1024)}  # 500MB
+            mock_response.content = b'x' * (500 * 1024 * 1024)
+            mock_response.raise_for_status = Mock()
+            mock_response.is_redirect = False
 
-        mock_client = Mock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client = Mock()
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
 
-        MockClient.return_value = mock_client
+            MockClient.return_value = mock_client
 
-        # Download with unlimited size (0)
-        content = await download_file("http://example.com/big.txt", max_size_bytes=0)
+            # Download with unlimited size (0)
+            content = await download_file("http://example.com/big.txt", max_size_bytes=0)
 
-        assert len(content) == 500 * 1024 * 1024
+            assert len(content) == 500 * 1024 * 1024
 
 
 # -------------------------------------------------------------------------
