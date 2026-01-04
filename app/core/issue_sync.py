@@ -1267,7 +1267,11 @@ class IssueSyncEngine:
 
                 # Get full URL (GitLab returns relative URL)
                 target_url = upload_result.get("url")
-                if target_url and not target_url.startswith("http"):
+                if not target_url:
+                    logger.warning(f"Upload succeeded but no URL returned for attachment {filename}, skipping URL replacement")
+                    continue
+
+                if not target_url.startswith("http"):
                     target_url = f"{self.target_instance.url}{target_url}"
 
                 url_mapping[source_url] = target_url

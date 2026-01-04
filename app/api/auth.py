@@ -3,6 +3,7 @@ Authentication API endpoints.
 
 Provides login, logout, and current user info endpoints.
 """
+import logging
 import secrets
 from datetime import datetime
 from typing import Optional
@@ -23,6 +24,8 @@ from app.core.auth import (
 from app.core.api_rate_limiter import limiter, AUTH_RATE_LIMIT
 from app.database import get_db
 from app.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
