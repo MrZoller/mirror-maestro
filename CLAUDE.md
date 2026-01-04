@@ -680,7 +680,7 @@ if not instance:
 
 # Good (with context)
 try:
-    client = GitLabClient(instance.url, instance.encrypted_token)
+    client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
     client.test_connection()
 except Exception as e:
     raise HTTPException(
@@ -703,7 +703,7 @@ async def create_mirror(db: AsyncSession, mirror_data: MirrorCreate) -> Mirror:
     pair = result.scalar_one_or_none()
 
     # GitLab API call - use sync wrapper in async context
-    client = GitLabClient(instance.url, instance.encrypted_token)
+    client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
     gitlab_mirror = client.create_mirror(...)  # Sync call wrapped in async function
 
     # Database operation - async
