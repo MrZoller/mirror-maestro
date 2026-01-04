@@ -1682,7 +1682,7 @@ async def rotate_mirror_token(
     if mirror.mirror_id:
         try:
             # Get current effective settings
-            effective_settings = _resolve_effective_settings(mirror, pair)
+            effective_settings = await _resolve_effective_settings(db, mirror=mirror, pair=pair)
 
             await _execute_gitlab_op(
                 client=mirror_client,
