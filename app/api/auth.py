@@ -229,6 +229,15 @@ async def change_password(
 
     # Update password
     user.hashed_password = get_password_hash(password_data.new_password)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to commit password change: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update password. Please try again."
+        )
 
+    logger.info(f"Password changed successfully for user '{user.username}'")
     return {"message": "Password changed successfully"}
