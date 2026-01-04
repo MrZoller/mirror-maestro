@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from app.database import get_db
 from app.models import Mirror, InstancePair, GitLabInstance
 from app.core.auth import verify_credentials
+from app.config import settings
 from app.core.gitlab_client import (
     GitLabClient,
     GitLabClientError,
@@ -799,7 +800,7 @@ async def _create_mirror_internal(
     encrypted_token = None
     gitlab_token_id = None
     token_name = None
-    token_client = GitLabClient(token_instance.url, token_instance.encrypted_token)
+    token_client = GitLabClient(token_instance.url, token_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
 
     try:
         # Use a unique token name that includes a timestamp for uniqueness
@@ -861,7 +862,7 @@ async def _create_mirror_internal(
     try:
         if direction == "push":
             # For push mirrors, configure on source to push to target
-            client = GitLabClient(source_instance.url, source_instance.encrypted_token)
+            client = GitLabClient(source_instance.url, source_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
             result = await _execute_gitlab_op(
                 client=client,
                 operation=lambda c: c.create_push_mirror(
@@ -876,7 +877,7 @@ async def _create_mirror_internal(
             gitlab_mirror_id = result.get("id")
         else:  # pull
             # For pull mirrors, configure on target to pull from source
-            client = GitLabClient(target_instance.url, target_instance.encrypted_token)
+            client = GitLabClient(target_instance.url, target_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
 
             # GitLab effectively supports only one pull mirror per project.
             existing = await _execute_gitlab_op(
@@ -1000,7 +1001,7 @@ async def _create_mirror_internal(
             try:
                 cleanup_instance = source_instance if direction == "push" else target_instance
                 cleanup_project_id = mirror_data.source_project_id if direction == "push" else mirror_data.target_project_id
-                cleanup_client = GitLabClient(cleanup_instance.url, cleanup_instance.encrypted_token)
+                cleanup_client = GitLabClient(cleanup_instance.url, cleanup_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
                 await _execute_gitlab_op(
                     client=cleanup_client,
                     operation=lambda c: c.delete_mirror(cleanup_project_id, gitlab_mirror_id),
@@ -1151,7 +1152,7 @@ async def preflight_mirror(
     owner_project_id = req.source_project_id if direction == "push" else req.target_project_id
     owner_instance = source_instance if direction == "push" else target_instance
 
-    client = GitLabClient(owner_instance.url, owner_instance.encrypted_token)
+    client = GitLabClient(owner_instance.url, owner_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
     existing = await _execute_gitlab_op(
         client=client,
         operation=lambda c: c.get_project_mirrors(owner_project_id) or [],
@@ -1192,7 +1193,7 @@ async def remove_existing_gitlab_mirrors(
     owner_project_id = req.source_project_id if direction == "push" else req.target_project_id
     owner_instance = source_instance if direction == "push" else target_instance
 
-    client = GitLabClient(owner_instance.url, owner_instance.encrypted_token)
+    client = GitLabClient(owner_instance.url, owner_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
     existing = await _execute_gitlab_op(
         client=client,
         operation=lambda c: c.get_project_mirrors(owner_project_id) or [],
@@ -1363,7 +1364,7 @@ async def update_mirror(
             )
 
             # Update the mirror in GitLab
-            client = GitLabClient(instance.url, instance.encrypted_token)
+            client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
             await _execute_gitlab_op(
                 client=client,
                 operation=lambda c: c.update_mirror(
@@ -1465,7 +1466,7 @@ async def _cleanup_mirror_from_gitlab(
 
                 if instance:
                     logger.info(f"Attempting to delete GitLab mirror {mirror.mirror_id} from project {project_id} on {instance.url}")
-                    client = GitLabClient(instance.url, instance.encrypted_token)
+                    client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
                     await _execute_gitlab_op(
                         client=client,
                         operation=lambda c: c.delete_mirror(project_id, mirror.mirror_id),
@@ -1511,7 +1512,7 @@ async def _cleanup_mirror_from_gitlab(
 
                 if token_instance:
                     logger.info(f"Deleting project access token {mirror.gitlab_token_id} from project {mirror.token_project_id}")
-                    token_client = GitLabClient(token_instance.url, token_instance.encrypted_token)
+                    token_client = GitLabClient(token_instance.url, token_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
                     await _execute_gitlab_op(
                         client=token_client,
                         operation=lambda c: c.delete_project_access_token(mirror.token_project_id, mirror.gitlab_token_id),
@@ -1617,7 +1618,7 @@ async def trigger_mirror_update(
         raise HTTPException(status_code=404, detail="GitLab instance not found")
 
     try:
-        client = GitLabClient(instance.url, instance.encrypted_token)
+        client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
         await _execute_gitlab_op(
             client=client,
             operation=lambda c: c.trigger_mirror_update(project_id, mirror.mirror_id),
@@ -1703,8 +1704,8 @@ async def rotate_mirror_token(
         mirror_project_id = mirror.target_project_id
         scopes = ["read_repository"]
 
-    token_client = GitLabClient(token_instance.url, token_instance.encrypted_token)
-    mirror_client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token)
+    token_client = GitLabClient(token_instance.url, token_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
+    mirror_client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
 
     # Delete old token if it exists
     if mirror.gitlab_token_id is not None and mirror.token_project_id:
@@ -1880,7 +1881,7 @@ async def _verify_single_mirror(
 
     # Get mirrors from GitLab
     try:
-        client = GitLabClient(owner_instance.url, owner_instance.encrypted_token)
+        client = GitLabClient(owner_instance.url, owner_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
         gitlab_mirrors = await _execute_gitlab_op(
             client=client,
             operation=lambda c: c.get_project_mirrors(owner_project_id) or [],
