@@ -44,9 +44,7 @@ router = APIRouter(prefix="/api/backup", tags=["backup"])
 
 def _get_encryption_key_path() -> Path:
     """Get path to encryption key file."""
-    import os
-    key_file = os.getenv("ENCRYPTION_KEY_PATH") or "./data/encryption.key"
-    return Path(key_file).resolve()
+    return Path(settings.encryption_key_path).resolve()
 
 
 def _safe_tar_extract(tar: tarfile.TarFile, extract_path: Path) -> None:
@@ -333,9 +331,8 @@ async def create_backup(
         key_content = key_path.read_bytes()
     else:
         # In test environments, use placeholder
-        import os
-        if os.getenv("ENCRYPTION_KEY"):
-            key_content = os.getenv("ENCRYPTION_KEY").encode()
+        if settings.encryption_key_env:
+            key_content = settings.encryption_key_env.encode()
         else:
             key_content = b"test-encryption-key-placeholder"
 
