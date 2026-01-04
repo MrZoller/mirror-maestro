@@ -1,6 +1,7 @@
 import logging
 import os
 import secrets
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,7 @@ class JWTSecretManager:
     def __init__(self):
         # Lazily initialized to avoid filesystem writes at import time.
         self._secret: Optional[str] = None
+        self._lock = threading.Lock()
 
     def _get_or_create_secret(self, env_secret: Optional[str] = None, env_path: Optional[str] = None) -> str:
         """Get or create a JWT secret key.
@@ -74,8 +76,12 @@ class JWTSecretManager:
             env_secret: JWT_SECRET_KEY value from settings
             env_path: JWT_SECRET_KEY_PATH value from settings
         """
+        # Double-checked locking pattern for thread-safe lazy initialization
         if self._secret is None:
-            self._secret = self._get_or_create_secret(env_secret, env_path)
+            with self._lock:
+                # Re-check after acquiring lock (another thread may have initialized it)
+                if self._secret is None:
+                    self._secret = self._get_or_create_secret(env_secret, env_path)
         return self._secret
 
 
