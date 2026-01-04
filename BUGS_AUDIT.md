@@ -1,7 +1,7 @@
 # Mirror Maestro - Comprehensive Bug Audit
 
 **Started**: 2026-01-04
-**Status**: COMPLETED (Session 5)
+**Status**: COMPLETED (Session 6)
 **Last Updated**: 2026-01-04
 
 ## Audit Methodology
@@ -533,14 +533,54 @@ Based on git history, these areas have been addressed in prior sessions:
 
 ---
 
+## Issues Fixed Session 6
+
+Session 6 focused on comprehensive deep dive across six categories: exception handling, unsafe dict access, HTTP client configuration, resource leaks, race conditions, and information disclosure.
+
+### CRITICAL Issues Fixed
+
+| # | File | Description |
+|---|------|-------------|
+| 1 | `app/core/issue_sync.py` | Added validation for source issue id/iid in `_create_or_recover_issue` |
+| 2 | `app/core/issue_sync.py` | Added validation for target issue id/iid in `_update_target_issue` |
+| 3 | `app/core/issue_sync.py` | Added validation for source_issue_iid in `_prepare_description` |
+| 4 | `app/database.py` | Added validation for token response id/token in migration |
+
+### HIGH Issues Fixed
+
+| # | File | Description |
+|---|------|-------------|
+| 1 | `app/api/instances.py` | Fixed silent exception handling - now logs debug message |
+| 2 | `app/api/pairs.py` | Fixed silent rollback exception - now logs debug message |
+| 3 | `app/core/gitlab_client.py` | Fixed silent test_connection exception - now logs debug message |
+| 4 | `app/core/issue_sync.py` | Fixed unsafe dict access for existing_target_issue id/iid |
+| 5 | `app/core/issue_sync.py` | Fixed unsafe dict access in cleanup function |
+| 6 | `app/core/gitlab_client.py` | Fixed unsafe branch.commit["id"] access in create_branch |
+| 7 | `app/core/gitlab_client.py` | Fixed unsafe b.commit["id"] access in get_branches |
+| 8 | `app/core/gitlab_client.py` | Fixed unsafe tag.commit["id"] access in create_tag |
+| 9 | `app/core/gitlab_client.py` | Fixed unsafe t.commit["id"] access in get_tags |
+| 10 | `app/api/export.py` | Fixed unsafe project["id"] access with validation |
+| 11 | `app/core/rate_limiter.py` | Added public reset() method to CircuitBreaker |
+| 12 | `app/core/mirror_gitlab_service.py` | Fixed encapsulation violation - now uses cb.reset() |
+| 13 | `app/api/mirrors.py` | Fixed exception details exposed in API responses (3 instances) |
+| 14 | `app/core/issue_sync.py` | Added httpx connection pool limits and client-level timeout |
+
+### MEDIUM Issues Fixed
+
+| # | File | Description |
+|---|------|-------------|
+| 1 | `app/core/issue_sync.py` | Narrowed exception type in `_parse_datetime` from Exception to (ValueError, TypeError) |
+
+---
+
 ## Summary
 
-- **Total Issues Found**: 49
-- **Critical**: 15 ✅ (all fixed)
-- **High**: 29 ✅ (all fixed)
-- **Medium**: 5 ✅ (all fixed)
+- **Total Issues Found**: 69
+- **Critical**: 19 ✅ (all fixed)
+- **High**: 44 ✅ (all fixed)
+- **Medium**: 6 ✅ (all fixed)
 - **Low**: 0
-- **Issues Fixed**: 49
+- **Issues Fixed**: 69
 - **Remaining**: 0
 
 ### By Session
@@ -549,6 +589,7 @@ Based on git history, these areas have been addressed in prior sessions:
 - **Session 3**: 9 issues fixed (2 CRITICAL, 5 HIGH, 2 MEDIUM)
 - **Session 4**: 8 issues fixed (1 CRITICAL, 7 HIGH)
 - **Session 5**: 18 issues fixed (7 CRITICAL, 11 HIGH) - Focused on GitLab API handling
+- **Session 6**: 20 issues fixed (4 CRITICAL, 15 HIGH, 1 MEDIUM) - Deep dive on dict access, error handling, resource limits
 
 ---
 
@@ -572,6 +613,10 @@ Based on git history, these areas have been addressed in prior sessions:
 16. **Input length validation**: Add max_length constraints to all list and string parameters to prevent DoS
 17. **Falsy value handling**: Use `is not None` instead of truthiness checks for IDs that could be 0
 18. **Database transaction rollback**: Always rollback on commit failures to keep session in clean state
+19. **CircuitBreaker encapsulation**: Never access private `_lock` attribute externally - use public methods like `reset()`
+20. **HTTP client configuration**: Always configure connection pool limits and client-level timeouts for httpx/requests
+21. **API error messages**: Never expose exception details in API responses - log them server-side only
+22. **Type-safe dict access**: For objects that could be dicts or objects, use `isinstance(x, dict)` check before `.get()`
 
 ---
 

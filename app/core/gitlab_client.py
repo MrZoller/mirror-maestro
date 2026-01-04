@@ -159,7 +159,8 @@ class GitLabClient:
         try:
             self.gl.auth()
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"GitLab connection test failed: {e}")
             return False
 
     def get_projects(
@@ -579,9 +580,10 @@ class GitLabClient:
         try:
             project = self.gl.projects.get(project_id)
             branch = project.branches.create({"branch": branch_name, "ref": ref})
+            commit_sha = branch.commit.get("id") if isinstance(branch.commit, dict) else getattr(branch.commit, "id", None)
             return {
                 "name": branch.name,
-                "commit_sha": branch.commit["id"],
+                "commit_sha": commit_sha,
                 "protected": branch.protected,
             }
         except Exception as e:
@@ -592,15 +594,16 @@ class GitLabClient:
         try:
             project = self.gl.projects.get(project_id)
             branches = project.branches.list(get_all=True)
-            return [
-                {
+            result = []
+            for b in branches:
+                commit_sha = b.commit.get("id") if isinstance(b.commit, dict) else getattr(b.commit, "id", None)
+                result.append({
                     "name": b.name,
-                    "commit_sha": b.commit["id"],
+                    "commit_sha": commit_sha,
                     "protected": b.protected,
                     "default": getattr(b, "default", False),
-                }
-                for b in branches
-            ]
+                })
+            return result
         except Exception as e:
             _handle_gitlab_error(e, f"Failed to get branches for project {project_id}")
 
@@ -641,9 +644,10 @@ class GitLabClient:
             if message:
                 data["message"] = message
             tag = project.tags.create(data)
+            commit_sha = tag.commit.get("id") if isinstance(tag.commit, dict) else getattr(tag.commit, "id", None)
             return {
                 "name": tag.name,
-                "commit_sha": tag.commit["id"],
+                "commit_sha": commit_sha,
                 "message": getattr(tag, "message", None),
             }
         except Exception as e:
@@ -654,14 +658,15 @@ class GitLabClient:
         try:
             project = self.gl.projects.get(project_id)
             tags = project.tags.list(get_all=True)
-            return [
-                {
+            result = []
+            for t in tags:
+                commit_sha = t.commit.get("id") if isinstance(t.commit, dict) else getattr(t.commit, "id", None)
+                result.append({
                     "name": t.name,
-                    "commit_sha": t.commit["id"],
+                    "commit_sha": commit_sha,
                     "message": getattr(t, "message", None),
-                }
-                for t in tags
-            ]
+                })
+            return result
         except Exception as e:
             _handle_gitlab_error(e, f"Failed to get tags for project {project_id}")
 
