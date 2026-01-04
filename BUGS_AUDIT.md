@@ -1,7 +1,7 @@
 # Mirror Maestro - Comprehensive Bug Audit
 
 **Started**: 2026-01-04
-**Status**: COMPLETED (Session 4)
+**Status**: COMPLETED (Session 5)
 **Last Updated**: 2026-01-04
 
 ## Audit Methodology
@@ -38,17 +38,17 @@
 
 | File | Reviewed | Issues Found | Issues Fixed |
 |------|----------|--------------|--------------|
-| `instances.py` | ✅ | 1 MEDIUM | 1 |
+| `instances.py` | ✅ | 2 (1 MEDIUM, 1 HIGH) | 2 |
 | `auth.py` (api) | ✅ | 2 HIGH | 2 |
-| `pairs.py` | ✅ | 0 | 0 |
-| `mirrors.py` | ✅ | 3 (2 CRITICAL, 1 HIGH) | 3 |
-| `issue_mirrors.py` | ✅ | 1 HIGH | 1 |
+| `pairs.py` | ✅ | 2 (1 HIGH, 1 MEDIUM) | 2 |
+| `mirrors.py` | ✅ | 8 (2 CRITICAL, 6 HIGH) | 8 |
+| `issue_mirrors.py` | ✅ | 2 HIGH | 2 |
 | `users.py` | ✅ | 0 | 0 |
 | `auth.py` | ✅ | 0 | 0 |
 | `dashboard.py` | ✅ | 0 | 0 |
 | `topology.py` | ✅ | 0 | 0 |
 | `search.py` | ✅ | 0 | 0 |
-| `export.py` | ✅ | 0 | 0 |
+| `export.py` | ✅ | 3 (2 CRITICAL, 1 MEDIUM) | 3 |
 | `backup.py` | ✅ | 4 (1 CRITICAL, 2 HIGH, 1 MEDIUM) | 4 |
 | `health.py` | ✅ | 0 | 0 |
 
@@ -59,7 +59,7 @@
 | `auth.py` | ✅ | 2 (1 CRITICAL, 1 HIGH) | 2 |
 | `encryption.py` | ✅ | 0 | 0 |
 | `gitlab_client.py` | ✅ | 0 | 0 |
-| `issue_sync.py` | ✅ | 5 (2 CRITICAL, 2 HIGH, 1 MEDIUM) | 5 |
+| `issue_sync.py` | ✅ | 10 (5 CRITICAL, 4 HIGH, 1 MEDIUM) | 10 |
 | `issue_scheduler.py` | ✅ | 2 HIGH | 2 |
 | `rate_limiter.py` | ✅ | 1 HIGH | 1 |
 | `api_rate_limiter.py` | ✅ | 0 | 0 |
@@ -482,6 +482,40 @@
 
 ---
 
+## Issues Fixed Session 5
+
+Session 5 focused on GitLab API request/response handling and async correctness.
+
+### CRITICAL Issues Fixed
+
+| # | File | Description |
+|---|------|-------------|
+| 1 | `app/core/issue_sync.py` | Fixed direct dict key access without .get() for issue id/iid (lines 638-640) |
+| 2 | `app/core/issue_sync.py` | Fixed direct dict key access for issue title (line 665) |
+| 3 | `app/core/issue_sync.py` | Fixed blocking socket.getaddrinfo() - now uses async DNS resolution |
+| 4 | `app/core/issue_sync.py` | Fixed SSRF bypass via redirect following - now validates each redirect URL |
+| 5 | `app/api/mirrors.py` | Added max_length to MirrorVerifyRequest.mirror_ids (limit: 1000) |
+| 6 | `app/api/export.py` | Added max_length to ImportData.mirrors (limit: 5000) |
+| 7 | `app/api/export.py` | Added max_length to MirrorExport path fields (limit: 500) |
+
+### HIGH Issues Fixed
+
+| # | File | Description |
+|---|------|-------------|
+| 1 | `app/core/issue_sync.py` | Fixed direct dict access for source_note["id"] in comment sync |
+| 2 | `app/core/issue_sync.py` | Fixed direct dict access for target_note["id"] with validation |
+| 3 | `app/core/issue_sync.py` | Fixed label cache dict comprehension with safe key access |
+| 4 | `app/api/mirrors.py` | Sanitized HTTPException to not expose full mirror objects |
+| 5 | `app/api/mirrors.py` | Fixed token ID false-y value handling (0 is valid but falsy) |
+| 6 | `app/api/mirrors.py` | Added GitLab API response validation for token creation |
+| 7 | `app/api/instances.py` | Added max_length to search query parameter (limit: 500) |
+| 8 | `app/api/pairs.py` | Added max_length and pattern validation to query parameters |
+| 9 | `app/api/mirrors.py` | Added comprehensive Query parameter validation (search, status, etc.) |
+| 10 | `app/api/pairs.py` | Added rollback handling for batch sync loop errors |
+| 11 | `app/api/issue_mirrors.py` | Added commit error handling with rollback |
+
+---
+
 ## Issues Fixed Session 1
 
 | # | Severity | File | Description |
@@ -501,12 +535,12 @@ Based on git history, these areas have been addressed in prior sessions:
 
 ## Summary
 
-- **Total Issues Found**: 31
-- **Critical**: 8 ✅ (all fixed)
-- **High**: 18 ✅ (all fixed)
-- **Medium**: 4 ✅ (all fixed)
+- **Total Issues Found**: 49
+- **Critical**: 15 ✅ (all fixed)
+- **High**: 29 ✅ (all fixed)
+- **Medium**: 5 ✅ (all fixed)
 - **Low**: 0
-- **Issues Fixed**: 31
+- **Issues Fixed**: 49
 - **Remaining**: 0
 
 ### By Session
@@ -514,6 +548,7 @@ Based on git history, these areas have been addressed in prior sessions:
 - **Session 2**: 11 issues fixed (4 CRITICAL, 5 HIGH, 2 MEDIUM)
 - **Session 3**: 9 issues fixed (2 CRITICAL, 5 HIGH, 2 MEDIUM)
 - **Session 4**: 8 issues fixed (1 CRITICAL, 7 HIGH)
+- **Session 5**: 18 issues fixed (7 CRITICAL, 11 HIGH) - Focused on GitLab API handling
 
 ---
 
@@ -531,6 +566,12 @@ Based on git history, these areas have been addressed in prior sessions:
 10. **Resource management**: Always close file handles, especially from `tar.extractfile()` and similar APIs
 11. **URL validation**: Always validate URL schemes, not just hostnames, to prevent protocol injection
 12. **Lock usage consistency**: When a class has internal locks, ensure all code paths (including callers) use them properly
+13. **GitLab API response validation**: Always use .get() with defaults for dict access, validate response types before use
+14. **Async DNS resolution**: Use `asyncio.get_running_loop().getaddrinfo()` instead of blocking `socket.getaddrinfo()`
+15. **SSRF redirect validation**: When following redirects, validate each redirect URL for SSRF, not just the initial URL
+16. **Input length validation**: Add max_length constraints to all list and string parameters to prevent DoS
+17. **Falsy value handling**: Use `is not None` instead of truthiness checks for IDs that could be 0
+18. **Database transaction rollback**: Always rollback on commit failures to keep session in clean state
 
 ---
 

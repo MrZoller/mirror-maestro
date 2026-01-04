@@ -4,7 +4,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.database import get_db
 from app.models import Mirror, InstancePair, GitLabInstance
@@ -41,13 +41,13 @@ class MirrorExport(BaseModel):
     Mirror export format - portable across environments.
     Project IDs are looked up at import time via GitLab API.
     """
-    source_project_path: str
-    target_project_path: str
+    source_project_path: str = Field(max_length=500)
+    target_project_path: str = Field(max_length=500)
     # Direction is determined by pair, not stored per-mirror
     mirror_overwrite_diverged: bool | None = None
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
-    mirror_branch_regex: str | None = None
+    mirror_branch_regex: str | None = Field(default=None, max_length=500)
     enabled: bool = True
 
 
@@ -75,7 +75,8 @@ class ImportData(BaseModel):
     Metadata is ignored (just for user reference).
     """
     metadata: ExportMetadata | None = None  # Optional, ignored on import
-    mirrors: List[MirrorExport]
+    # Limit to 5000 mirrors per import to prevent DoS
+    mirrors: List[MirrorExport] = Field(max_length=5000)
 
 
 @router.get("/pair/{pair_id}")

@@ -376,8 +376,15 @@ async def trigger_sync(
         target_instance_id=target_instance_id,
     )
     db.add(job)
-    await db.commit()
-    await db.refresh(job)
+    try:
+        await db.commit()
+        await db.refresh(job)
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create sync job: database error"
+        )
 
     # Trigger sync in background
     async def run_sync():

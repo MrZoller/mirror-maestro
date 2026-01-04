@@ -1,7 +1,7 @@
 from typing import List
 import logging
 from urllib.parse import urlparse
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -133,7 +133,7 @@ class GitLabInstanceResponse(BaseModel):
 
 @router.get("", response_model=List[GitLabInstanceResponse])
 async def list_instances(
-    search: str | None = None,
+    search: str | None = Query(default=None, max_length=500),
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
