@@ -110,6 +110,14 @@ class GitLabInstanceCreate(BaseModel):
             raise ValueError("Instance name must be 100 characters or less")
         return v
 
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v):
+        """Validate description length."""
+        if v and len(v) > 500:
+            raise ValueError("Description must be 500 characters or less")
+        return v.strip() if v else ""
+
     @field_validator('url')
     @classmethod
     def validate_url(cls, v):
@@ -181,6 +189,14 @@ class GitLabInstanceUpdate(BaseModel):
         """Validate token if provided."""
         if v is not None and not v.strip():
             raise ValueError("Access token cannot be empty")
+        return v.strip() if v else None
+
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v):
+        """Validate description length if provided."""
+        if v is not None and len(v) > 500:
+            raise ValueError("Description must be 500 characters or less")
         return v.strip() if v else None
 
 
