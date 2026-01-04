@@ -1,10 +1,10 @@
 from typing import List, TypeVar, Callable, Any
 import re
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from datetime import datetime, timedelta
 
 from app.database import get_db
@@ -266,7 +266,8 @@ class MirrorVerifyResponse(BaseModel):
 
 class MirrorVerifyRequest(BaseModel):
     """Request to verify multiple mirrors."""
-    mirror_ids: list[int]
+    # Limit to 1000 mirrors per request to prevent DoS
+    mirror_ids: list[int] = Field(max_length=1000)
 
 
 class MirrorUpdate(BaseModel):
@@ -408,15 +409,15 @@ async def _resolve_effective_settings(
 @router.get("", response_model=MirrorListResponse)
 async def list_mirrors(
     instance_pair_id: int | None = None,
-    status: str | None = None,
+    status: str | None = Query(default=None, max_length=50),
     enabled: bool | None = None,
-    search: str | None = None,
-    token_status: str | None = None,
-    group_path: str | None = None,
-    page: int = 1,
-    page_size: int = 50,
-    order_by: str = "created_at",
-    order_dir: str = "desc",
+    search: str | None = Query(default=None, max_length=500),
+    token_status: str | None = Query(default=None, pattern="^(active|expiring_soon|expired|none)$"),
+    group_path: str | None = Query(default=None, max_length=500),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    order_by: str = Query(default="created_at", pattern="^(created_at|updated_at|source_project_path|target_project_path)$"),
+    order_dir: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
@@ -775,8 +776,25 @@ async def _create_mirror_internal(
             ),
             operation_name=f"create_project_access_token({token_project_id})",
         )
+        # Validate response - token_info must be a dict with id and token
+        if not isinstance(token_info, dict):
+            logger.error(f"GitLab API returned invalid token response: expected dict, got {type(token_info).__name__}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create access token: GitLab returned invalid response"
+            )
         gitlab_token_id = token_info.get("id")
         plaintext_token = token_info.get("token")
+        # Use 'is not None' for ID since 0 is theoretically a valid ID (falsy but valid)
+        if gitlab_token_id is None or not plaintext_token:
+            logger.error(
+                f"GitLab API returned incomplete token response. "
+                f"Has id: {gitlab_token_id is not None}, Has token: {bool(plaintext_token)}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create access token: GitLab returned incomplete response"
+            )
         if plaintext_token:
             encrypted_token = encryption.encrypt(plaintext_token)
         logger.info(f"Created project access token '{token_name}' on project {token_project_id}")
@@ -831,7 +849,7 @@ async def _create_mirror_internal(
             existing_pull = [m for m in (existing or []) if str(m.get("mirror_direction") or "").lower() == "pull"]
             if existing_pull:
                 # Cleanup the token we just created
-                if gitlab_token_id:
+                if gitlab_token_id is not None:
                     try:
                         await _execute_gitlab_op(
                             client=token_client,
@@ -840,6 +858,15 @@ async def _create_mirror_internal(
                         )
                     except Exception:
                         logger.warning(f"Failed to cleanup token {gitlab_token_id} after mirror conflict")
+                # Sanitize existing mirrors - only expose safe fields (no tokens/credentials)
+                safe_mirrors = [
+                    {
+                        "id": m.get("id"),
+                        "url": m.get("url"),  # URL is already sanitized by GitLab (no auth)
+                        "enabled": m.get("enabled"),
+                    }
+                    for m in existing_pull
+                ]
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -848,7 +875,7 @@ async def _create_mirror_internal(
                             "GitLab allows only one pull mirror per project. "
                             "Remove the existing pull mirror first."
                         ),
-                        "existing_pull_mirrors": existing_pull,
+                        "existing_pull_mirrors": safe_mirrors,
                     },
                 )
 
@@ -869,7 +896,7 @@ async def _create_mirror_internal(
             gitlab_mirror_id = result.get("id")
     except HTTPException:
         # Cleanup the token we created before re-raising
-        if gitlab_token_id:
+        if gitlab_token_id is not None:
             try:
                 await _execute_gitlab_op(
                     client=token_client,
@@ -881,7 +908,7 @@ async def _create_mirror_internal(
         raise
     except Exception as e:
         # Cleanup the token we created
-        if gitlab_token_id:
+        if gitlab_token_id is not None:
             try:
                 await _execute_gitlab_op(
                     client=token_client,
@@ -946,7 +973,7 @@ async def _create_mirror_internal(
                 logger.error(f"Failed to cleanup GitLab mirror {gitlab_mirror_id}: {str(cleanup_error)}")
 
         # Cleanup: Delete the project access token
-        if gitlab_token_id:
+        if gitlab_token_id is not None:
             try:
                 await _execute_gitlab_op(
                     client=token_client,
@@ -1426,7 +1453,7 @@ async def _cleanup_mirror_from_gitlab(
     token_cleanup_failed = False
     token_error_msg = None
 
-    if mirror.gitlab_token_id and mirror.token_project_id:
+    if mirror.gitlab_token_id is not None and mirror.token_project_id:
         try:
             # Get the instance that has the token
             pair_result = await db.execute(
@@ -1633,7 +1660,7 @@ async def rotate_mirror_token(
     mirror_client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token)
 
     # Delete old token if it exists
-    if mirror.gitlab_token_id and mirror.token_project_id:
+    if mirror.gitlab_token_id is not None and mirror.token_project_id:
         try:
             logger.info(f"Deleting old token {mirror.gitlab_token_id} from project {mirror.token_project_id}")
             await _execute_gitlab_op(

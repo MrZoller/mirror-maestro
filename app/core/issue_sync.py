@@ -211,9 +211,11 @@ def _is_private_ip(ip_str: str) -> bool:
         return True
 
 
-def _validate_url_for_ssrf(url: str) -> None:
+async def _validate_url_for_ssrf(url: str) -> None:
     """
     Validate a URL to prevent SSRF attacks.
+
+    Uses async DNS resolution to avoid blocking the event loop.
 
     Args:
         url: URL to validate.
@@ -240,10 +242,11 @@ def _validate_url_for_ssrf(url: str) -> None:
     if hostname.lower() in dangerous_hostnames:
         raise ValueError(f"Hostname '{hostname}' is not allowed")
 
-    # Resolve hostname and check if it points to a private IP
+    # Resolve hostname asynchronously and check if it points to a private IP
     try:
-        # Get all IP addresses for the hostname
-        addr_info = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        # Use async DNS resolution to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        addr_info = await loop.getaddrinfo(hostname, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
         for family, socktype, proto, canonname, sockaddr in addr_info:
             ip_str = sockaddr[0]
             if _is_private_ip(ip_str):
@@ -295,16 +298,48 @@ async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0)
         ValueError: If URL is invalid/dangerous or file size exceeds max_size_bytes.
     """
     # SSRF protection: validate URL before making request
-    _validate_url_for_ssrf(url)
+    await _validate_url_for_ssrf(url)
 
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    url,
-                    follow_redirects=True,
-                    timeout=settings.attachment_download_timeout
-                )
+            # Use manual redirect handling to validate each redirect URL for SSRF
+            async with httpx.AsyncClient(follow_redirects=False) as client:
+                current_url = url
+                max_redirects = 10
+                redirect_count = 0
+
+                while True:
+                    response = await client.get(
+                        current_url,
+                        timeout=settings.attachment_download_timeout
+                    )
+
+                    # Handle redirects manually to validate each redirect URL
+                    if response.is_redirect and redirect_count < max_redirects:
+                        redirect_url = response.headers.get("location")
+                        if not redirect_url:
+                            raise ValueError("Redirect response missing Location header")
+
+                        # Make redirect URL absolute if relative
+                        if redirect_url.startswith("/"):
+                            from urllib.parse import urlparse, urlunparse
+                            parsed = urlparse(current_url)
+                            redirect_url = urlunparse((parsed.scheme, parsed.netloc, redirect_url, "", "", ""))
+                        elif not redirect_url.startswith(("http://", "https://")):
+                            raise ValueError(f"Invalid redirect URL: {redirect_url}")
+
+                        # SSRF validation on redirect URL (prevents SSRF bypass via redirect)
+                        await _validate_url_for_ssrf(redirect_url)
+
+                        current_url = redirect_url
+                        redirect_count += 1
+                        continue
+
+                    if response.is_redirect and redirect_count >= max_redirects:
+                        raise ValueError(f"Too many redirects (max: {max_redirects})")
+
+                    break
+
                 response.raise_for_status()
 
                 # Safely parse content length
@@ -635,8 +670,17 @@ class IssueSyncEngine:
         stats: Dict[str, Any]
     ) -> None:
         """Sync a single issue from source to target."""
-        source_issue_id = source_issue["id"]
-        source_issue_iid = source_issue["iid"]
+        source_issue_id = source_issue.get("id")
+        source_issue_iid = source_issue.get("iid")
+
+        # Validate required fields from GitLab API response
+        if source_issue_id is None or source_issue_iid is None:
+            logger.error(
+                f"Invalid issue from GitLab API: missing 'id' or 'iid'. "
+                f"Keys present: {list(source_issue.keys())}"
+            )
+            stats["issues_failed"] += 1
+            return
 
         stats["issues_processed"] += 1
 
@@ -662,7 +706,9 @@ class IssueSyncEngine:
         mapping = result.scalar_one_or_none()
 
         # Compute content hash for change detection
-        content_to_hash = f"{source_issue['title']}|||{source_issue.get('description', '')}"
+        source_title = source_issue.get('title', '')
+        source_description = source_issue.get('description', '')
+        content_to_hash = f"{source_title}|||{source_description}"
         current_hash = compute_content_hash(content_to_hash)
 
         if mapping:
@@ -1046,7 +1092,13 @@ class IssueSyncEngine:
         mappings_to_update = []
 
         for source_note in source_notes:
-            source_note_id = source_note["id"]
+            source_note_id = source_note.get("id")
+            if source_note_id is None:
+                logger.warning(
+                    f"Skipping note with missing 'id'. Keys present: {list(source_note.keys())}"
+                )
+                continue
+
             source_note_body = source_note.get("body", "")
             content_hash = compute_content_hash(source_note_body)
 
@@ -1081,11 +1133,20 @@ class IssueSyncEngine:
                     source_note_body
                 )
 
+                # Validate response from GitLab API
+                target_note_id = target_note.get("id") if isinstance(target_note, dict) else None
+                if target_note_id is None:
+                    logger.error(
+                        f"Failed to create comment: GitLab API returned invalid response. "
+                        f"Response type: {type(target_note).__name__}"
+                    )
+                    continue
+
                 # Create mapping (will be added to DB in batch)
                 mapping = CommentMapping(
                     issue_mapping_id=issue_mapping_id,
                     source_note_id=source_note_id,
-                    target_note_id=target_note["id"],
+                    target_note_id=target_note_id,
                     last_synced_at=datetime.utcnow(),
                     source_content_hash=content_hash,
                 )
@@ -1392,8 +1453,15 @@ class IssueSyncEngine:
             "load_target_labels",
             self.mirror.target_project_id
         )
-        self.target_labels_cache = {label["name"]: label for label in labels}
-        logger.debug(f"Loaded {len(labels)} labels into cache")
+        # Safely build cache, skipping any malformed labels
+        self.target_labels_cache = {}
+        for label in labels:
+            label_name = label.get("name") if isinstance(label, dict) else None
+            if label_name:
+                self.target_labels_cache[label_name] = label
+            else:
+                logger.warning(f"Skipping label with missing 'name': {type(label).__name__}")
+        logger.debug(f"Loaded {len(self.target_labels_cache)} labels into cache")
 
     async def _ensure_mirror_from_label(self) -> None:
         """Ensure the Mirrored-From label exists on target project."""
