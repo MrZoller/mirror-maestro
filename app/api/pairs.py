@@ -1,7 +1,7 @@
 from typing import List, Optional
 import re
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, delete, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -152,8 +152,8 @@ class InstancePairResponse(BaseModel):
 
 @router.get("", response_model=List[InstancePairResponse])
 async def list_pairs(
-    search: str | None = None,
-    direction: str | None = None,
+    search: str | None = Query(default=None, max_length=500),
+    direction: str | None = Query(default=None, pattern="^(push|pull)$"),
     source_instance_id: int | None = None,
     target_instance_id: int | None = None,
     db: AsyncSession = Depends(get_db),
@@ -638,12 +638,22 @@ async def sync_all_mirrors(
 
             # Update mirror status in database
             mirror.last_update_status = "updating"
-            await db.commit()
+            try:
+                await db.commit()
+            except Exception as commit_error:
+                # Rollback the failed commit to maintain session state
+                await db.rollback()
+                raise commit_error
 
             tracker.record_success()
             logger.info(f"[{idx + 1}/{len(mirrors)}] Triggered sync for {mirror_identifier}")
 
         except Exception as e:
+            # Ensure session is in clean state after any error
+            try:
+                await db.rollback()
+            except Exception:
+                pass  # Session may already be rolled back
             error_msg = f"{mirror_identifier}: {str(e)}"
             errors.append(error_msg)
             tracker.record_failure(error_msg)
