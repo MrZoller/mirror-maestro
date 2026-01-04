@@ -241,9 +241,10 @@ class CircuitBreaker:
         if self.state == "HALF_OPEN":
             # Failed during recovery attempt, reopen circuit
             self.state = "OPEN"
+            previous_successes = self.success_count
             self.success_count = 0
             logger.warning(
-                f"Circuit breaker recovery failed after {self.success_count} successes, "
+                f"Circuit breaker recovery failed after {previous_successes} successes, "
                 f"reopening circuit"
             )
         elif self.failure_count >= self.failure_threshold:
