@@ -343,12 +343,15 @@ async def trigger_sync(
 
     # Check for bidirectional sync conflict
     # This prevents A→B and B→A syncs from running simultaneously
+    # Instance IDs are required because project IDs are only unique per GitLab instance
     from app.core.issue_scheduler import check_bidirectional_sync_conflict
 
     conflicting_job = await check_bidirectional_sync_conflict(
         db,
         source_project_id=mirror.source_project_id,
         target_project_id=mirror.target_project_id,
+        source_instance_id=source_instance_id,
+        target_instance_id=target_instance_id,
         exclude_config_id=config.id
     )
 
@@ -362,13 +365,15 @@ async def trigger_sync(
             )
         )
 
-    # Create sync job with project tracking for conflict detection
+    # Create sync job with project and instance tracking for conflict detection
     job = IssueSyncJob(
         mirror_issue_config_id=config.id,
         job_type="manual",
         status="pending",
         source_project_id=mirror.source_project_id,
         target_project_id=mirror.target_project_id,
+        source_instance_id=source_instance_id,
+        target_instance_id=target_instance_id,
     )
     db.add(job)
     await db.commit()

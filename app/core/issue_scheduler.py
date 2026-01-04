@@ -25,6 +25,8 @@ async def check_bidirectional_sync_conflict(
     db: AsyncSession,
     source_project_id: int,
     target_project_id: int,
+    source_instance_id: int,
+    target_instance_id: int,
     exclude_config_id: Optional[int] = None
 ) -> Optional[IssueSyncJob]:
     """
@@ -32,6 +34,7 @@ async def check_bidirectional_sync_conflict(
 
     A conflict occurs when:
     - There's a running sync FROM target TO source (reverse direction)
+    - On the SAME GitLab instances (project IDs are only unique per instance)
 
     This prevents race conditions where A→B and B→A syncs run simultaneously,
     which could cause issues to be created/updated inconsistently.
@@ -40,17 +43,24 @@ async def check_bidirectional_sync_conflict(
         db: Database session
         source_project_id: Source project ID for the sync we want to start
         target_project_id: Target project ID for the sync we want to start
+        source_instance_id: Source GitLab instance ID
+        target_instance_id: Target GitLab instance ID
         exclude_config_id: Optional config ID to exclude (for same-config checks)
 
     Returns:
         The conflicting job if found, None otherwise
     """
     # Check for reverse sync (target→source while we want source→target)
+    # Must also match instance IDs since project IDs are only unique per instance
     query = select(IssueSyncJob).where(
         and_(
             IssueSyncJob.status.in_(["pending", "running"]),
+            # Reverse direction: their source is our target, their target is our source
             IssueSyncJob.source_project_id == target_project_id,
-            IssueSyncJob.target_project_id == source_project_id
+            IssueSyncJob.target_project_id == source_project_id,
+            # Also check instance IDs to ensure we're comparing same projects
+            IssueSyncJob.source_instance_id == target_instance_id,
+            IssueSyncJob.target_instance_id == source_instance_id
         )
     )
 
@@ -274,6 +284,24 @@ class IssueScheduler:
             logger.error(f"Mirror {config.mirror_id} not found for config {config.id}")
             return
 
+        # Load instance pair early - needed for conflict detection with instance context
+        pair_result = await db.execute(
+            select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+        )
+        pair = pair_result.scalar_one_or_none()
+
+        if not pair:
+            logger.error(f"Instance pair {mirror.instance_pair_id} not found for config {config.id}")
+            return
+
+        # Determine source and target instance IDs based on mirror direction
+        if pair.mirror_direction == "pull":
+            source_instance_id = pair.source_instance_id
+            target_instance_id = pair.target_instance_id
+        else:  # push
+            source_instance_id = pair.target_instance_id
+            target_instance_id = pair.source_instance_id
+
         # Check if there's already a running or pending sync for this config
         existing_job_result = await db.execute(
             select(IssueSyncJob).where(
@@ -292,10 +320,13 @@ class IssueScheduler:
 
         # Check for bidirectional sync conflict
         # This prevents A→B and B→A syncs from running simultaneously
+        # Instance IDs are required because project IDs are only unique per GitLab instance
         conflicting_job = await check_bidirectional_sync_conflict(
             db,
             source_project_id=mirror.source_project_id,
             target_project_id=mirror.target_project_id,
+            source_instance_id=source_instance_id,
+            target_instance_id=target_instance_id,
             exclude_config_id=config.id
         )
 
@@ -311,7 +342,7 @@ class IssueScheduler:
             await db.commit()
             return
 
-        # Create sync job with project tracking for conflict detection
+        # Create sync job with project and instance tracking for conflict detection
         job = IssueSyncJob(
             mirror_issue_config_id=config.id,
             job_type="scheduled",
@@ -319,28 +350,14 @@ class IssueScheduler:
             started_at=datetime.utcnow(),
             source_project_id=mirror.source_project_id,
             target_project_id=mirror.target_project_id,
+            source_instance_id=source_instance_id,
+            target_instance_id=target_instance_id,
         )
         db.add(job)
         await db.commit()
         await db.refresh(job)
 
         try:
-            pair_result = await db.execute(
-                select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
-            )
-            pair = pair_result.scalar_one_or_none()
-
-            if not pair:
-                raise ValueError(f"Instance pair {mirror.instance_pair_id} not found")
-
-            # Determine source and target based on mirror direction
-            if pair.mirror_direction == "pull":
-                source_instance_id = pair.source_instance_id
-                target_instance_id = pair.target_instance_id
-            else:  # push
-                source_instance_id = pair.target_instance_id
-                target_instance_id = pair.source_instance_id
-
             source_instance_result = await db.execute(
                 select(GitLabInstance).where(GitLabInstance.id == source_instance_id)
             )
