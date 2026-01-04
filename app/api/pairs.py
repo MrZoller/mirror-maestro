@@ -652,8 +652,8 @@ async def sync_all_mirrors(
             # Ensure session is in clean state after any error
             try:
                 await db.rollback()
-            except Exception:
-                pass  # Session may already be rolled back
+            except Exception as rollback_err:
+                logger.debug(f"Rollback after error (may already be rolled back): {rollback_err}")
             error_msg = f"{mirror_identifier}: {str(e)}"
             errors.append(error_msg)
             tracker.record_failure(error_msg)

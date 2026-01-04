@@ -259,12 +259,8 @@ class MirrorGitLabService:
                 return False
             cb = self._circuit_breakers[instance_url]
 
-        # Acquire the circuit breaker's internal lock to safely modify state
-        with cb._lock:
-            cb.state = "CLOSED"
-            cb.failure_count = 0
-            cb.success_count = 0
-            cb.last_failure_time = None
+        # Use the CircuitBreaker's public reset method for proper encapsulation
+        cb.reset()
         logger.info(f"Circuit breaker for {instance_url} manually reset to CLOSED")
         return True
 

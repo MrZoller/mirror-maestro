@@ -63,19 +63,19 @@ async def _execute_gitlab_op(
         logger.error(f"{operation_name} failed - connection error: {e}")
         raise HTTPException(
             status_code=503,
-            detail=f"GitLab service unavailable: {e}"
+            detail="GitLab service unavailable. Check server logs for details."
         )
     except GitLabRateLimitError as e:
         logger.error(f"{operation_name} failed - rate limit exceeded: {e}")
         raise HTTPException(
             status_code=429,
-            detail=f"GitLab rate limit exceeded. Please try again later."
+            detail="GitLab rate limit exceeded. Please try again later."
         )
     except GitLabClientError as e:
         logger.error(f"{operation_name} failed: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"GitLab operation failed: {e}"
+            detail="GitLab operation failed. Check server logs for details."
         )
 
 
@@ -1693,7 +1693,7 @@ async def rotate_mirror_token(
         logger.error(f"Failed to create new token: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create new project access token: {str(e)}"
+            detail="Failed to create new project access token. Check server logs for details."
         )
 
     # Validate token result

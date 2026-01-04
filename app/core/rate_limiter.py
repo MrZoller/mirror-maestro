@@ -290,6 +290,20 @@ class CircuitBreaker:
                 return ("OPEN", False)
             return (self.state, True)
 
+    def reset(self) -> None:
+        """
+        Manually reset circuit breaker to CLOSED state (thread-safe).
+
+        Use this for manual intervention when the underlying service is known
+        to be available again.
+        """
+        with self._lock:
+            self.state = "CLOSED"
+            self.failure_count = 0
+            self.success_count = 0
+            self.last_failure_time = None
+            logger.info("Circuit breaker manually reset to CLOSED state")
+
 
 class BatchOperationTracker:
     """

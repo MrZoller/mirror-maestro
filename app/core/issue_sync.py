@@ -303,16 +303,26 @@ async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0)
     for attempt in range(max_retries):
         try:
             # Use manual redirect handling to validate each redirect URL for SSRF
-            async with httpx.AsyncClient(follow_redirects=False) as client:
+            # Configure connection pool limits to prevent resource exhaustion
+            limits = httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+            )
+            timeout = httpx.Timeout(
+                timeout=float(settings.attachment_download_timeout),
+                connect=10.0,  # Connection timeout
+            )
+            async with httpx.AsyncClient(
+                follow_redirects=False,
+                limits=limits,
+                timeout=timeout,
+            ) as client:
                 current_url = url
                 max_redirects = 10
                 redirect_count = 0
 
                 while True:
-                    response = await client.get(
-                        current_url,
-                        timeout=settings.attachment_download_timeout
-                    )
+                    response = await client.get(current_url)
 
                     # Handle redirects manually to validate each redirect URL
                     if response.is_redirect and redirect_count < max_redirects:
@@ -742,19 +752,27 @@ class IssueSyncEngine:
         Checks if the issue already exists on target (orphaned from previous failed sync)
         before creating a new one.
         """
-        source_issue_id = source_issue["id"]
-        source_issue_iid = source_issue["iid"]
+        # Validate required fields from source issue
+        source_issue_id = source_issue.get("id")
+        source_issue_iid = source_issue.get("iid")
+        source_issue_title = source_issue.get("title", "Untitled Issue")
+        source_issue_state = source_issue.get("state", "opened")
+
+        if source_issue_id is None or source_issue_iid is None:
+            raise ValueError(f"Invalid source issue: missing 'id' or 'iid' field")
 
         # Idempotency check: search for existing issue with same source reference
         # This prevents creating duplicates if DB commit failed but GitLab creation succeeded
         existing_target_issue = await self._find_existing_target_issue(source_issue_id, source_issue_iid)
         if existing_target_issue:
+            target_issue_id = existing_target_issue.get("id")
+            target_issue_iid = existing_target_issue.get("iid")
+            if target_issue_id is None or target_issue_iid is None:
+                raise ValueError(f"Invalid existing target issue: missing 'id' or 'iid' field")
             logger.info(
-                f"Found orphaned issue {existing_target_issue['iid']} for source issue {source_issue_iid}. "
+                f"Found orphaned issue {target_issue_iid} for source issue {source_issue_iid}. "
                 "Reusing and updating it with current source content."
             )
-            target_issue_id = existing_target_issue["id"]
-            target_issue_iid = existing_target_issue["iid"]
 
             # Update the orphaned issue with current source content
             # to ensure it's in sync before marking the mapping as synced
@@ -775,7 +793,7 @@ class IssueSyncEngine:
                 f"update_orphaned_issue_{target_issue_iid}",
                 self.mirror.target_project_id,
                 target_issue_iid,
-                title=source_issue["title"],
+                title=source_issue_title,
                 description=description,
                 labels=labels,
                 weight=source_issue.get("weight") if self.config.sync_weight else None,
@@ -804,14 +822,16 @@ class IssueSyncEngine:
                 self.target_client.create_issue,
                 f"create_issue_{source_issue_iid}",
                 self.mirror.target_project_id,
-                title=source_issue["title"],
+                title=source_issue_title,
                 description=description,
                 labels=labels,
                 weight=source_issue.get("weight") if self.config.sync_weight else None,
             )
 
-            target_issue_id = target_issue["id"]
-            target_issue_iid = target_issue["iid"]
+            target_issue_id = target_issue.get("id")
+            target_issue_iid = target_issue.get("iid")
+            if target_issue_id is None or target_issue_iid is None:
+                raise ValueError(f"GitLab create_issue returned invalid response: missing 'id' or 'iid'")
 
             logger.info(
                 f"Created target issue {target_issue_iid} for source issue {source_issue_iid}"
@@ -822,7 +842,7 @@ class IssueSyncEngine:
             await self._sync_time_tracking(source_issue, target_issue_iid)
 
         # Close target issue if source is closed
-        if source_issue["state"] == "closed" and self.config.sync_closed_issues:
+        if source_issue_state == "closed" and self.config.sync_closed_issues:
             await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
                 f"close_issue_{target_issue_iid}",
@@ -883,7 +903,15 @@ class IssueSyncEngine:
         content_hash: str
     ) -> None:
         """Update an existing issue on target instance."""
-        source_issue_iid = source_issue["iid"]
+        # Validate required fields from source issue
+        source_issue_id = source_issue.get("id")
+        source_issue_iid = source_issue.get("iid")
+        source_issue_title = source_issue.get("title", "Untitled Issue")
+        source_issue_state = source_issue.get("state", "opened")
+
+        if source_issue_id is None or source_issue_iid is None:
+            raise ValueError(f"Invalid source issue: missing 'id' or 'iid' field")
+
         target_issue_iid = mapping.target_issue_iid
 
         # Prepare labels
@@ -896,7 +924,7 @@ class IssueSyncEngine:
         if self.config.sync_attachments:
             description = await self._sync_attachments_in_description(
                 description,
-                source_issue["id"],
+                source_issue_id,
                 mapping.id,
             )
 
@@ -906,7 +934,7 @@ class IssueSyncEngine:
             f"update_issue_{target_issue_iid}",
             self.mirror.target_project_id,
             target_issue_iid,
-            title=source_issue["title"],
+            title=source_issue_title,
             description=description,
             labels=labels,
             weight=source_issue.get("weight") if self.config.sync_weight else None,
@@ -921,7 +949,7 @@ class IssueSyncEngine:
             await self._sync_time_tracking(source_issue, target_issue_iid)
 
         # Sync state (open/closed) with retry logic
-        if source_issue["state"] == "closed" and self.config.sync_closed_issues:
+        if source_issue_state == "closed" and self.config.sync_closed_issues:
             await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
                 f"close_issue_{target_issue_iid}",
@@ -929,7 +957,7 @@ class IssueSyncEngine:
                 target_issue_iid,
                 state_event="close"
             )
-        elif source_issue["state"] == "opened":
+        elif source_issue_state == "opened":
             await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
                 f"reopen_issue_{target_issue_iid}",
@@ -1000,11 +1028,16 @@ class IssueSyncEngine:
         main_content, _ = extract_footer(original_description)
 
         # Build new footer
+        source_issue_iid = source_issue.get("iid")
+        source_web_url = source_issue.get("web_url", "")
+        if source_issue_iid is None:
+            raise ValueError("Cannot prepare description: source issue missing 'iid' field")
+
         footer = build_footer(
             source_instance_url=self.source_instance.url,
             source_project_path=self.mirror.source_project_path,
-            source_issue_iid=source_issue["iid"],
-            source_web_url=source_issue["web_url"],
+            source_issue_iid=source_issue_iid,
+            source_web_url=source_web_url,
             milestone=source_issue.get("milestone"),
             iteration=source_issue.get("iteration"),
             epic=source_issue.get("epic"),
@@ -1311,7 +1344,11 @@ class IssueSyncEngine:
 
             # Check each issue against database mappings
             for issue in target_issues:
-                target_issue_id = issue["id"]
+                target_issue_id = issue.get("id")
+                target_issue_iid = issue.get("iid")
+                if target_issue_id is None:
+                    logger.warning("Skipping issue with missing 'id' field during cleanup")
+                    continue
 
                 # Check if mapping exists
                 result = await self.db.execute(
@@ -1325,7 +1362,7 @@ class IssueSyncEngine:
                 if not mapping:
                     stats["orphaned_issues_found"] += 1
                     logger.warning(
-                        f"Found orphaned issue {issue['iid']} on target - "
+                        f"Found orphaned issue {target_issue_iid} on target - "
                         "exists on GitLab but not in database"
                     )
 
@@ -1502,5 +1539,5 @@ class IssueSyncEngine:
             return None
         try:
             return datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
-        except Exception:
+        except (ValueError, TypeError):
             return None
