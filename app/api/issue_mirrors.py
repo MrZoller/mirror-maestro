@@ -400,6 +400,10 @@ async def trigger_sync(
                 sync_config = config_result.scalar_one_or_none()
                 if sync_config is None:
                     sync_logger.warning(f"Issue config {config_id} was deleted, aborting sync")
+                    sync_job.status = "failed"
+                    sync_job.completed_at = datetime.utcnow()
+                    sync_job.error_details = {"error": "Issue config was deleted during sync"}
+                    await sync_db.commit()
                     return
 
                 # Reload mirror
@@ -409,6 +413,10 @@ async def trigger_sync(
                 sync_mirror = mirror_result.scalar_one_or_none()
                 if sync_mirror is None:
                     sync_logger.warning(f"Mirror {sync_config.mirror_id} was deleted, aborting sync")
+                    sync_job.status = "failed"
+                    sync_job.completed_at = datetime.utcnow()
+                    sync_job.error_details = {"error": "Mirror was deleted during sync"}
+                    await sync_db.commit()
                     return
 
                 # Run sync
