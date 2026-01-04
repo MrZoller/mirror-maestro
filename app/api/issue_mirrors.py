@@ -1,6 +1,7 @@
 """API endpoints for managing issue mirror configurations."""
 
 import asyncio
+import logging
 import threading
 from datetime import datetime
 from typing import List, Optional, Set
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db, AsyncSessionLocal
 from app.models import MirrorIssueConfig, Mirror
 from app.core.auth import verify_credentials
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/issue-mirrors", tags=["issue-mirrors"])

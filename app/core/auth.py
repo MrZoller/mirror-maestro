@@ -10,6 +10,7 @@ When MULTI_USER_ENABLED=true:
   - Supports multiple users with admin/regular roles
   - Initial admin created from INITIAL_ADMIN_USERNAME/PASSWORD
 """
+import logging
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, Union
@@ -23,6 +24,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 from app.database import get_db
 
 
