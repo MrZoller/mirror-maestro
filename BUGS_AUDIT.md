@@ -1,7 +1,7 @@
 # Mirror Maestro - Comprehensive Bug Audit
 
 **Started**: 2026-01-04
-**Status**: COMPLETED (Session 14)
+**Status**: COMPLETED (Session 15)
 **Last Updated**: 2026-01-04
 
 ## Audit Methodology
@@ -789,14 +789,27 @@ Session 14 focused on HTTP semantics and code consistency. Conducted comprehensi
 
 ---
 
+## Issues Fixed Session 15
+
+Session 15 focused on frontend resource management and production security. Found and fixed memory leak and rate limiting gap.
+
+### MEDIUM Issues Fixed
+
+| # | File | Description |
+|---|------|-------------|
+| 1 | `app/static/js/app.js` | Fixed memory leak - live polling interval continues after leaving dashboard tab |
+| 2 | `app/api/auth.py` | Added rate limiting to change-password endpoint for defense-in-depth |
+
+---
+
 ## Summary
 
-- **Total Issues Found**: 128
+- **Total Issues Found**: 130
 - **Critical**: 37 ✅ (all fixed)
 - **High**: 67 ✅ (all fixed)
-- **Medium**: 20 ✅ (all fixed)
+- **Medium**: 22 ✅ (all fixed)
 - **Low**: 4 ✅ (all fixed)
-- **Issues Fixed**: 128
+- **Issues Fixed**: 130
 - **Remaining**: 0
 
 ### By Session
@@ -814,6 +827,7 @@ Session 14 focused on HTTP semantics and code consistency. Conducted comprehensi
 - **Session 12**: 4 issues fixed (4 HIGH) - Description field length validation + code quality validation
 - **Session 13**: 4 issues fixed (2 HIGH, 2 MEDIUM) - Email and project path length validation
 - **Session 14**: 3 issues fixed (3 LOW) - HTTP status code consistency
+- **Session 15**: 2 issues fixed (2 MEDIUM) - Frontend memory leak, rate limiting gap
 
 ---
 
