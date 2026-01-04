@@ -2,8 +2,10 @@
 
 import asyncio
 import hashlib
+import ipaddress
 import logging
 import re
+import socket
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple, Any
 from urllib.parse import urlparse
@@ -185,12 +187,104 @@ def extract_mirror_urls_from_description(description: Optional[str]) -> Set[str]
     return urls
 
 
-async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0) -> Optional[bytes]:
+def _is_private_ip(ip_str: str) -> bool:
     """
-    Download a file from a URL with retry logic and size limits.
+    Check if an IP address is in a private/reserved range.
+
+    Prevents SSRF attacks by blocking requests to internal networks.
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        # Check for private, loopback, link-local, reserved, and multicast
+        return (
+            ip.is_private or
+            ip.is_loopback or
+            ip.is_link_local or
+            ip.is_reserved or
+            ip.is_multicast or
+            # Cloud metadata endpoints
+            ip_str.startswith("169.254.") or  # AWS/Azure/GCP metadata
+            ip_str == "100.100.100.200"  # Alibaba Cloud metadata
+        )
+    except ValueError:
+        # Invalid IP - treat as potentially dangerous
+        return True
+
+
+def _validate_url_for_ssrf(url: str) -> None:
+    """
+    Validate a URL to prevent SSRF attacks.
 
     Args:
-        url: URL to download from.
+        url: URL to validate.
+
+    Raises:
+        ValueError: If URL is potentially dangerous (private IP, bad scheme, etc.)
+    """
+    parsed = urlparse(url)
+
+    # Only allow http/https schemes
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Only http/https allowed.")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL has no hostname")
+
+    # Block obviously dangerous hostnames
+    dangerous_hostnames = {
+        "localhost", "127.0.0.1", "::1", "0.0.0.0",
+        "metadata.google.internal",  # GCP metadata
+        "169.254.169.254",  # AWS/Azure/GCP metadata IP
+    }
+    if hostname.lower() in dangerous_hostnames:
+        raise ValueError(f"Hostname '{hostname}' is not allowed")
+
+    # Resolve hostname and check if it points to a private IP
+    try:
+        # Get all IP addresses for the hostname
+        addr_info = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for family, socktype, proto, canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            if _is_private_ip(ip_str):
+                raise ValueError(
+                    f"Hostname '{hostname}' resolves to private IP '{ip_str}'. "
+                    "Requests to internal networks are not allowed."
+                )
+    except socket.gaierror as e:
+        raise ValueError(f"Could not resolve hostname '{hostname}': {e}")
+
+
+def _parse_content_length(header_value: Optional[str]) -> Optional[int]:
+    """
+    Safely parse Content-Length header value.
+
+    Args:
+        header_value: Raw header value (may be None or invalid).
+
+    Returns:
+        Parsed integer or None if invalid/missing.
+    """
+    if not header_value:
+        return None
+    try:
+        size = int(header_value)
+        # Reject negative or unreasonably large values (10GB limit)
+        if size < 0 or size > 10 * 1024 * 1024 * 1024:
+            logger.warning(f"Content-Length value out of range: {size}")
+            return None
+        return size
+    except (ValueError, TypeError):
+        logger.warning(f"Invalid Content-Length header: {header_value}")
+        return None
+
+
+async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0) -> Optional[bytes]:
+    """
+    Download a file from a URL with retry logic, size limits, and SSRF protection.
+
+    Args:
+        url: URL to download from (must be http/https, not pointing to private IPs).
         max_retries: Maximum number of retry attempts (default: 3).
         max_size_bytes: Maximum file size in bytes (0 = unlimited).
 
@@ -198,8 +292,11 @@ async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0)
         File content as bytes, or None if download failed after all retries.
 
     Raises:
-        ValueError: If file size exceeds max_size_bytes.
+        ValueError: If URL is invalid/dangerous or file size exceeds max_size_bytes.
     """
+    # SSRF protection: validate URL before making request
+    _validate_url_for_ssrf(url)
+
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient() as client:
@@ -210,12 +307,11 @@ async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0)
                 )
                 response.raise_for_status()
 
-                # Check content length before downloading
-                content_length = response.headers.get('content-length')
-                if content_length and max_size_bytes > 0:
-                    size_bytes = int(content_length)
-                    if size_bytes > max_size_bytes:
-                        size_mb = size_bytes / (1024 * 1024)
+                # Safely parse content length
+                content_length = _parse_content_length(response.headers.get('content-length'))
+                if content_length is not None and max_size_bytes > 0:
+                    if content_length > max_size_bytes:
+                        size_mb = content_length / (1024 * 1024)
                         max_mb = max_size_bytes / (1024 * 1024)
                         raise ValueError(
                             f"File size ({size_mb:.2f}MB) exceeds maximum allowed size ({max_mb:.2f}MB)"
@@ -233,7 +329,7 @@ async def download_file(url: str, max_retries: int = 3, max_size_bytes: int = 0)
 
                 return content
         except ValueError:
-            # Don't retry size limit errors
+            # Don't retry validation/size limit errors
             raise
         except Exception as e:
             if attempt < max_retries - 1:
@@ -373,16 +469,13 @@ class IssueSyncEngine:
 
             # Execute the operation with retry logic and circuit breaker
             if circuit_breaker:
-                # Check circuit breaker state manually (since it's sync but we need async execution)
-                if circuit_breaker.state == "OPEN":
-                    if circuit_breaker._should_attempt_reset():
-                        circuit_breaker.state = "HALF_OPEN"
-                        logger.info("Circuit breaker entering HALF_OPEN state, testing recovery")
-                    else:
-                        raise Exception(
-                            f"Circuit breaker is OPEN. Service unavailable. "
-                            f"Will retry after {circuit_breaker.recovery_timeout}s cooldown."
-                        )
+                # Thread-safe check of circuit breaker state with automatic HALF_OPEN transition
+                current_state, is_available = circuit_breaker.check_and_transition()
+                if not is_available:
+                    raise Exception(
+                        f"Circuit breaker is OPEN. Service unavailable. "
+                        f"Will retry after {circuit_breaker.recovery_timeout}s cooldown."
+                    )
 
                 try:
                     # Execute with retry logic (async)
@@ -390,12 +483,14 @@ class IssueSyncEngine:
                         operation,
                         operation_name=operation_name
                     )
-                    # Mark success on circuit breaker
-                    circuit_breaker._on_success()
+                    # Mark success on circuit breaker (thread-safe)
+                    with circuit_breaker._lock:
+                        circuit_breaker._on_success()
                     return result
                 except Exception as e:
-                    # Mark failure on circuit breaker
-                    circuit_breaker._on_failure()
+                    # Mark failure on circuit breaker (thread-safe)
+                    with circuit_breaker._lock:
+                        circuit_breaker._on_failure()
                     raise
             else:
                 # No circuit breaker, just use retry logic

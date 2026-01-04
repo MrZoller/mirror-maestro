@@ -297,9 +297,9 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
                 {"max_id": max_id}
             )
         await db.commit()
-    except Exception:
-        # Sequence reset is PostgreSQL-specific, ignore errors for other DBs
-        pass
+    except Exception as e:
+        # Sequence reset is PostgreSQL-specific; log for debugging but continue
+        logger.debug(f"Sequence reset skipped (not PostgreSQL or not supported): {e}")
 
     return counts
 
@@ -439,7 +439,10 @@ def _validate_backup_archive(archive_path: Path) -> Dict:
             if "backup_metadata.json" in members:
                 metadata_file = tar.extractfile("backup_metadata.json")
                 if metadata_file:
-                    metadata = json.loads(metadata_file.read().decode())
+                    try:
+                        metadata = json.loads(metadata_file.read().decode())
+                    finally:
+                        metadata_file.close()
 
             return {
                 "valid": True,
@@ -634,8 +637,9 @@ async def get_backup_stats(
     try:
         result = await db.execute(text("SELECT pg_database_size(current_database())"))
         db_size = result.scalar() or 0
-    except Exception:
-        # Fallback if query fails
+    except Exception as e:
+        # Not PostgreSQL or function not available; log and continue with 0
+        logger.debug(f"Could not retrieve database size (not PostgreSQL or not supported): {e}")
         db_size = 0
 
     return {
