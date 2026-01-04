@@ -2337,6 +2337,140 @@ renderResources();
 
 ## Production Deployment
 
+### Environment Mode and Security Validation
+
+Mirror Maestro supports three environment modes controlled by the `ENVIRONMENT` setting:
+
+```python
+environment: str = "development"  # Options: development, staging, production
+```
+
+**Production Mode Security**:
+
+When `ENVIRONMENT=production`, the application performs strict credential validation at startup:
+
+```python
+@model_validator(mode='after')
+def validate_production_credentials(self) -> 'Settings':
+    if self.environment != 'production':
+        return self
+
+    errors = []
+    if self.auth_enabled and self.auth_password == 'changeme':
+        errors.append("AUTH_PASSWORD must be changed from default")
+    if self.multi_user_enabled and self.initial_admin_password == 'changeme':
+        errors.append("INITIAL_ADMIN_PASSWORD must be changed from default")
+    if 'postgres:postgres@' in self.database_url:
+        errors.append("DATABASE_URL contains default credentials")
+
+    if errors:
+        raise ValueError("Production mode security validation failed")
+```
+
+This prevents accidental deployment with insecure defaults.
+
+### Security Headers Middleware
+
+All responses include security headers via `SecurityHeadersMiddleware` in `app/main.py`:
+
+```python
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        return response
+```
+
+### HTTP Rate Limiting
+
+The application uses `slowapi` for HTTP rate limiting (see `app/core/api_rate_limiter.py`):
+
+```python
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_client_identifier, default_limits=["200/minute"])
+
+# Rate limits by endpoint type
+AUTH_RATE_LIMIT = "5/minute"      # Login endpoints
+WRITE_RATE_LIMIT = "30/minute"    # Create/update operations
+READ_RATE_LIMIT = "100/minute"    # Read operations
+SYNC_RATE_LIMIT = "10/minute"     # Sync triggers
+```
+
+Apply to endpoints:
+```python
+@router.post("/login")
+@limiter.limit(AUTH_RATE_LIMIT)
+async def login(request: Request, ...):
+    pass
+```
+
+### Request Logging Middleware
+
+All requests are logged with correlation IDs via `RequestLoggingMiddleware`:
+
+```python
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        request_id = str(uuid.uuid4())[:8]
+        start_time = time.time()
+
+        response = await call_next(request)
+
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info(f"[{request_id}] {request.method} {request.url.path} -> {response.status_code} ({duration_ms:.0f}ms)")
+
+        response.headers["X-Request-ID"] = request_id
+        return response
+```
+
+### Docker Security
+
+The Dockerfile is configured to run as non-root:
+
+```dockerfile
+RUN groupadd -r -g 1000 appgroup && \
+    useradd -r -u 1000 -g appgroup appuser
+
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data
+
+USER appuser
+```
+
+### Database Migrations with Alembic
+
+Alembic is configured for schema migrations:
+
+```bash
+# Generate migration
+alembic revision --autogenerate -m "description"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback
+alembic downgrade -1
+```
+
+Configuration in `alembic.ini` and `migrations/env.py`.
+
+### SQL Credential Protection
+
+SQL DEBUG logging is only enabled in development to prevent credential exposure:
+
+```python
+_enable_sql_echo = (
+    settings.log_level.upper() == "DEBUG" and
+    settings.environment == "development"
+)
+engine = create_async_engine(settings.database_url, echo=_enable_sql_echo, ...)
+```
+
 ### Issue Syncing Robustness
 
 **Production Readiness Features**:
