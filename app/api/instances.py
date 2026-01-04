@@ -47,10 +47,15 @@ class GitLabInstanceCreate(BaseModel):
         test_url = v if '://' in v else f'https://{v}'
         try:
             parsed = urlparse(test_url)
+            # Validate scheme is http or https only
+            if parsed.scheme not in ('http', 'https'):
+                raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed")
             if not parsed.hostname:
                 raise ValueError("Invalid URL: no hostname found")
             # Return original value (normalization happens in the API logic)
             return v
+        except ValueError:
+            raise
         except Exception as e:
             raise ValueError(f"Invalid URL format: {str(e)}")
 
@@ -92,9 +97,14 @@ class GitLabInstanceUpdate(BaseModel):
             test_url = v if '://' in v else f'https://{v}'
             try:
                 parsed = urlparse(test_url)
+                # Validate scheme is http or https only
+                if parsed.scheme not in ('http', 'https'):
+                    raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed")
                 if not parsed.hostname:
                     raise ValueError("Invalid URL: no hostname found")
                 return v
+            except ValueError:
+                raise
             except Exception as e:
                 raise ValueError(f"Invalid URL format: {str(e)}")
         return v

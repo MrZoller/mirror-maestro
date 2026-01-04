@@ -253,26 +253,35 @@ class MirrorGitLabService:
         return {"state": "CLOSED", "failure_count": 0}
 
     def reset_circuit_breaker(self, instance_url: str) -> bool:
-        """Manually reset a circuit breaker to CLOSED state."""
-        if instance_url in self._circuit_breakers:
+        """Manually reset a circuit breaker to CLOSED state (thread-safe)."""
+        with self._circuit_breakers_lock:
+            if instance_url not in self._circuit_breakers:
+                return False
             cb = self._circuit_breakers[instance_url]
+
+        # Acquire the circuit breaker's internal lock to safely modify state
+        with cb._lock:
             cb.state = "CLOSED"
             cb.failure_count = 0
+            cb.success_count = 0
             cb.last_failure_time = None
-            logger.info(f"Circuit breaker for {instance_url} manually reset to CLOSED")
-            return True
-        return False
+        logger.info(f"Circuit breaker for {instance_url} manually reset to CLOSED")
+        return True
 
 
 # Singleton instance for use across the application
 _mirror_gitlab_service: Optional[MirrorGitLabService] = None
+_mirror_gitlab_service_lock = threading.Lock()
 
 
 def get_mirror_gitlab_service() -> MirrorGitLabService:
-    """Get the singleton MirrorGitLabService instance."""
+    """Get the singleton MirrorGitLabService instance (thread-safe)."""
     global _mirror_gitlab_service
     if _mirror_gitlab_service is None:
-        _mirror_gitlab_service = MirrorGitLabService()
+        with _mirror_gitlab_service_lock:
+            # Double-check inside lock to prevent race condition
+            if _mirror_gitlab_service is None:
+                _mirror_gitlab_service = MirrorGitLabService()
     return _mirror_gitlab_service
 
 

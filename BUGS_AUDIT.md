@@ -1,7 +1,7 @@
 # Mirror Maestro - Comprehensive Bug Audit
 
 **Started**: 2026-01-04
-**Status**: COMPLETED (Session 2)
+**Status**: COMPLETED (Session 3)
 **Last Updated**: 2026-01-04
 
 ## Audit Methodology
@@ -38,7 +38,7 @@
 
 | File | Reviewed | Issues Found | Issues Fixed |
 |------|----------|--------------|--------------|
-| `instances.py` | ✅ | 0 | 0 |
+| `instances.py` | ✅ | 1 MEDIUM | 1 |
 | `pairs.py` | ✅ | 0 | 0 |
 | `mirrors.py` | ✅ | 2 CRITICAL | 2 |
 | `issue_mirrors.py` | ✅ | 1 HIGH | 1 |
@@ -48,7 +48,7 @@
 | `topology.py` | ✅ | 0 | 0 |
 | `search.py` | ✅ | 0 | 0 |
 | `export.py` | ✅ | 0 | 0 |
-| `backup.py` | ✅ | 2 (1 CRITICAL, 1 MEDIUM) | 2 |
+| `backup.py` | ✅ | 4 (1 CRITICAL, 2 HIGH, 1 MEDIUM) | 4 |
 | `health.py` | ✅ | 0 | 0 |
 
 ### Core Layer (`app/core/`)
@@ -58,12 +58,12 @@
 | `auth.py` | ✅ | 1 CRITICAL | 1 |
 | `encryption.py` | ✅ | 0 | 0 |
 | `gitlab_client.py` | ✅ | 0 | 0 |
-| `issue_sync.py` | ✅ | 3 (1 CRITICAL, 1 HIGH, 1 MEDIUM) | 3 |
+| `issue_sync.py` | ✅ | 5 (2 CRITICAL, 2 HIGH, 1 MEDIUM) | 5 |
 | `issue_scheduler.py` | ✅ | 2 HIGH | 2 |
 | `rate_limiter.py` | ✅ | 1 HIGH | 1 |
 | `api_rate_limiter.py` | ✅ | 0 | 0 |
-| `mirror_gitlab_service.py` | ✅ | 1 HIGH | 1 |
-| `jwt_secret.py` | ✅ | 0 | 0 |
+| `mirror_gitlab_service.py` | ✅ | 3 HIGH | 3 |
+| `jwt_secret.py` | ✅ | 1 HIGH | 1 |
 
 ### Database Layer
 
@@ -156,6 +156,43 @@
 
 **Status**: ✅ FIXED (Session 2)
 
+#### 6. SSRF vulnerability in attachment download
+
+**File**: `app/core/issue_sync.py`
+
+**Problem**: The `download_file()` function accepted arbitrary URLs from GitLab API responses without validation, allowing Server-Side Request Forgery (SSRF) attacks.
+
+**Impact**: An attacker could craft issues with malicious attachment URLs pointing to:
+- Internal services (e.g., `http://localhost:6379` for Redis)
+- Cloud metadata endpoints (`http://169.254.169.254/`)
+- Private network resources
+
+**Fix**: Added comprehensive URL validation:
+- `_is_private_ip()` to detect private/reserved IP ranges
+- `_validate_url_for_ssrf()` to block dangerous URLs including:
+  - Non-http/https schemes
+  - Private IP addresses
+  - Cloud metadata endpoints
+  - DNS resolution validation to prevent DNS rebinding
+
+**Status**: ✅ FIXED (Session 3)
+
+#### 7. Content-Length header parsing without validation
+
+**File**: `app/core/issue_sync.py`
+
+**Problem**: The `download_file()` function parsed the Content-Length header directly with `int()` without validation, potentially causing crashes or integer overflow.
+
+**Impact**: Malformed headers could crash the application or cause unexpected behavior.
+
+**Fix**: Added `_parse_content_length()` function with:
+- Null/empty check
+- Safe integer parsing
+- Range validation (0 to 10GB max)
+- Proper error logging
+
+**Status**: ✅ FIXED (Session 3)
+
 ### HIGH
 
 #### 1. CircuitBreaker race conditions
@@ -215,6 +252,68 @@
 
 **Status**: ✅ FIXED (Session 2)
 
+#### 6. CircuitBreaker state access bypasses lock in issue_sync.py
+
+**File**: `app/core/issue_sync.py`
+
+**Problem**: The `_execute_gitlab_api_call()` method directly accessed `circuit_breaker.state` and called internal methods `_on_success()` and `_on_failure()` without using the thread-safe `check_and_transition()` method.
+
+**Impact**: Race conditions could lead to inconsistent circuit breaker state under concurrent load.
+
+**Fix**: Updated to use `check_and_transition()` for state checks and wrap `_on_success()`/`_on_failure()` calls with the circuit breaker's lock.
+
+**Status**: ✅ FIXED (Session 3)
+
+#### 7. reset_circuit_breaker() unprotected state modification
+
+**File**: `app/core/mirror_gitlab_service.py`
+
+**Problem**: The `reset_circuit_breaker()` method modified circuit breaker state (state, failure_count, last_failure_time) without acquiring the circuit breaker's internal lock.
+
+**Impact**: Race condition if called while circuit breaker is being used by another thread.
+
+**Fix**: Added proper lock acquisition using `cb._lock` before modifying state, and also reset `success_count`.
+
+**Status**: ✅ FIXED (Session 3)
+
+#### 8. Singleton double-checked locking race condition
+
+**File**: `app/core/mirror_gitlab_service.py`
+
+**Problem**: The `get_mirror_gitlab_service()` singleton getter had a race condition - multiple threads could see `_mirror_gitlab_service is None` and create multiple instances.
+
+**Impact**: Multiple instances could be created, wasting resources and potentially causing inconsistent circuit breaker states.
+
+**Fix**: Added `_mirror_gitlab_service_lock` module-level lock with proper double-checked locking pattern.
+
+**Status**: ✅ FIXED (Session 3)
+
+#### 9. JWT secret permissions failures silently ignored
+
+**File**: `app/core/jwt_secret.py`
+
+**Problem**: When `os.chmod()` failed to set restrictive permissions (0600) on the JWT secret file, the exception was silently caught with `except Exception: pass`.
+
+**Impact**: Security-sensitive permission failures would go unnoticed, potentially leaving the JWT secret readable by other users.
+
+**Fix**: Changed to catch `OSError` specifically and log a warning with actionable information about manually securing the file.
+
+**Status**: ✅ FIXED (Session 3)
+
+#### 10. Silent exception swallowing in backup.py
+
+**File**: `app/api/backup.py`
+
+**Problem**: Two locations silently swallowed exceptions with `except Exception: pass`:
+1. PostgreSQL sequence reset after restore
+2. Database size query for stats
+
+**Impact**: Database-specific errors were completely invisible, making debugging difficult.
+
+**Fix**: Changed to log exceptions at DEBUG level, providing visibility while not alarming users for expected behavior (non-PostgreSQL databases).
+
+**Status**: ✅ FIXED (Session 3)
+
 ### MEDIUM
 
 #### 1. Orphaned issue search limited to page 1
@@ -239,13 +338,53 @@
 
 **Status**: ✅ FIXED (Session 2)
 
+#### 3. TarFile.extractfile() resource leak
+
+**File**: `app/api/backup.py`
+
+**Problem**: The `validate_backup` endpoint called `tar.extractfile()` but never closed the returned file object, causing a resource leak.
+
+**Impact**: Memory leak over time as file handles accumulate.
+
+**Fix**: Added try/finally block to ensure the extracted file object is properly closed.
+
+**Status**: ✅ FIXED (Session 3)
+
+#### 4. URL scheme validation insufficient
+
+**File**: `app/api/instances.py`
+
+**Problem**: The URL validators in `GitLabInstanceCreate` and `GitLabInstanceUpdate` only validated that a hostname existed, but didn't restrict the URL scheme to http/https.
+
+**Impact**: Potentially dangerous URL schemes like `javascript://`, `file://`, or `ftp://` could be stored.
+
+**Fix**: Added explicit validation that scheme is either `http` or `https`, rejecting all other schemes.
+
+**Status**: ✅ FIXED (Session 3)
+
 ### LOW
 
 (None found - some minor code style issues like redundant imports inside function bodies were noted but not critical)
 
 ---
 
-## Issues Fixed This Session (Session 2)
+## Issues Fixed This Session (Session 3)
+
+| # | Severity | File | Description |
+|---|----------|------|-------------|
+| 1 | CRITICAL | `app/core/issue_sync.py` | SSRF vulnerability in attachment download |
+| 2 | CRITICAL | `app/core/issue_sync.py` | Content-Length header parsing without validation |
+| 3 | HIGH | `app/core/issue_sync.py` | CircuitBreaker state access bypasses lock |
+| 4 | HIGH | `app/core/mirror_gitlab_service.py` | reset_circuit_breaker() unprotected state modification |
+| 5 | HIGH | `app/core/mirror_gitlab_service.py` | Singleton double-checked locking race condition |
+| 6 | HIGH | `app/core/jwt_secret.py` | JWT secret permissions failures silently ignored |
+| 7 | HIGH | `app/api/backup.py` | Silent exception swallowing (2 locations) |
+| 8 | MEDIUM | `app/api/backup.py` | TarFile.extractfile() resource leak |
+| 9 | MEDIUM | `app/api/instances.py` | URL scheme validation insufficient |
+
+---
+
+## Issues Fixed Session 2
 
 | # | Severity | File | Description |
 |---|----------|------|-------------|
@@ -263,7 +402,7 @@
 
 ---
 
-## Issues Fixed Prior (Session 1)
+## Issues Fixed Session 1
 
 | # | Severity | File | Description |
 |---|----------|------|-------------|
@@ -282,13 +421,18 @@ Based on git history, these areas have been addressed in prior sessions:
 
 ## Summary
 
-- **Total Issues Found**: 14
-- **Critical**: 5 ✅ (all fixed)
-- **High**: 6 ✅ (all fixed)
-- **Medium**: 2 ✅ (all fixed)
+- **Total Issues Found**: 23
+- **Critical**: 7 ✅ (all fixed)
+- **High**: 11 ✅ (all fixed)
+- **Medium**: 4 ✅ (all fixed)
 - **Low**: 0
-- **Issues Fixed**: 14
+- **Issues Fixed**: 23
 - **Remaining**: 0
+
+### By Session
+- **Session 1**: 1 issue fixed (1 CRITICAL)
+- **Session 2**: 11 issues fixed (4 CRITICAL, 5 HIGH, 2 MEDIUM)
+- **Session 3**: 9 issues fixed (2 CRITICAL, 5 HIGH, 2 MEDIUM)
 
 ---
 
@@ -301,6 +445,11 @@ Based on git history, these areas have been addressed in prior sessions:
 5. **Thread safety review**: Any shared state accessed from async tasks needs synchronization
 6. **Security headers review**: Ensure error responses don't leak internal details
 7. **Database schema changes**: When adding columns, ensure all creation sites are updated
+8. **SSRF protection**: Any code fetching URLs from external sources (like GitLab API) should validate URLs before making requests
+9. **Silent exception handling**: Never use bare `except: pass` - always log or handle meaningfully
+10. **Resource management**: Always close file handles, especially from `tar.extractfile()` and similar APIs
+11. **URL validation**: Always validate URL schemes, not just hostnames, to prevent protocol injection
+12. **Lock usage consistency**: When a class has internal locks, ensure all code paths (including callers) use them properly
 
 ---
 
