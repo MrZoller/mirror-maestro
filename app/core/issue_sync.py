@@ -1458,6 +1458,7 @@ class IssueSyncEngine:
                 state="all",
                 per_page=100,
                 get_all=True,  # Search all pages to find orphaned issues
+                max_pages=settings.max_pages_per_request,  # Prevent unbounded pagination
             )
 
             # Limit the number of issues we check to prevent performance issues
