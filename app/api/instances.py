@@ -252,7 +252,7 @@ async def list_instances(
     ]
 
 
-@router.post("", response_model=GitLabInstanceResponse)
+@router.post("", response_model=GitLabInstanceResponse, status_code=201)
 async def create_instance(
     instance: GitLabInstanceCreate,
     db: AsyncSession = Depends(get_db),

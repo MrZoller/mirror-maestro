@@ -270,7 +270,7 @@ async def list_pairs(
     ]
 
 
-@router.post("", response_model=InstancePairResponse)
+@router.post("", response_model=InstancePairResponse, status_code=201)
 async def create_pair(
     pair: InstancePairCreate,
     db: AsyncSession = Depends(get_db),
