@@ -112,6 +112,14 @@ class InstancePairCreate(BaseModel):
             raise ValueError("Instance ID must be a positive integer")
         return v
 
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v):
+        """Validate description length."""
+        if v and len(v) > 500:
+            raise ValueError("Description must be 500 characters or less")
+        return v.strip() if v else ""
+
     @model_validator(mode='after')
     def validate_not_self_referential(self):
         """Validate that source and target instances are different."""
@@ -175,6 +183,14 @@ class InstancePairUpdate(BaseModel):
         if v is not None and v <= 0:
             raise ValueError("Instance ID must be a positive integer")
         return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v):
+        """Validate description length if provided."""
+        if v is not None and len(v) > 500:
+            raise ValueError("Description must be 500 characters or less")
+        return v.strip() if v else None
 
 
 class InstancePairResponse(BaseModel):
