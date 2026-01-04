@@ -703,17 +703,19 @@ async def sync_all_mirrors(
             except Exception as commit_error:
                 # Rollback the failed commit to maintain session state
                 await db.rollback()
-                raise commit_error
-
-            tracker.record_success()
-            logger.info(f"[{idx + 1}/{len(mirrors)}] Triggered sync for {mirror_identifier}")
+                # Record as failure and continue instead of re-raising
+                error_msg = f"{mirror_identifier}: Database commit failed - {type(commit_error).__name__}"
+                errors.append(error_msg)
+                tracker.record_failure(error_msg)
+                logger.error(f"Failed to update status for mirror {mirror.id}: {type(commit_error).__name__}")
+            else:
+                # Only record success if commit succeeded
+                tracker.record_success()
+                logger.info(f"[{idx + 1}/{len(mirrors)}] Triggered sync for {mirror_identifier}")
 
         except Exception as e:
-            # Ensure session is in clean state after any error
-            try:
-                await db.rollback()
-            except Exception as rollback_err:
-                logger.debug(f"Rollback after error (may already be rolled back): {rollback_err}")
+            # Rollback for errors during GitLab API operations
+            await db.rollback()
             error_msg = f"{mirror_identifier}: {str(e)}"
             errors.append(error_msg)
             tracker.record_failure(error_msg)

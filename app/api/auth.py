@@ -115,6 +115,13 @@ async def login(
                     created_at=datetime.utcnow()
                 )
             )
+
+        # Log authentication failure for security monitoring
+        from app.core.logging_utils import sanitize_for_logging
+        logger.warning(
+            f"Login failed for user '{sanitize_for_logging(login_data.username, max_length=50)}' "
+            f"(legacy mode)"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password"
@@ -135,12 +142,23 @@ async def login(
     password_valid = verify_password(login_data.password, password_to_verify)
 
     if user is None or not password_valid:
+        # Log authentication failure for security monitoring
+        from app.core.logging_utils import sanitize_for_logging
+        logger.warning(
+            f"Login failed for user '{sanitize_for_logging(login_data.username, max_length=50)}' "
+            f"(multi-user mode)"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password"
         )
 
     if not user.is_active:
+        # Log authentication failure for security monitoring
+        logger.warning(
+            f"Login failed - account disabled "
+            f"(user_id: {user.id}, username: {user.username})"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account is disabled"

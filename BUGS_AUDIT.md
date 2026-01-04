@@ -1,7 +1,7 @@
 # Mirror Maestro - Comprehensive Bug Audit
 
 **Started**: 2026-01-04
-**Status**: COMPLETED (Session 6)
+**Status**: COMPLETED (Session 8)
 **Last Updated**: 2026-01-04
 
 ## Audit Methodology
@@ -619,14 +619,51 @@ Session 7 focused on comprehensive deep-dive analysis using parallel agent-based
 
 ---
 
+## Issues Fixed Session 8
+
+Session 8 focused on database transaction safety and security audit logging using parallel agent-based analysis across six categories: error handling gaps, edge case bugs, logging security issues, configuration validation, async context/transaction bugs, and API contract issues.
+
+### CRITICAL Issues Fixed
+
+| # | File | Description |
+|---|------|-------------|
+| 1 | `app/api/auth.py` | Added database rollback on password change commit failure |
+| 2 | `app/api/issue_mirrors.py` | Added database rollback on issue mirror config creation commit failure |
+| 3 | `app/api/issue_mirrors.py` | Added database rollback on issue mirror config update commit failure |
+| 4 | `app/api/issue_mirrors.py` | Added database rollback on issue mirror config deletion commit failure |
+| 5 | `app/api/users.py` | Added database rollback on user creation commit failure |
+| 6 | `app/api/users.py` | Added database rollback on user update commit failure |
+| 7 | `app/api/users.py` | Added database rollback on user deletion commit failure |
+| 8 | `app/api/pairs.py` | Fixed double-rollback pattern in batch mirror sync (try/except/else pattern) |
+| 9 | `app/core/auth.py` | Added authentication failure logging for legacy mode (SSRF prevention) |
+| 10 | `app/core/auth.py` | Added authentication failure logging for JWT token verification |
+| 11 | `app/core/auth.py` | Added authentication failure logging for inactive user accounts |
+| 12 | `app/core/auth.py` | Added authorization failure logging for admin privilege checks |
+| 13 | `app/api/auth.py` | Added authentication failure logging for legacy mode login |
+| 14 | `app/api/auth.py` | Added authentication failure logging for multi-user mode login |
+| 15 | `app/api/auth.py` | Added authentication failure logging for disabled account login attempts |
+
+### MEDIUM Issues Fixed
+
+| # | File | Description |
+|---|------|-------------|
+| 1 | `app/core/logging_utils.py` | Created sanitize_for_logging() to prevent CRLF injection attacks |
+| 2 | `app/core/logging_utils.py` | Created sanitize_url_for_logging() to remove credentials from URLs |
+| 3 | `app/core/logging_utils.py` | Created sanitize_exception_for_logging() to prevent sensitive data leakage |
+| 4 | `app/core/logging_utils.py` | Created redact_token() for safe token logging |
+| 5 | `app/api/users.py` | Added security audit logging for user creation |
+| 6 | `app/api/users.py` | Added security audit logging for user deletion |
+
+---
+
 ## Summary
 
-- **Total Issues Found**: 83
-- **Critical**: 21 ✅ (all fixed)
+- **Total Issues Found**: 97
+- **Critical**: 29 ✅ (all fixed)
 - **High**: 49 ✅ (all fixed)
-- **Medium**: 12 ✅ (all fixed)
+- **Medium**: 18 ✅ (all fixed)
 - **Low**: 1 ✅ (all fixed)
-- **Issues Fixed**: 83
+- **Issues Fixed**: 97
 - **Remaining**: 0
 
 ### By Session
@@ -637,6 +674,7 @@ Session 7 focused on comprehensive deep-dive analysis using parallel agent-based
 - **Session 5**: 18 issues fixed (7 CRITICAL, 11 HIGH) - Focused on GitLab API handling
 - **Session 6**: 20 issues fixed (4 CRITICAL, 15 HIGH, 1 MEDIUM) - Deep dive on dict access, error handling, resource limits
 - **Session 7**: 14 issues fixed (2 CRITICAL, 5 HIGH, 6 MEDIUM, 1 LOW) - Parallel agent analysis on race conditions, SSRF, input validation
+- **Session 8**: 16 issues fixed (8 CRITICAL, 2 CRITICAL security, 6 MEDIUM) - Database transaction safety, security audit logging
 
 ---
 
@@ -670,6 +708,12 @@ Session 7 focused on comprehensive deep-dive analysis using parallel agent-based
 26. **Query parameter validation**: Use FastAPI's Query() with ge/le constraints instead of silent clamping
 27. **Batch operation safety**: Always add configurable limits to endpoints that process multiple items
 28. **Graceful shutdown**: Dispose database engines and close connections during application shutdown
+29. **Database commit error handling**: Always wrap `db.commit()` in try/except and rollback on failure to prevent session corruption
+30. **Double-rollback prevention**: Use try/except/else pattern when needed, avoid nested exception handlers both rolling back
+31. **Log injection prevention**: Always sanitize user input before logging to prevent CRLF injection and log forging
+32. **Authentication failure logging**: Log all authentication and authorization failures for security monitoring
+33. **Credential redaction**: Never log full tokens or passwords - use redaction functions to show only partial values
+34. **Security audit events**: Log user management operations (create, update, delete) with actor information
 
 ---
 
