@@ -248,7 +248,7 @@ async def create_instance(
 
     # Test connection first
     try:
-        client = GitLabClient(instance.url, encrypted_token)
+        client = GitLabClient(instance.url, encrypted_token, timeout=settings.gitlab_api_timeout)
         if not client.test_connection():
             raise HTTPException(status_code=400, detail="Failed to connect to GitLab instance")
     except HTTPException:
@@ -372,7 +372,7 @@ async def update_instance(
             instance.encrypted_token = encryption.encrypt(instance_update.token)
             # Best-effort: refresh token user identity
             try:
-                client = GitLabClient(instance.url, instance.encrypted_token)
+                client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
                 u = client.get_current_user()
                 instance.api_user_id = u.get("id")
                 instance.api_username = u.get("username")
@@ -542,7 +542,7 @@ async def get_instance_projects(
         raise HTTPException(status_code=404, detail="Instance not found")
 
     try:
-        client = GitLabClient(instance.url, instance.encrypted_token)
+        client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
         projects = client.get_projects(search=search, per_page=per_page, page=page, get_all=get_all)
         return {"projects": projects}
     except Exception as e:
@@ -574,7 +574,7 @@ async def get_instance_groups(
         raise HTTPException(status_code=404, detail="Instance not found")
 
     try:
-        client = GitLabClient(instance.url, instance.encrypted_token)
+        client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
         groups = client.get_groups(search=search, per_page=per_page, page=page, get_all=get_all)
         return {"groups": groups}
     except Exception as e:
@@ -617,7 +617,7 @@ async def get_project_mirrors(
         raise HTTPException(status_code=404, detail="Instance not found")
 
     try:
-        client = GitLabClient(instance.url, instance.encrypted_token)
+        client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
         mirrors = client.get_project_mirrors(project_id) or []
 
         push_count = sum(1 for m in mirrors if (m.get("mirror_direction") or "").lower() == "push")

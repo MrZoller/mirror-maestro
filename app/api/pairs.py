@@ -661,7 +661,7 @@ async def sync_all_mirrors(
     rate_limiter.start_tracking()
 
     # Create GitLab client
-    client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token)
+    client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
 
     # Process each mirror
     skipped = 0

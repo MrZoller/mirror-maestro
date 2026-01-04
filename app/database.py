@@ -129,7 +129,7 @@ async def migrate_mirrors_to_auto_tokens():
                 token_name = f"mirror-maestro-{mirror.id}"
                 expires_at = (datetime.utcnow() + timedelta(days=TOKEN_EXPIRY_DAYS)).strftime("%Y-%m-%d")
 
-                token_client = GitLabClient(token_instance.url, token_instance.encrypted_token)
+                token_client = GitLabClient(token_instance.url, token_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
                 token_result = token_client.create_project_access_token(
                     project_id=token_project_id,
                     name=token_name,
@@ -167,7 +167,7 @@ async def migrate_mirrors_to_auto_tokens():
                         mirror_instance = target_instance
                         mirror_project_id = mirror.target_project_id
 
-                    mirror_client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token)
+                    mirror_client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
                     try:
                         mirror_client.update_mirror(
                             project_id=mirror_project_id,
