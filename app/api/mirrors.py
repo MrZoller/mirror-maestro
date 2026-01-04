@@ -25,7 +25,39 @@ T = TypeVar('T')
 # Token expiration: 1 year from creation
 TOKEN_EXPIRY_DAYS = 365
 
+# Maximum allowed regex pattern length to prevent resource exhaustion
+MAX_REGEX_LENGTH = 500
+
 logger = logging.getLogger(__name__)
+
+
+def _validate_regex_safety(pattern: str) -> None:
+    """
+    Validate a regex pattern for safety against ReDoS attacks.
+
+    Checks for:
+    - Maximum pattern length
+    - Nested quantifiers that can cause catastrophic backtracking
+    - Valid regex syntax
+
+    Raises:
+        ValueError: If pattern is unsafe or invalid
+    """
+    if len(pattern) > MAX_REGEX_LENGTH:
+        raise ValueError(f"Regex pattern too long (max {MAX_REGEX_LENGTH} characters)")
+
+    # Check for common ReDoS patterns (nested quantifiers)
+    # Patterns like (a+)+, (a*)+, (a+)*, etc. can cause catastrophic backtracking
+    redos_patterns = [
+        r'\([^)]*[+*][^)]*\)[+*]',  # (something+)+ or (something*)* etc
+        r'\([^)]*\|[^)]*\)[+*]',    # (a|b)+ with alternation can be problematic
+    ]
+    for danger_pattern in redos_patterns:
+        if re.search(danger_pattern, pattern):
+            raise ValueError(
+                "Regex pattern contains potentially dangerous nested quantifiers. "
+                "Please simplify the pattern to avoid performance issues."
+            )
 
 
 async def _execute_gitlab_op(
@@ -165,8 +197,11 @@ class MirrorCreate(BaseModel):
     @field_validator('mirror_branch_regex')
     @classmethod
     def validate_branch_regex(cls, v):
-        """Validate that branch regex is valid regex syntax."""
+        """Validate that branch regex is valid and safe."""
         if v is not None and v.strip():
+            # Check for ReDoS vulnerabilities first
+            _validate_regex_safety(v)
+            # Then verify it compiles
             try:
                 re.compile(v)
             except re.error as e:
@@ -281,8 +316,11 @@ class MirrorUpdate(BaseModel):
     @field_validator('mirror_branch_regex')
     @classmethod
     def validate_branch_regex(cls, v):
-        """Validate that branch regex is valid regex syntax."""
+        """Validate that branch regex is valid and safe."""
         if v is not None and v.strip():
+            # Check for ReDoS vulnerabilities first
+            _validate_regex_safety(v)
+            # Then verify it compiles
             try:
                 re.compile(v)
             except re.error as e:
@@ -1546,6 +1584,15 @@ async def trigger_mirror_update(
 
     if not mirror.mirror_id:
         raise HTTPException(status_code=400, detail="Mirror not configured in GitLab")
+
+    # Check if mirror token has expired before attempting update
+    if mirror.mirror_token_expires_at:
+        token_status = _compute_token_status(mirror.mirror_token_expires_at)
+        if token_status == "expired":
+            raise HTTPException(
+                status_code=400,
+                detail="Mirror token has expired. Please rotate the token before triggering an update."
+            )
 
     # Get instance and trigger update
     pair_result = await db.execute(
