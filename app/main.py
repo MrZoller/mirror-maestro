@@ -223,6 +223,11 @@ async def lifespan(app: FastAPI):
         await wait_for_manual_syncs(timeout=settings.sync_shutdown_timeout)
         logging.info("Manual sync tasks completed")
 
+        # Dispose database engine to cleanly close all connections
+        from app.database import engine
+        await engine.dispose()
+        logging.info("Database engine disposed")
+
     except Exception as e:
         logging.error(f"Error during graceful shutdown: {e}", exc_info=True)
 

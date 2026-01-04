@@ -587,15 +587,20 @@ async def delete_pair(
 @router.post("/{pair_id}/sync-mirrors")
 async def sync_all_mirrors(
     pair_id: int,
+    limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of mirrors to sync (1-1000)"),
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
     """
-    Trigger batch sync for all enabled mirrors in this instance pair.
+    Trigger batch sync for enabled mirrors in this instance pair.
 
     This endpoint processes mirrors sequentially with rate limiting to avoid
-    overwhelming GitLab instances. Use this to resume all mirrors after a
+    overwhelming GitLab instances. Use this to resume mirrors after a
     GitLab instance outage or scheduled maintenance.
+
+    Args:
+        pair_id: Instance pair ID
+        limit: Maximum number of mirrors to sync (default: 100, max: 1000)
 
     Returns:
         Summary of sync operations including counts and any errors
@@ -609,12 +614,12 @@ async def sync_all_mirrors(
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
 
-    # Get all enabled mirrors for this pair
+    # Get enabled mirrors for this pair with limit
     mirrors_result = await db.execute(
         select(Mirror).where(
             Mirror.instance_pair_id == pair_id,
             Mirror.enabled == True
-        )
+        ).limit(limit)
     )
     mirrors = mirrors_result.scalars().all()
 
