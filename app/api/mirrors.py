@@ -1673,7 +1673,16 @@ async def rotate_mirror_token(
     new_token_value = token_result.get("token")
     new_token_id = token_result.get("id")
     if not new_token_value or new_token_id is None:
-        logger.error(f"GitLab API returned incomplete token response: {token_result}")
+        # Log which fields are missing without exposing the actual token value
+        missing_fields = []
+        if not new_token_value:
+            missing_fields.append("token")
+        if new_token_id is None:
+            missing_fields.append("id")
+        logger.error(
+            f"GitLab API returned incomplete token response. Missing fields: {missing_fields}. "
+            f"Response keys: {list(token_result.keys()) if isinstance(token_result, dict) else 'not a dict'}"
+        )
         raise HTTPException(
             status_code=500,
             detail="GitLab API returned incomplete token response (missing 'token' or 'id')"
