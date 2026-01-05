@@ -1,6 +1,7 @@
 """API endpoints for managing issue mirror configurations."""
 
 import asyncio
+import logging
 import threading
 from datetime import datetime
 from typing import List, Optional, Set
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db, AsyncSessionLocal
 from app.models import MirrorIssueConfig, Mirror
 from app.core.auth import verify_credentials
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/issue-mirrors", tags=["issue-mirrors"])
@@ -207,8 +210,16 @@ async def create_issue_config(
     # Create new configuration
     config = MirrorIssueConfig(**config_data.model_dump())
     db.add(config)
-    await db.commit()
-    await db.refresh(config)
+    try:
+        await db.commit()
+        await db.refresh(config)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create issue mirror config: {type(e).__name__}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create issue mirror configuration"
+        )
     return config
 
 
@@ -234,8 +245,16 @@ async def update_issue_config(
     for field, value in config_data.model_dump(exclude_unset=True).items():
         setattr(config, field, value)
 
-    await db.commit()
-    await db.refresh(config)
+    try:
+        await db.commit()
+        await db.refresh(config)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to update issue mirror config {config_id}: {type(e).__name__}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update issue mirror configuration"
+        )
     return config
 
 
@@ -257,7 +276,15 @@ async def delete_issue_config(
         )
 
     await db.delete(config)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to delete issue mirror config {config_id}: {type(e).__name__}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete issue mirror configuration"
+        )
 
 
 @router.post("/{config_id}/trigger-sync", status_code=202)

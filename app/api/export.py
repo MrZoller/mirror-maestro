@@ -202,8 +202,8 @@ async def import_pair_mirrors(
         raise HTTPException(status_code=404, detail="Source or target instance not found")
 
     # Create GitLab clients for looking up project IDs
-    source_client = GitLabClient(source_instance.url, source_instance.encrypted_token)
-    target_client = GitLabClient(target_instance.url, target_instance.encrypted_token)
+    source_client = GitLabClient(source_instance.url, source_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
+    target_client = GitLabClient(target_instance.url, target_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
 
     # Initialize rate limiter and tracker for batch import
     rate_limiter = RateLimiter(

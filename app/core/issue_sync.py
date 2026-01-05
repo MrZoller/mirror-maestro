@@ -1267,7 +1267,11 @@ class IssueSyncEngine:
 
                 # Get full URL (GitLab returns relative URL)
                 target_url = upload_result.get("url")
-                if target_url and not target_url.startswith("http"):
+                if not target_url:
+                    logger.warning(f"Upload succeeded but no URL returned for attachment {filename}, skipping URL replacement")
+                    continue
+
+                if not target_url.startswith("http"):
                     target_url = f"{self.target_instance.url}{target_url}"
 
                 url_mapping[source_url] = target_url
@@ -1454,6 +1458,7 @@ class IssueSyncEngine:
                 state="all",
                 per_page=100,
                 get_all=True,  # Search all pages to find orphaned issues
+                max_pages=settings.max_pages_per_request,  # Prevent unbounded pagination
             )
 
             # Limit the number of issues we check to prevent performance issues

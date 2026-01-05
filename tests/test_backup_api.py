@@ -18,9 +18,10 @@ class FakeGitLabClient:
     test_ok = True
     current_user = {"id": 42, "username": "backup-test-user", "name": "Backup Test User"}
 
-    def __init__(self, url: str, encrypted_token: str):
+    def __init__(self, url: str, encrypted_token: str, timeout: int = 60):
         self.url = url
         self.encrypted_token = encrypted_token
+        self.timeout = timeout
 
     def test_connection(self) -> bool:
         return self.test_ok
@@ -54,7 +55,7 @@ async def test_backup_stats_with_data(client, session_maker, monkeypatch):
         "/api/instances",
         json={"name": "test-inst", "url": "https://gitlab.example.com", "token": "test-token"}
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 201
 
     # Check stats
     resp = await client.get("/api/backup/stats")
@@ -127,7 +128,7 @@ async def test_create_backup_with_data(client, session_maker, monkeypatch):
             "token": "backup-test-token"
         }
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     instance_data = resp.json()
 
     # Create backup
@@ -246,7 +247,7 @@ async def test_backup_creation_and_restore(client, session_maker, monkeypatch):
             "description": "Test instance for backup/restore"
         }
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     original_instance = resp.json()
 
     # Create backup

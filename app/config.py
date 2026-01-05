@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = 24
 
+    # Encryption key for token storage - auto-generated and persisted
+    # Can be overridden by setting ENCRYPTION_KEY or ENCRYPTION_KEY_PATH environment variables
+    encryption_key_env: Optional[str] = Field(default=None, validation_alias="ENCRYPTION_KEY")
+    encryption_key_path: str = Field(default="./data/encryption.key", validation_alias="ENCRYPTION_KEY_PATH")
+
     @property
     def jwt_secret_key(self) -> str:
         """Get the JWT secret key from the secret manager.

@@ -93,7 +93,7 @@ async def test_multi_project_push_mirrors(client, e2e_config_single, resource_tr
                 "description": "Multi-project E2E test",
             },
         )
-        assert inst_resp.status_code == 200, inst_resp.text
+        assert inst_resp.status_code == 201, inst_resp.text
         instance_id = inst_resp.json()["id"]
 
         # Create push pair
@@ -135,7 +135,7 @@ async def test_multi_project_push_mirrors(client, e2e_config_single, resource_tr
                     "enabled": True,
                 },
             )
-            assert mirror_resp.status_code == 200, mirror_resp.text
+            assert mirror_resp.status_code == 201, mirror_resp.text
             created_mirrors.append(mirror_resp.json())
 
         # Trigger updates for all mirrors
@@ -283,7 +283,7 @@ async def test_multi_project_pull_mirrors(client, e2e_config_single, resource_tr
                 "token": cfg["token"],
             },
         )
-        assert inst_resp.status_code == 200
+        assert inst_resp.status_code == 201
         instance_id = inst_resp.json()["id"]
 
         # Create pull pair
@@ -296,7 +296,7 @@ async def test_multi_project_pull_mirrors(client, e2e_config_single, resource_tr
                 "mirror_direction": "pull",
             },
         )
-        assert pair_resp.status_code == 200
+        assert pair_resp.status_code == 201
         pair_id = pair_resp.json()["id"]
 
         # Store token
@@ -325,7 +325,7 @@ async def test_multi_project_pull_mirrors(client, e2e_config_single, resource_tr
                     "enabled": True,
                 },
             )
-            assert mirror_resp.status_code == 200, mirror_resp.text
+            assert mirror_resp.status_code == 201, mirror_resp.text
             created_mirrors.append(mirror_resp.json())
 
         # Trigger updates

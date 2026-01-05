@@ -154,6 +154,24 @@ class GitLabClient:
         # Set timeout for all HTTP requests to prevent hanging operations
         self.gl = gitlab.Gitlab(url, private_token=self.token, timeout=timeout)
 
+    def close(self) -> None:
+        """
+        Close the underlying HTTP session.
+
+        This should be called when the client is no longer needed to release resources.
+        """
+        if hasattr(self.gl, 'session') and self.gl.session:
+            self.gl.session.close()
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensures resources are cleaned up."""
+        self.close()
+        return False
+
     def test_connection(self) -> bool:
         """Test if the connection to GitLab is working."""
         try:

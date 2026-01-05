@@ -341,7 +341,7 @@ async def _check_instances(db: AsyncSession) -> List[InstanceHealthDetail]:
         start = time.perf_counter()
         try:
             def check_connection():
-                client = GitLabClient(instance.url, instance.encrypted_token)
+                client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
                 return client.test_connection()
 
             # Use retry logic if rate limiter is available
