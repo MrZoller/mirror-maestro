@@ -132,7 +132,7 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
             "token": cfg["token"],
             "description": "live GitLab E2E",
         })
-        assert inst_resp.status_code == 200, inst_resp.text
+        assert inst_resp.status_code == 201, inst_resp.text
         created_instance_id = inst_resp.json()["id"]
 
         # 2) Store a token for the group path so authenticated clone URLs are used.
@@ -153,7 +153,7 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
             "mirror_direction": "pull",
             "description": "live GitLab E2E",
         })
-        assert pull_pair_resp.status_code == 200, pull_pair_resp.text
+        assert pull_pair_resp.status_code == 201, pull_pair_resp.text
         pull_pair_id = pull_pair_resp.json()["id"]
         created_pair_ids.append(pull_pair_id)
 
@@ -164,7 +164,7 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
             "mirror_direction": "push",
             "description": "live GitLab E2E",
         })
-        assert push_pair_resp.status_code == 200, push_pair_resp.text
+        assert push_pair_resp.status_code == 201, push_pair_resp.text
         push_pair_id = push_pair_resp.json()["id"]
         created_pair_ids.append(push_pair_id)
 
@@ -214,7 +214,7 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
             # Do not pass pull-only settings; they should come from group defaults.
         }
         pull_mirror_resp = await client.post("/api/mirrors", json=pull_mirror_payload)
-        assert pull_mirror_resp.status_code == 200, pull_mirror_resp.text
+        assert pull_mirror_resp.status_code == 201, pull_mirror_resp.text
         pull_mirror_body = pull_mirror_resp.json()
         pull_mirror_db_id = pull_mirror_body["id"]
         created_mirror_db_ids.append(pull_mirror_db_id)
@@ -307,7 +307,7 @@ async def test_e2e_live_gitlab_create_pull_and_push_mirrors_trigger_update_and_e
             "enabled": True,
             # Do not pass settings; keep_divergent_refs / only_protected should come from group defaults.
         })
-        assert push_mirror_resp.status_code == 200, push_mirror_resp.text
+        assert push_mirror_resp.status_code == 201, push_mirror_resp.text
         push_mirror_body = push_mirror_resp.json()
         push_mirror_db_id = push_mirror_body["id"]
         created_mirror_db_ids.append(push_mirror_db_id)
