@@ -65,7 +65,7 @@ async def test_instances_create_and_get_and_delete(client, session_maker, monkey
         "description": "d",
     }
     resp = await client.post("/api/instances", json=payload)
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     created = resp.json()
     assert created["name"] == "inst1"
     assert created["url"] == "https://gitlab.example.com"
@@ -99,14 +99,14 @@ async def test_instances_delete_cascades_pairs_mirrors_group_settings_and_tokens
         "/api/instances",
         json={"name": "inst-src", "url": "https://src.example.com", "token": "t-src", "description": ""},
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     src_id = resp.json()["id"]
 
     resp = await client.post(
         "/api/instances",
         json={"name": "inst-tgt", "url": "https://tgt.example.com", "token": "t-tgt", "description": ""},
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     tgt_id = resp.json()["id"]
 
     # Pair references src_id (will be deleted when deleting src instance).
@@ -119,7 +119,7 @@ async def test_instances_delete_cascades_pairs_mirrors_group_settings_and_tokens
             "mirror_direction": "pull",
         },
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     pair_id = resp.json()["id"]
 
     async with session_maker() as s:
@@ -177,6 +177,7 @@ async def test_instances_update_token(client, session_maker, monkeypatch):
         "/api/instances",
         json={"name": "inst1", "url": "https://x", "token": "t1", "description": ""},
     )
+    assert resp.status_code == 201
     instance_id = resp.json()["id"]
 
     resp = await client.put(f"/api/instances/{instance_id}", json={"token": "t2"})
@@ -198,6 +199,7 @@ async def test_instances_projects_and_groups(client, session_maker, monkeypatch)
         "/api/instances",
         json={"name": "inst1", "url": "https://x", "token": "t1", "description": ""},
     )
+    assert resp.status_code == 201
     instance_id = resp.json()["id"]
 
     resp = await client.get(f"/api/instances/{instance_id}/projects")

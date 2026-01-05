@@ -55,7 +55,7 @@ async def test_pairs_create_list_update_delete(client, session_maker):
         "description": "d",
     }
     resp = await client.post("/api/pairs", json=payload)
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     pair_id = resp.json()["id"]
 
     resp = await client.get("/api/pairs")
