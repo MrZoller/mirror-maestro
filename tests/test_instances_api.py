@@ -10,9 +10,10 @@ class FakeGitLabClient:
     groups = [{"id": 2, "name": "g"}]
     current_user = {"id": 42, "username": "mirror-bot", "name": "Mirror Bot"}
 
-    def __init__(self, url: str, encrypted_token: str):
+    def __init__(self, url: str, encrypted_token: str, timeout: int = 60):
         self.url = url
         self.encrypted_token = encrypted_token
+        self.timeout = timeout
 
     def test_connection(self) -> bool:
         return self.test_ok
@@ -220,21 +221,21 @@ async def test_instances_update_url_disallowed_when_used_by_pair(client, session
         "/api/instances",
         json={"name": "inst-src", "url": "https://src.example.com", "token": "t-src", "description": ""},
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     src_id = resp.json()["id"]
 
     resp = await client.post(
         "/api/instances",
         json={"name": "inst-tgt", "url": "https://tgt.example.com", "token": "t-tgt", "description": ""},
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     tgt_id = resp.json()["id"]
 
     resp = await client.post(
         "/api/pairs",
         json={"name": "pair-url-lock", "source_instance_id": src_id, "target_instance_id": tgt_id, "mirror_direction": "pull"},
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
 
     resp = await client.put(f"/api/instances/{src_id}", json={"url": "https://new.example.com"})
     assert resp.status_code == 400
@@ -278,7 +279,7 @@ async def test_instances_groups_not_found(client):
 
 @pytest.mark.asyncio
 async def test_instances_projects_pagination_clamping(client, session_maker, monkeypatch):
-    """Test that pagination parameters are clamped to safe values."""
+    """Test that pagination parameters are validated (not clamped)."""
     patch_gitlab_client(monkeypatch, FakeGitLabClient)
     FakeGitLabClient.test_ok = True
     FakeGitLabClient.projects = []
@@ -290,12 +291,16 @@ async def test_instances_projects_pagination_clamping(client, session_maker, mon
     )
     instance_id = resp.json()["id"]
 
-    # Test per_page is clamped to max 100
+    # Test per_page > 100 is rejected
     resp = await client.get(f"/api/instances/{instance_id}/projects?per_page=999&page=5")
-    assert resp.status_code == 200
+    assert resp.status_code == 422  # Validation error
 
-    # Test page is clamped to minimum 1
+    # Test page < 1 is rejected
     resp = await client.get(f"/api/instances/{instance_id}/projects?page=0")
+    assert resp.status_code == 422  # Validation error
+
+    # Test valid parameters work
+    resp = await client.get(f"/api/instances/{instance_id}/projects?per_page=50&page=1")
     assert resp.status_code == 200
 
 
@@ -447,7 +452,7 @@ async def test_instances_create_with_empty_description(client, monkeypatch):
         "/api/instances",
         json={"name": "inst1", "url": "https://x", "token": "t1", "description": ""},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     # Empty string is allowed
     assert resp.json()["description"] == ""
 

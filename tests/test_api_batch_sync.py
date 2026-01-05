@@ -346,4 +346,4 @@ async def test_sync_all_mirrors_pull_direction(client: AsyncClient, db_session: 
         assert result["succeeded"] == 1
 
         # Verify GitLab client was created with TARGET instance (for pull)
-        MockClient.assert_called_with(target_instance.url, target_instance.encrypted_token)
+        MockClient.assert_called_with(target_instance.url, target_instance.encrypted_token, timeout=60)

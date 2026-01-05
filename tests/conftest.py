@@ -90,6 +90,16 @@ async def app(engine, session_maker: async_sessionmaker[AsyncSession], monkeypat
     # Reset the mirror service singleton for each test
     service_mod.reset_mirror_gitlab_service()
 
+    # Mock socket.getaddrinfo to prevent DNS resolution in tests
+    # This is needed for SSRF validation in instances API
+    import socket
+    def fake_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        # Return a public IP address (Google DNS) to pass SSRF checks
+        # This simulates successful DNS resolution to a public IP
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', port or 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
     async def override_get_db():
         async with session_maker() as session:
             yield session
