@@ -101,7 +101,7 @@ async def test_cross_instance_push_mirror(client, e2e_config_dual, resource_trac
                 "description": "Source instance",
             },
         )
-        assert src_inst_resp.status_code == 200
+        assert src_inst_resp.status_code == 201
         source_instance_id = src_inst_resp.json()["id"]
 
         # Register target instance
@@ -114,7 +114,7 @@ async def test_cross_instance_push_mirror(client, e2e_config_dual, resource_trac
                 "description": "Target instance",
             },
         )
-        assert tgt_inst_resp.status_code == 200
+        assert tgt_inst_resp.status_code == 201
         target_instance_id = tgt_inst_resp.json()["id"]
 
         # Create push pair (source instance -> target instance)
@@ -127,7 +127,7 @@ async def test_cross_instance_push_mirror(client, e2e_config_dual, resource_trac
                 "mirror_direction": "push",
             },
         )
-        assert pair_resp.status_code == 200
+        assert pair_resp.status_code == 201
         pair_id = pair_resp.json()["id"]
 
         # Store token for target instance (needed for authenticated push URL)
@@ -155,7 +155,7 @@ async def test_cross_instance_push_mirror(client, e2e_config_dual, resource_trac
                 "enabled": True,
             },
         )
-        assert mirror_resp.status_code == 200, mirror_resp.text
+        assert mirror_resp.status_code == 201, mirror_resp.text
         mirror = mirror_resp.json()
         created_mirrors.append(mirror)
 
@@ -302,7 +302,7 @@ async def test_cross_instance_pull_mirror(client, e2e_config_dual, resource_trac
                 "token": cfg["instance1"]["token"],
             },
         )
-        assert src_inst_resp.status_code == 200
+        assert src_inst_resp.status_code == 201
         source_instance_id = src_inst_resp.json()["id"]
 
         tgt_inst_resp = await client.post(
@@ -313,7 +313,7 @@ async def test_cross_instance_pull_mirror(client, e2e_config_dual, resource_trac
                 "token": cfg["instance2"]["token"],
             },
         )
-        assert tgt_inst_resp.status_code == 200
+        assert tgt_inst_resp.status_code == 201
         target_instance_id = tgt_inst_resp.json()["id"]
 
         # Create pull pair (target pulls from source)
@@ -326,7 +326,7 @@ async def test_cross_instance_pull_mirror(client, e2e_config_dual, resource_trac
                 "mirror_direction": "pull",
             },
         )
-        assert pair_resp.status_code == 200
+        assert pair_resp.status_code == 201
         pair_id = pair_resp.json()["id"]
 
         # Store token for source instance (needed for authenticated pull URL)
@@ -354,7 +354,7 @@ async def test_cross_instance_pull_mirror(client, e2e_config_dual, resource_trac
                 "enabled": True,
             },
         )
-        assert mirror_resp.status_code == 200, mirror_resp.text
+        assert mirror_resp.status_code == 201, mirror_resp.text
         mirror = mirror_resp.json()
         created_mirrors.append(mirror)
 
@@ -498,7 +498,7 @@ async def test_cross_instance_multiple_projects(
                 "token": cfg["instance1"]["token"],
             },
         )
-        assert src_inst_resp.status_code == 200
+        assert src_inst_resp.status_code == 201
         source_instance_id = src_inst_resp.json()["id"]
 
         tgt_inst_resp = await client.post(
@@ -509,7 +509,7 @@ async def test_cross_instance_multiple_projects(
                 "token": cfg["instance2"]["token"],
             },
         )
-        assert tgt_inst_resp.status_code == 200
+        assert tgt_inst_resp.status_code == 201
         target_instance_id = tgt_inst_resp.json()["id"]
 
         # Create pair
@@ -522,7 +522,7 @@ async def test_cross_instance_multiple_projects(
                 "mirror_direction": "push",
             },
         )
-        assert pair_resp.status_code == 200
+        assert pair_resp.status_code == 201
         pair_id = pair_resp.json()["id"]
 
         # Store token
@@ -551,7 +551,7 @@ async def test_cross_instance_multiple_projects(
                     "enabled": True,
                 },
             )
-            assert mirror_resp.status_code == 200
+            assert mirror_resp.status_code == 201
             created_mirrors.append(mirror_resp.json())
 
         # Trigger all updates
@@ -727,7 +727,7 @@ async def test_cross_instance_bidirectional_mirroring(
                 "description": "Instance 1 for bidirectional test",
             },
         )
-        assert inst1_resp.status_code == 200
+        assert inst1_resp.status_code == 201
         instance1_id = inst1_resp.json()["id"]
 
         inst2_resp = await client.post(
@@ -739,7 +739,7 @@ async def test_cross_instance_bidirectional_mirroring(
                 "description": "Instance 2 for bidirectional test",
             },
         )
-        assert inst2_resp.status_code == 200
+        assert inst2_resp.status_code == 201
         instance2_id = inst2_resp.json()["id"]
 
         # Create pair 1: Instance 1 → Instance 2 (push)
@@ -753,7 +753,7 @@ async def test_cross_instance_bidirectional_mirroring(
                 "description": "Bidirectional: Instance 1 to Instance 2",
             },
         )
-        assert pair_1_to_2_resp.status_code == 200
+        assert pair_1_to_2_resp.status_code == 201
         pair_1_to_2_id = pair_1_to_2_resp.json()["id"]
 
         # Create pair 2: Instance 2 → Instance 1 (push)
@@ -767,7 +767,7 @@ async def test_cross_instance_bidirectional_mirroring(
                 "description": "Bidirectional: Instance 2 to Instance 1",
             },
         )
-        assert pair_2_to_1_resp.status_code == 200
+        assert pair_2_to_1_resp.status_code == 201
         pair_2_to_1_id = pair_2_to_1_resp.json()["id"]
 
         # Store tokens for both instances
@@ -807,7 +807,7 @@ async def test_cross_instance_bidirectional_mirroring(
                 "enabled": True,
             },
         )
-        assert mirror1_resp.status_code == 200, mirror1_resp.text
+        assert mirror1_resp.status_code == 201, mirror1_resp.text
         mirror1 = mirror1_resp.json()
         created_mirrors.append(mirror1)
         assert mirror1.get("mirror_id"), f"Mirror 1 missing GitLab ID: {mirror1}"
@@ -824,7 +824,7 @@ async def test_cross_instance_bidirectional_mirroring(
                 "enabled": True,
             },
         )
-        assert mirror2_resp.status_code == 200, mirror2_resp.text
+        assert mirror2_resp.status_code == 201, mirror2_resp.text
         mirror2 = mirror2_resp.json()
         created_mirrors.append(mirror2)
         assert mirror2.get("mirror_id"), f"Mirror 2 missing GitLab ID: {mirror2}"

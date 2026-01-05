@@ -112,6 +112,14 @@ class InstancePairCreate(BaseModel):
             raise ValueError("Instance ID must be a positive integer")
         return v
 
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v):
+        """Validate description length."""
+        if v and len(v) > 500:
+            raise ValueError("Description must be 500 characters or less")
+        return v.strip() if v else ""
+
     @model_validator(mode='after')
     def validate_not_self_referential(self):
         """Validate that source and target instances are different."""
@@ -175,6 +183,14 @@ class InstancePairUpdate(BaseModel):
         if v is not None and v <= 0:
             raise ValueError("Instance ID must be a positive integer")
         return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v):
+        """Validate description length if provided."""
+        if v is not None and len(v) > 500:
+            raise ValueError("Description must be 500 characters or less")
+        return v.strip() if v else None
 
 
 class InstancePairResponse(BaseModel):
@@ -254,13 +270,23 @@ async def list_pairs(
     ]
 
 
-@router.post("", response_model=InstancePairResponse)
+@router.post("", response_model=InstancePairResponse, status_code=201)
 async def create_pair(
     pair: InstancePairCreate,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
     """Create a new instance pair."""
+    # Check if pair with same name already exists
+    existing_result = await db.execute(
+        select(InstancePair).where(InstancePair.name == pair.name)
+    )
+    if existing_result.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Instance pair with name '{pair.name}' already exists. Please choose a different name."
+        )
+
     # Validate that both instances exist
     source_result = await db.execute(
         select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id)
@@ -587,15 +613,20 @@ async def delete_pair(
 @router.post("/{pair_id}/sync-mirrors")
 async def sync_all_mirrors(
     pair_id: int,
+    limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of mirrors to sync (1-1000)"),
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
 ):
     """
-    Trigger batch sync for all enabled mirrors in this instance pair.
+    Trigger batch sync for enabled mirrors in this instance pair.
 
     This endpoint processes mirrors sequentially with rate limiting to avoid
-    overwhelming GitLab instances. Use this to resume all mirrors after a
+    overwhelming GitLab instances. Use this to resume mirrors after a
     GitLab instance outage or scheduled maintenance.
+
+    Args:
+        pair_id: Instance pair ID
+        limit: Maximum number of mirrors to sync (default: 100, max: 1000)
 
     Returns:
         Summary of sync operations including counts and any errors
@@ -609,12 +640,12 @@ async def sync_all_mirrors(
     if not pair:
         raise HTTPException(status_code=404, detail="Instance pair not found")
 
-    # Get all enabled mirrors for this pair
+    # Get enabled mirrors for this pair with limit
     mirrors_result = await db.execute(
         select(Mirror).where(
             Mirror.instance_pair_id == pair_id,
             Mirror.enabled == True
-        )
+        ).limit(limit)
     )
     mirrors = mirrors_result.scalars().all()
 
@@ -656,7 +687,7 @@ async def sync_all_mirrors(
     rate_limiter.start_tracking()
 
     # Create GitLab client
-    client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token)
+    client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
 
     # Process each mirror
     skipped = 0
@@ -698,17 +729,19 @@ async def sync_all_mirrors(
             except Exception as commit_error:
                 # Rollback the failed commit to maintain session state
                 await db.rollback()
-                raise commit_error
-
-            tracker.record_success()
-            logger.info(f"[{idx + 1}/{len(mirrors)}] Triggered sync for {mirror_identifier}")
+                # Record as failure and continue instead of re-raising
+                error_msg = f"{mirror_identifier}: Database commit failed - {type(commit_error).__name__}"
+                errors.append(error_msg)
+                tracker.record_failure(error_msg)
+                logger.error(f"Failed to update status for mirror {mirror.id}: {type(commit_error).__name__}")
+            else:
+                # Only record success if commit succeeded
+                tracker.record_success()
+                logger.info(f"[{idx + 1}/{len(mirrors)}] Triggered sync for {mirror_identifier}")
 
         except Exception as e:
-            # Ensure session is in clean state after any error
-            try:
-                await db.rollback()
-            except Exception as rollback_err:
-                logger.debug(f"Rollback after error (may already be rolled back): {rollback_err}")
+            # Rollback for errors during GitLab API operations
+            await db.rollback()
             error_msg = f"{mirror_identifier}: {str(e)}"
             errors.append(error_msg)
             tracker.record_failure(error_msg)

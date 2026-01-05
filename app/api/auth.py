@@ -3,6 +3,7 @@ Authentication API endpoints.
 
 Provides login, logout, and current user info endpoints.
 """
+import logging
 import secrets
 from datetime import datetime
 from typing import Optional
@@ -23,6 +24,8 @@ from app.core.auth import (
 from app.core.api_rate_limiter import limiter, AUTH_RATE_LIMIT
 from app.database import get_db
 from app.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -115,6 +118,13 @@ async def login(
                     created_at=datetime.utcnow()
                 )
             )
+
+        # Log authentication failure for security monitoring
+        from app.core.logging_utils import sanitize_for_logging
+        logger.warning(
+            f"Login failed for user '{sanitize_for_logging(login_data.username, max_length=50)}' "
+            f"(legacy mode)"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password"
@@ -135,12 +145,23 @@ async def login(
     password_valid = verify_password(login_data.password, password_to_verify)
 
     if user is None or not password_valid:
+        # Log authentication failure for security monitoring
+        from app.core.logging_utils import sanitize_for_logging
+        logger.warning(
+            f"Login failed for user '{sanitize_for_logging(login_data.username, max_length=50)}' "
+            f"(multi-user mode)"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password"
         )
 
     if not user.is_active:
+        # Log authentication failure for security monitoring
+        logger.warning(
+            f"Login failed - account disabled "
+            f"(user_id: {user.id}, username: {user.username})"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account is disabled"
@@ -192,7 +213,9 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/change-password")
+@limiter.limit(AUTH_RATE_LIMIT)
 async def change_password(
+    request: Request,
     password_data: ChangePasswordRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -229,6 +252,15 @@ async def change_password(
 
     # Update password
     user.hashed_password = get_password_hash(password_data.new_password)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to commit password change: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update password. Please try again."
+        )
 
+    logger.info(f"Password changed successfully for user '{user.username}'")
     return {"message": "Password changed successfully"}

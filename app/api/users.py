@@ -3,6 +3,7 @@ User management API endpoints.
 
 Admin-only endpoints for managing users in multi-user mode.
 """
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -20,6 +21,8 @@ from app.core.auth import (
 from app.database import get_db
 from app.models import User
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 
@@ -27,7 +30,7 @@ class UserCreate(BaseModel):
     """Request to create a new user."""
     username: str
     password: str
-    email: Optional[str] = None
+    email: Optional[EmailStr] = None
     is_admin: bool = False
 
     @field_validator('username')
@@ -48,10 +51,18 @@ class UserCreate(BaseModel):
             raise ValueError('Password must be at least 8 characters')
         return v
 
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[EmailStr]) -> Optional[EmailStr]:
+        """Validate email length matches database constraint."""
+        if v is not None and len(str(v)) > 255:
+            raise ValueError('Email must be at most 255 characters')
+        return v
+
 
 class UserUpdate(BaseModel):
     """Request to update a user."""
-    email: Optional[str] = None
+    email: Optional[EmailStr] = None
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
@@ -61,6 +72,14 @@ class UserUpdate(BaseModel):
     def validate_password(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and len(v) < 8:
             raise ValueError('Password must be at least 8 characters')
+        return v
+
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[EmailStr]) -> Optional[EmailStr]:
+        """Validate email length matches database constraint."""
+        if v is not None and len(str(v)) > 255:
+            raise ValueError('Email must be at most 255 characters')
         return v
 
 
@@ -150,9 +169,18 @@ async def create_user(
         is_active=True
     )
     db.add(user)
-    await db.commit()
-    await db.refresh(user)
+    try:
+        await db.commit()
+        await db.refresh(user)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create user: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create user"
+        )
 
+    logger.info(f"User '{user.username}' created by admin '{admin.username}'")
     return UserResponse.model_validate(user)
 
 
@@ -243,8 +271,16 @@ async def update_user(
     for field, value in update_data.items():
         setattr(user, field, value)
 
-    await db.commit()
-    await db.refresh(user)
+    try:
+        await db.commit()
+        await db.refresh(user)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to update user {user_id}: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user"
+        )
 
     return UserResponse.model_validate(user)
 
@@ -291,4 +327,14 @@ async def delete_user(
         )
 
     await db.delete(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to delete user {user_id}: {type(e).__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user"
+        )
+
+    logger.warning(f"User '{user.username}' (ID:{user_id}) deleted by admin '{admin.username}'")
