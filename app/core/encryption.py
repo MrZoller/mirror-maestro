@@ -2,6 +2,7 @@ import base64
 import logging
 import os
 import stat
+import threading
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -16,22 +17,27 @@ class Encryption:
         # Lazily initialized to avoid filesystem writes at import time.
         self._key: Optional[bytes] = None
         self._cipher: Optional[Fernet] = None
+        self._lock = threading.Lock()
 
-    def _get_or_create_key(self) -> bytes:
-        """Get or create an encryption key."""
-        # Backwards-compatible defaults:
-        # - If ENCRYPTION_KEY is set, use it directly (recommended for containers).
-        # - Otherwise, if ENCRYPTION_KEY_PATH is set, read/write the key there.
-        # - Otherwise use ./data/encryption.key relative to the working directory.
-        env_key = os.getenv("ENCRYPTION_KEY")
+    def _get_or_create_key(self, env_key: Optional[str] = None, key_file: str = "./data/encryption.key") -> bytes:
+        """Get or create an encryption key.
+
+        Args:
+            env_key: Optional encryption key from ENCRYPTION_KEY environment variable
+            key_file: Path to encryption key file (from ENCRYPTION_KEY_PATH or default)
+        """
+        # Use provided env_key or fall back to configuration
+        if env_key is None:
+            from app.config import settings
+            env_key = settings.encryption_key_env
+            key_file = settings.encryption_key_path
+
         if env_key:
             # Fernet keys are already urlsafe-base64. Accept bytes or str.
             key = env_key.encode("utf-8")
             # Validate early with Fernet constructor.
             Fernet(key)
             return key
-
-        key_file = os.getenv("ENCRYPTION_KEY_PATH") or "./data/encryption.key"
 
         # Create data directory if it doesn't exist
         os.makedirs(os.path.dirname(key_file) or ".", exist_ok=True)
@@ -81,9 +87,13 @@ class Encryption:
             logger.warning(f"Could not verify permissions on encryption key file: {e}")
 
     def _get_cipher(self) -> Fernet:
+        # Double-checked locking pattern for thread-safe lazy initialization
         if self._cipher is None:
-            self._key = self._get_or_create_key()
-            self._cipher = Fernet(self._key)
+            with self._lock:
+                # Re-check after acquiring lock (another thread may have initialized it)
+                if self._cipher is None:
+                    self._key = self._get_or_create_key()
+                    self._cipher = Fernet(self._key)
         return self._cipher
 
     def encrypt(self, data: str) -> str:

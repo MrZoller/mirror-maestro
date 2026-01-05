@@ -55,7 +55,7 @@ async def test_pairs_create_list_update_delete(client, session_maker):
         "description": "d",
     }
     resp = await client.post("/api/pairs", json=payload)
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     pair_id = resp.json()["id"]
 
     resp = await client.get("/api/pairs")
@@ -96,7 +96,7 @@ async def test_pairs_delete_cascades_mirrors_and_group_defaults(client, session_
             "mirror_direction": "pull",
         },
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     pair_id = resp.json()["id"]
 
     async with session_maker() as s:
@@ -151,7 +151,7 @@ async def test_pairs_cannot_change_instances_when_mirrors_exist(client, session_
         "/api/pairs",
         json={"name": "pair-lock", "source_instance_id": src_id, "target_instance_id": tgt_id, "mirror_direction": "pull"},
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     pair_id = resp.json()["id"]
 
     async with session_maker() as s:
@@ -231,7 +231,7 @@ async def test_pairs_create_with_all_settings(client, session_maker):
             "description": "Test pair with all settings"
         },
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert data["mirror_direction"] == "pull"
     assert data["mirror_overwrite_diverged"] is False
@@ -334,7 +334,7 @@ async def test_pairs_create_with_push_direction(client, session_maker):
             "mirror_direction": "push",
         },
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     assert resp.json()["mirror_direction"] == "push"
 
 
@@ -388,7 +388,7 @@ async def test_pairs_bidirectional_mirroring(client, session_maker):
             "description": "Push changes from A to B",
         },
     )
-    assert resp_ab.status_code == 200
+    assert resp_ab.status_code == 201
     pair_ab = resp_ab.json()
     assert pair_ab["source_instance_id"] == instance_a
     assert pair_ab["target_instance_id"] == instance_b
@@ -409,7 +409,7 @@ async def test_pairs_bidirectional_mirroring(client, session_maker):
             "description": "Pull changes from B to A",
         },
     )
-    assert resp_ba.status_code == 200
+    assert resp_ba.status_code == 201
     pair_ba = resp_ba.json()
     assert pair_ba["source_instance_id"] == instance_b
     assert pair_ba["target_instance_id"] == instance_a
@@ -458,7 +458,7 @@ async def test_pairs_bidirectional_with_mirrors(client, session_maker):
             "mirror_direction": "push",
         },
     )
-    assert resp_ab.status_code == 200
+    assert resp_ab.status_code == 201
     pair_ab_id = resp_ab.json()["id"]
 
     resp_ba = await client.post(
@@ -470,7 +470,7 @@ async def test_pairs_bidirectional_with_mirrors(client, session_maker):
             "mirror_direction": "push",
         },
     )
-    assert resp_ba.status_code == 200
+    assert resp_ba.status_code == 201
     pair_ba_id = resp_ba.json()["id"]
 
     # Add mirrors to both pairs
@@ -550,7 +550,7 @@ async def test_pairs_update_to_self_referential_rejected(client, session_maker):
             "target_instance_id": instance_b,
         },
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     pair_id = resp.json()["id"]
 
     # Try to update target to match source
@@ -578,7 +578,7 @@ async def test_pairs_update_creates_bidirectional_warning(client, session_maker)
             "target_instance_id": instance_b,
         },
     )
-    assert resp_ab.status_code == 200
+    assert resp_ab.status_code == 201
     pair_ab_id = resp_ab.json()["id"]
 
     # Create C → A pair (unrelated)
@@ -590,7 +590,7 @@ async def test_pairs_update_creates_bidirectional_warning(client, session_maker)
             "target_instance_id": instance_a,
         },
     )
-    assert resp_ca.status_code == 200
+    assert resp_ca.status_code == 201
     pair_ca_id = resp_ca.json()["id"]
     assert resp_ca.json().get("warnings") is None  # No warning (not a reverse)
 

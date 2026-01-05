@@ -10,6 +10,7 @@ When MULTI_USER_ENABLED=true:
   - Supports multiple users with admin/regular roles
   - Initial admin created from INITIAL_ADMIN_USERNAME/PASSWORD
 """
+import logging
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, Union
@@ -23,6 +24,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 from app.database import get_db
 
 
@@ -111,6 +114,12 @@ def _verify_legacy_credentials(credentials: HTTPBasicCredentials) -> str:
     )
 
     if not (correct_username and correct_password):
+        # Log authentication failure for security monitoring
+        from app.core.logging_utils import sanitize_for_logging
+        logger.warning(
+            f"Authentication failed for user '{sanitize_for_logging(credentials.username, max_length=50)}' "
+            f"(legacy mode)"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -129,6 +138,12 @@ async def _verify_jwt_token(
 
     token_data = decode_access_token(token)
     if token_data is None:
+        # Log authentication failure for security monitoring
+        from app.core.logging_utils import redact_token
+        logger.warning(
+            f"JWT authentication failed - invalid or expired token "
+            f"(token: {redact_token(token, visible_chars=4)})"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
@@ -142,6 +157,11 @@ async def _verify_jwt_token(
     user = result.scalar_one_or_none()
 
     if user is None:
+        # Log authentication failure for security monitoring
+        logger.warning(
+            f"JWT authentication failed - user not found or inactive "
+            f"(user_id: {token_data.user_id}, username: {token_data.username})"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
@@ -250,6 +270,11 @@ async def require_admin(
         return CurrentUser(id=0, username=current_user, is_admin=True)
 
     if not current_user.is_admin:
+        # Log authorization failure for security monitoring
+        logger.warning(
+            f"Authorization failed - admin privileges required "
+            f"(user_id: {current_user.id}, username: {current_user.username})"
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"

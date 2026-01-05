@@ -38,6 +38,7 @@ class RateLimiter:
         self.max_retries = max_retries
         self.operation_count = 0
         self.start_time: datetime | None = None
+        self._lock = threading.Lock()
 
     async def delay(self) -> None:
         """Apply configured delay between operations."""
@@ -51,7 +52,8 @@ class RateLimiter:
 
     def record_operation(self) -> None:
         """Record that an operation was performed."""
-        self.operation_count += 1
+        with self._lock:
+            self.operation_count += 1
 
     def get_metrics(self) -> dict[str, Any]:
         """
@@ -326,17 +328,20 @@ class BatchOperationTracker:
         self.failed = 0
         self.errors: list[str] = []
         self.start_time = datetime.utcnow()
+        self._lock = threading.Lock()
 
     def record_success(self) -> None:
         """Record a successful operation."""
-        self.processed += 1
-        self.succeeded += 1
+        with self._lock:
+            self.processed += 1
+            self.succeeded += 1
 
     def record_failure(self, error_msg: str) -> None:
         """Record a failed operation."""
-        self.processed += 1
-        self.failed += 1
-        self.errors.append(error_msg)
+        with self._lock:
+            self.processed += 1
+            self.failed += 1
+            self.errors.append(error_msg)
 
     def get_progress(self) -> dict[str, Any]:
         """

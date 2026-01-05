@@ -286,7 +286,7 @@ async def test_mirrors_create_pull_defaults_mirror_user_to_token_user(client, se
         "enabled": True,
     }
     resp = await client.post("/api/mirrors", json=payload)
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
 
     *_head, mirror_user_id = FakeGitLabClient.pull_calls[-1]
     assert mirror_user_id == 123
@@ -574,7 +574,7 @@ async def test_mirrors_create_gitlab_api_failure(client, session_maker, monkeypa
 
     # Set up fake client that fails
     class FailingGitLabClient:
-        def __init__(self, url: str, encrypted_token: str):
+        def __init__(self, url: str, encrypted_token: str, timeout: int = 60):
             pass
 
         def create_pull_mirror(self, *args, **kwargs):
@@ -739,7 +739,7 @@ async def test_mirrors_update_gitlab_api_failure(client, session_maker, monkeypa
     from app.api import mirrors as mod
 
     class FailingGitLabClient:
-        def __init__(self, url: str, encrypted_token: str):
+        def __init__(self, url: str, encrypted_token: str, timeout: int = 60):
             pass
 
         def update_mirror(self, *args, **kwargs):
@@ -819,7 +819,7 @@ async def test_mirrors_delete_gitlab_api_failure_still_deletes_db(client, sessio
     from app.api import mirrors as mod
 
     class FailingGitLabClient:
-        def __init__(self, url: str, encrypted_token: str):
+        def __init__(self, url: str, encrypted_token: str, timeout: int = 60):
             pass
 
         def delete_mirror(self, project_id: int, mirror_id: int):
@@ -863,7 +863,7 @@ async def test_mirrors_trigger_update_gitlab_api_failure(client, session_maker, 
     from app.api import mirrors as mod
 
     class FailingGitLabClient:
-        def __init__(self, url: str, encrypted_token: str):
+        def __init__(self, url: str, encrypted_token: str, timeout: int = 60):
             pass
 
         def trigger_mirror_update(self, project_id: int, mirror_id: int):
