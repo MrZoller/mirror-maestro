@@ -286,7 +286,7 @@ async def test_mirrors_create_pull_defaults_mirror_user_to_token_user(client, se
         "enabled": True,
     }
     resp = await client.post("/api/mirrors", json=payload)
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
 
     *_head, mirror_user_id = FakeGitLabClient.pull_calls[-1]
     assert mirror_user_id == 123
