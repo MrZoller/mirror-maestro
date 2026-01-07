@@ -11,7 +11,11 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="shortcut icon" href="/favicon.ico">
     <link rel="stylesheet" href="/static/css/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    {% if use_local_vendor_assets %}
+    <script src="/static/vendor/chart.umd.min.js"></script>
+    {% else %}
+    <script src="{{ cdn_chartjs_url }}"></script>
+    {% endif %}
 </head>
 <body>
     <header>
@@ -1866,7 +1870,11 @@ Safe and controlled cleanup</code></pre>
     </div>
 
     <script src="/static/js/app.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+    {% if use_local_vendor_assets %}
+    <script src="/static/vendor/d3.min.js"></script>
+    {% else %}
+    <script src="{{ cdn_d3js_url }}"></script>
+    {% endif %}
     <script src="/static/js/topology.js"></script>
     <script>
         // Update stats on dashboard
