@@ -86,7 +86,62 @@ If your GitLab instance has the Container Registry disabled:
 
 The pipeline will push Docker images to `$CI_REGISTRY_IMAGE` (e.g., `registry.gitlab.com/yourname/mirror-maestro`).
 
-### 4. Air-Gapped / Restricted Network Configuration
+### 4. Push to Alternative Docker Registry (Nexus, Harbor, etc.)
+
+By default, the pipeline pushes Docker images to **GitLab Container Registry**. To push to a different registry (Nexus, Harbor, Docker Hub, etc.), override GitLab's predefined variables.
+
+**Settings > CI/CD > Variables** - Add these variables:
+
+| Variable | Example Value (Nexus) | Description |
+|----------|----------------------|-------------|
+| `CI_REGISTRY` | `nexus.company.com:5000` | Docker registry URL |
+| `CI_REGISTRY_USER` | `deploy-user` | Registry username |
+| `CI_REGISTRY_PASSWORD` | `deploy-password` | Registry password (mark as **Masked**) |
+| `CI_REGISTRY_IMAGE` | `nexus.company.com:5000/mirror-maestro` | Full image path in registry |
+
+**Example configurations:**
+
+**Nexus Docker Registry**:
+```bash
+CI_REGISTRY=nexus.company.com:5000
+CI_REGISTRY_USER=deploy-user
+CI_REGISTRY_PASSWORD=xxxxxxxx  # Masked
+CI_REGISTRY_IMAGE=nexus.company.com:5000/mirror-maestro
+```
+
+**Harbor Registry**:
+```bash
+CI_REGISTRY=harbor.company.com
+CI_REGISTRY_USER=robot$mirror-maestro
+CI_REGISTRY_PASSWORD=xxxxxxxx  # Masked
+CI_REGISTRY_IMAGE=harbor.company.com/library/mirror-maestro
+```
+
+**Docker Hub**:
+```bash
+CI_REGISTRY=docker.io
+CI_REGISTRY_USER=yourname
+CI_REGISTRY_PASSWORD=xxxxxxxx  # Masked
+CI_REGISTRY_IMAGE=docker.io/yourname/mirror-maestro
+```
+
+**Result**: The pipeline will push to your configured registry:
+- `nexus.company.com:5000/mirror-maestro:1.2.3`
+- `nexus.company.com:5000/mirror-maestro:1.2`
+- `nexus.company.com:5000/mirror-maestro:1`
+- `nexus.company.com:5000/mirror-maestro:latest`
+
+**Nexus Setup Notes**:
+
+If using Nexus, create a **Docker Hosted Repository**:
+1. Repository Type: `docker (hosted)`
+2. Name: `mirror-maestro` (or your preferred name)
+3. HTTP Port: `5000` (or your preferred port)
+4. Enable Docker V1 API: `false` (use V2 only)
+5. Realms: Enable "Docker Bearer Token Realm" in Nexus settings
+6. User: Create a deployment user with push permissions
+
+### 5. Air-Gapped / Restricted Network Configuration
 
 If your GitLab runners **cannot access the internet**, you need to configure local mirrors for all external dependencies. The pipeline supports this through CI/CD variables.
 
