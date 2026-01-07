@@ -95,9 +95,9 @@ If your GitLab runners **cannot access the internet**, you need to configure loc
 The pipeline needs to pull from these external sources:
 
 1. **Docker Images** (for CI jobs):
-   - `python:3.11`, `python:3.12`
-   - `docker:24`, `docker:24-dind`
-   - `registry.gitlab.com/gitlab-org/release-cli:latest`
+   - `python:3.11-alpine`, `python:3.12-alpine` (Alpine-based Python images)
+   - `docker:24`, `docker:24-dind` (Alpine-based Docker images)
+   - `registry.gitlab.com/gitlab-org/release-cli:latest` (Alpine-based)
 
 2. **Python Packages** (for pip install):
    - All packages from `requirements.txt` and `requirements-dev.txt`
@@ -106,6 +106,14 @@ The pipeline needs to pull from these external sources:
    - Ubuntu base image (`ubuntu:22.04`)
    - APT packages (python3.11, gcc, libpq-dev, etc.)
    - Python packages (from PyPI)
+
+**Important**: The pipeline uses **Alpine-based images** for CI jobs (test/build/release) to minimize mirror requirements. Only the application build uses Ubuntu. This means you need:
+
+- **Alpine APK mirrors** (for CI job images: python, docker, release-cli)
+- **Ubuntu APT mirrors** (for application Dockerfile build only)
+- **PyPI mirrors** (for Python packages)
+
+**Alternative**: If you prefer to use Debian/Ubuntu for CI jobs (e.g., for better compatibility), set the `CI_PYTHON_IMAGE` variable to `python:3.11-slim` or `python:3.12-slim`. This will require Debian APT mirrors instead of Alpine APK mirrors.
 
 #### Configure Local Mirrors
 
@@ -118,6 +126,7 @@ The pipeline needs to pull from these external sources:
 | `CI_PIP_INDEX_URL` | `http://nexus.company.com/repository/pypi-proxy/simple` | PyPI mirror for pip install in CI jobs |
 | `CI_PIP_TRUSTED_HOST` | `nexus.company.com` | Trusted host for HTTP PyPI mirror (no `http://` prefix) |
 | `CI_RELEASE_CLI_IMAGE` | `harbor.company.com/gitlab-org/release-cli:latest` | Local mirror of GitLab release-cli image |
+| `CI_PYTHON_IMAGE` | `python:3.11-alpine` | Python image variant (default: `python:3.11-alpine`; use `python:3.11-slim` for Debian) |
 | **Docker Build Configuration** | | |
 | `DOCKER_REGISTRY` | `harbor.company.com/proxy/` | Docker registry for base images in Dockerfile (include trailing slash) |
 | `APT_MIRROR` | `http://nexus.company.com/repository/ubuntu-proxy/ubuntu` | Ubuntu APT mirror (must include `/ubuntu` path) |
@@ -130,6 +139,13 @@ The pipeline needs to pull from these external sources:
 - All variables are **optional** - if not set, defaults to public registries/mirrors
 - Docker registry variables should include trailing slash: `harbor.company.com/proxy/`
 - APT mirror must include full path: `http://nexus.company.com/repository/ubuntu-proxy/ubuntu`
+
+**Alpine APK Packages**: The CI jobs install a few Alpine packages (`gcc`, `musl-dev`, `libffi-dev`) via `apk add`. For air-gapped environments, you need either:
+1. **Caching HTTP proxy** for `dl-cdn.alpinelinux.org` (simplest)
+2. **Local Alpine mirror** (set `/etc/apk/repositories` in custom image)
+3. **Pre-baked Docker images** with packages already installed (most secure)
+
+If Alpine APK access is problematic, use `CI_PYTHON_IMAGE=python:3.11-slim` to switch to Debian-based images (requires Debian APT mirrors instead).
 
 #### Example: Nexus Configuration
 
@@ -177,10 +193,14 @@ PIP_TRUSTED_HOST=nexus.company.com
 
 ```bash
 # Pull Docker images through Nexus
-docker pull nexus.company.com:5000/docker-proxy/python:3.11
-docker pull nexus.company.com:5000/docker-proxy/python:3.12
+docker pull nexus.company.com:5000/docker-proxy/python:3.11-alpine
+docker pull nexus.company.com:5000/docker-proxy/python:3.12-alpine
 docker pull nexus.company.com:5000/docker-proxy/docker:24
+docker pull nexus.company.com:5000/docker-proxy/docker:24-dind
 docker pull nexus.company.com:5000/docker-proxy/ubuntu:22.04
+
+# Mirror GitLab release-cli (if using separate GitLab registry proxy)
+docker pull nexus.company.com:5000/gitlab-registry-proxy/gitlab-org/release-cli:latest
 
 # Pre-download Python packages (uploads to Nexus on first request)
 pip install --index-url http://nexus.company.com:8081/repository/pypi-proxy/simple \
@@ -226,6 +246,48 @@ CI_RELEASE_CLI_IMAGE=harbor.company.com/gitlab-registry-proxy/gitlab-org/release
 DOCKER_REGISTRY=harbor.company.com/docker-hub-proxy/
 # ... (use Nexus for PyPI and APT as Harbor doesn't support those)
 ```
+
+#### Handling Alpine APK Packages
+
+The Alpine-based CI job images need to install build dependencies (`gcc`, `musl-dev`, `libffi-dev`) via `apk add`. Three options:
+
+**Option 1: HTTP Caching Proxy (Simplest)**
+
+Configure your network to cache `dl-cdn.alpinelinux.org` traffic:
+
+```bash
+# Example with Squid proxy (not Nexus/Harbor)
+http_proxy=http://proxy.company.com:3128 apk add gcc musl-dev libffi-dev
+```
+
+**Option 2: Custom Alpine Mirror**
+
+Set up a local Alpine mirror and configure GitLab runners to use it. Create a custom base image:
+
+```dockerfile
+# custom-python-alpine.Dockerfile
+FROM python:3.11-alpine
+RUN echo "http://alpine-mirror.company.com/v3.18/main" > /etc/apk/repositories && \
+    echo "http://alpine-mirror.company.com/v3.18/community" >> /etc/apk/repositories && \
+    apk add --no-cache gcc musl-dev libffi-dev
+```
+
+Then use `CI_PYTHON_IMAGE=registry.company.com/custom-python-alpine:3.11`.
+
+**Option 3: Switch to Debian (If Alpine is Problematic)**
+
+If managing Alpine APK packages is too complex, use Debian-based images:
+
+```bash
+# Set this CI/CD variable
+CI_PYTHON_IMAGE=python:3.11-slim
+```
+
+This switches from Alpine to Debian, requiring Debian APT mirrors instead. You'll need to configure:
+- Debian APT mirror in addition to Ubuntu APT mirror
+- Or use the same Ubuntu mirror (Debian packages often work)
+
+**Recommendation**: For most air-gapped environments, **Option 1** (HTTP caching proxy) or **Option 3** (switch to Debian) is simplest.
 
 ## Usage
 
