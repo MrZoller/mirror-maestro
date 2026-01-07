@@ -1,0 +1,282 @@
+# GitLab CI/CD Pipeline for Mirror Maestro
+#
+# This pipeline provides the same functionality as the GitHub Actions workflows:
+# - tests.yml: Run pytest on Python 3.11 and 3.12
+# - release.yml: Build and publish Docker images on version tags
+# - e2e-live-gitlab.yml: Manual E2E tests against live GitLab instances
+#
+# GitHub will ignore this file, allowing both CI/CD systems to coexist.
+
+stages:
+  - test
+  - build
+  - release
+
+# Default settings for all jobs
+default:
+  image: python:3.11
+  before_script:
+    - python -m pip install --upgrade pip
+
+# Cache pip packages to speed up subsequent runs
+.cache_template: &cache_template
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .cache/pip
+
+# ============================================================================
+# TEST STAGE
+# ============================================================================
+
+# Run tests on Python 3.11
+test:python-3.11:
+  stage: test
+  image: python:3.11
+  <<: *cache_template
+  script:
+    - pip install -r requirements.txt -r requirements-dev.txt
+    - python -m pytest -q
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
+
+# Run tests on Python 3.12
+test:python-3.12:
+  stage: test
+  image: python:3.12
+  <<: *cache_template
+  script:
+    - pip install -r requirements.txt -r requirements-dev.txt
+    - python -m pytest -q
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
+
+# Manual E2E tests against live GitLab instances
+# Equivalent to GitHub's workflow_dispatch in e2e-live-gitlab.yml
+test:e2e-live:
+  stage: test
+  image: python:3.12
+  <<: *cache_template
+  script:
+    - pip install -r requirements.txt -r requirements-dev.txt
+    - |
+      # Set test scope based on E2E_TEST_SCOPE variable (default: single)
+      TEST_SCOPE="${E2E_TEST_SCOPE:-single}"
+      case "$TEST_SCOPE" in
+        single)
+          MARKERS="-m 'live_gitlab and not dual_instance'"
+          ;;
+        dual)
+          MARKERS="-m dual_instance"
+          ;;
+        multi-project)
+          MARKERS="-m multi_project"
+          ;;
+        multi-group)
+          MARKERS="-m multi_group"
+          ;;
+        all)
+          MARKERS="-m live_gitlab"
+          ;;
+        *)
+          MARKERS="-m 'live_gitlab and not dual_instance'"
+          ;;
+      esac
+      echo "Running E2E tests with scope: $TEST_SCOPE (markers: $MARKERS)"
+      python -m pytest -v $MARKERS
+  variables:
+    # Hard opt-in guardrail
+    E2E_LIVE_GITLAB: "1"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: manual
+  # Configure these variables in GitLab CI/CD settings:
+  # - E2E_GITLAB_URL: GitLab instance 1 URL
+  # - E2E_GITLAB_GROUP_PATH: GitLab instance 1 group path
+  # - E2E_GITLAB_TOKEN: GitLab instance 1 access token (masked)
+  # - E2E_GITLAB_URL_2: GitLab instance 2 URL (for dual-instance tests)
+  # - E2E_GITLAB_GROUP_PATH_2: GitLab instance 2 group path
+  # - E2E_GITLAB_TOKEN_2: GitLab instance 2 access token (masked)
+  # - E2E_GITLAB_HTTP_USERNAME: HTTP username for PAT auth (default: oauth2)
+  # - E2E_GITLAB_MIRROR_TIMEOUT_S: Seconds to wait for mirror sync (default: 120)
+  # - E2E_TEST_SCOPE: Test scope (single, dual, multi-project, multi-group, all)
+
+# ============================================================================
+# BUILD STAGE
+# ============================================================================
+
+# Build multi-architecture Docker images and push to GitLab Container Registry
+# Only runs on version tags (v1.2.3)
+build:docker:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+    # Use GitLab Container Registry
+    IMAGE_NAME: $CI_REGISTRY_IMAGE
+  before_script:
+    # Install buildx for multi-arch builds
+    - apk add --no-cache git
+    - docker context create builder
+    - docker buildx create --use builder
+    - docker buildx inspect --bootstrap
+    # Login to GitLab Container Registry
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    # Extract version from tag (v1.2.3 -> 1.2.3)
+    - export VERSION=${CI_COMMIT_TAG#v}
+    - export MAJOR=$(echo $VERSION | cut -d. -f1)
+    - export MINOR=$(echo $VERSION | cut -d. -f1,2)
+
+    # Build and push multi-architecture image
+    - |
+      docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        --push \
+        --tag "$IMAGE_NAME:$VERSION" \
+        --tag "$IMAGE_NAME:$MINOR" \
+        --tag "$IMAGE_NAME:$MAJOR" \
+        --tag "$IMAGE_NAME:latest" \
+        --cache-from type=registry,ref=$IMAGE_NAME:buildcache \
+        --cache-to type=registry,ref=$IMAGE_NAME:buildcache,mode=max \
+        .
+
+    - echo "Successfully built and pushed image:"
+    - echo "  - $IMAGE_NAME:$VERSION"
+    - echo "  - $IMAGE_NAME:$MINOR"
+    - echo "  - $IMAGE_NAME:$MAJOR"
+    - echo "  - $IMAGE_NAME:latest"
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+  needs:
+    - test:python-3.11
+    - test:python-3.12
+
+# ============================================================================
+# RELEASE STAGE
+# ============================================================================
+
+# Create GitLab release with auto-generated changelog
+# Only runs on version tags (v1.2.3)
+release:gitlab:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  before_script:
+    - apk add --no-cache git
+  script:
+    # Generate changelog from commits since last tag
+    - |
+      PREVIOUS_TAG=$(git describe --tags --abbrev=0 $CI_COMMIT_TAG^ 2>/dev/null || echo "")
+      if [ -z "$PREVIOUS_TAG" ]; then
+        # First release - get all commits
+        CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
+      else
+        # Get commits since previous tag
+        CHANGELOG=$(git log ${PREVIOUS_TAG}..$CI_COMMIT_TAG --pretty=format:"- %s (%h)" --no-merges)
+      fi
+
+      # Save changelog to file
+      echo "$CHANGELOG" > CHANGELOG.txt
+
+      # Create release description
+      cat > RELEASE_DESCRIPTION.md <<EOF
+      ## Docker Image
+
+      Pull the image from GitLab Container Registry:
+
+      \`\`\`bash
+      docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+      \`\`\`
+
+      Or use the latest tag:
+
+      \`\`\`bash
+      docker pull $CI_REGISTRY_IMAGE:latest
+      \`\`\`
+
+      ## Quick Start
+
+      \`\`\`bash
+      # Create required directories and files
+      mkdir -p data ssl
+      cp .env.example .env
+
+      # Update docker-compose.yml to use the published image
+      # (replace 'build: .' with 'image: $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG')
+
+      # Start the application
+      docker-compose up -d
+      \`\`\`
+
+      See the [README]($CI_PROJECT_URL/-/blob/main/README.md) for full documentation.
+
+      ## What's Changed
+
+      $CHANGELOG
+      EOF
+
+      cat RELEASE_DESCRIPTION.md
+  release:
+    tag_name: '$CI_COMMIT_TAG'
+    name: 'Release $CI_COMMIT_TAG'
+    description: './RELEASE_DESCRIPTION.md'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+  needs:
+    - build:docker
+
+# ============================================================================
+# DOCUMENTATION
+# ============================================================================
+
+# How to use this pipeline:
+#
+# 1. AUTOMATIC TESTS (on every push/MR):
+#    - Push code to any branch
+#    - Tests run automatically on Python 3.11 and 3.12
+#
+# 2. MANUAL E2E TESTS:
+#    - Go to CI/CD > Pipelines > Run Pipeline
+#    - Click "Run pipeline" button
+#    - Configure variables (optional):
+#      - E2E_TEST_SCOPE: single, dual, multi-project, multi-group, or all
+#    - The E2E test job will appear as "manual" - click the play button
+#    - Requires pre-configured CI/CD variables (see test:e2e-live job)
+#
+# 3. RELEASE (on version tags):
+#    - Update version in pyproject.toml
+#    - Commit: git commit -m "chore: bump version to 1.2.3"
+#    - Create tag: git tag v1.2.3
+#    - Push: git push origin main --tags
+#    - Pipeline will:
+#      a. Run tests on Python 3.11 and 3.12
+#      b. Build multi-arch Docker images (amd64, arm64)
+#      c. Push to GitLab Container Registry with tags:
+#         - v1.2.3 (exact version)
+#         - 1.2 (minor version)
+#         - 1 (major version)
+#         - latest
+#      d. Create GitLab release with auto-generated changelog
+#
+# 4. REQUIRED CI/CD VARIABLES (for E2E tests):
+#    Settings > CI/CD > Variables:
+#    - E2E_GITLAB_URL (protected, not masked)
+#    - E2E_GITLAB_GROUP_PATH (protected, not masked)
+#    - E2E_GITLAB_TOKEN (protected, masked)
+#    - E2E_GITLAB_URL_2 (optional, for dual-instance tests)
+#    - E2E_GITLAB_GROUP_PATH_2 (optional, for dual-instance tests)
+#    - E2E_GITLAB_TOKEN_2 (optional, for dual-instance tests)
+#
+# 5. COEXISTENCE WITH GITHUB ACTIONS:
+#    - GitHub ignores .gitlab-ci.yml
+#    - GitLab ignores .github/workflows/
+#    - Both can run independently
+#    - Use GitHub Container Registry (ghcr.io) for GitHub releases
+#    - Use GitLab Container Registry ($CI_REGISTRY) for GitLab releases

@@ -1102,6 +1102,34 @@ This repo includes a manual workflow: `.github/workflows/e2e-live-gitlab.yml`.
 2. Select test scope: `single`, `dual`, `multi-project`, or `all`
 3. Optionally override URLs and group paths in the dispatch inputs
 
+### GitLab CI/CD Support
+
+Mirror Maestro includes full GitLab CI/CD pipeline support in `.gitlab-ci.yml`, which provides the same functionality as GitHub Actions:
+
+**Pipeline Stages:**
+- **Test**: Automatic tests on Python 3.11 and 3.12 (runs on push/MR/tags)
+- **E2E**: Manual end-to-end tests against live GitLab instances
+- **Build**: Multi-architecture Docker image builds (amd64/arm64) on version tags
+- **Release**: GitLab release creation with auto-generated changelog
+
+**Key Benefits:**
+- ✅ Coexists peacefully with GitHub Actions (GitHub ignores `.gitlab-ci.yml`)
+- ✅ Mirror this repo to your company's GitLab and build/test there
+- ✅ Pushes to GitLab Container Registry (`registry.gitlab.com/yourname/mirror-maestro`)
+- ✅ Same test coverage and multi-arch support as GitHub Actions
+
+**Quick Start:**
+1. Mirror this GitHub repo to your GitLab instance (you can use Mirror Maestro itself!)
+2. Configure CI/CD variables for E2E tests (Settings → CI/CD → Variables)
+3. Push code or create tags - pipeline runs automatically
+
+**Detailed Documentation:** See [docs/GITLAB_CICD.md](docs/GITLAB_CICD.md) for:
+- Complete setup instructions
+- CI/CD variable configuration
+- How to run manual E2E tests
+- Release creation process
+- Docker image usage from GitLab Container Registry
+
 ### Code Style
 The project follows standard Python conventions:
 - Use Black for code formatting
