@@ -1,6 +1,18 @@
-FROM python:3.11-slim
+ARG DOCKER_REGISTRY=""
+ARG APT_MIRROR=""
+ARG PIP_INDEX_URL="https://pypi.org/simple"
+ARG PIP_TRUSTED_HOST=""
+
+FROM ${DOCKER_REGISTRY}python:3.11-slim
 
 WORKDIR /app
+
+# Configure APT mirror if provided (for enterprise environments)
+RUN if [ -n "$APT_MIRROR" ]; then \
+        echo "Configuring APT mirror: $APT_MIRROR" && \
+        sed -i "s|http://deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+        sed -i "s|http://deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list; \
+    fi
 
 # Install system dependencies (including PostgreSQL client for pg_dump)
 RUN apt-get update && \
@@ -12,7 +24,13 @@ RUN apt-get update && \
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Configure pip for custom PyPI mirror (for enterprise environments)
+RUN if [ -n "$PIP_TRUSTED_HOST" ]; then \
+        pip install --no-cache-dir --index-url="$PIP_INDEX_URL" --trusted-host="$PIP_TRUSTED_HOST" -r requirements.txt; \
+    else \
+        pip install --no-cache-dir --index-url="$PIP_INDEX_URL" -r requirements.txt; \
+    fi
 
 # Copy application code
 COPY app ./app

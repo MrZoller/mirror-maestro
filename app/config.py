@@ -80,6 +80,13 @@ class Settings(BaseSettings):
     ssl_cert_path: str = "/etc/nginx/ssl/cert.pem"
     ssl_key_path: str = "/etc/nginx/ssl/key.pem"
 
+    # Frontend Asset Configuration
+    # For enterprise environments, set to empty string to use local copies from /static/vendor
+    # Local copies should be placed in app/static/vendor/ directory
+    cdn_chartjs_url: str = "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
+    cdn_d3js_url: str = "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"
+    use_local_vendor_assets: bool = False  # Set to true to use local copies from /static/vendor
+
     # Rate Limiting (for batch operations and imports)
     # Delay between GitLab API operations to avoid overwhelming instances
     gitlab_api_delay_ms: int = 200  # Delay in milliseconds (200ms = ~300 ops/min, well under 600/min limit)

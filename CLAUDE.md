@@ -2644,6 +2644,142 @@ metrics = service.get_metrics()
 cb_state = service.get_circuit_breaker_state("https://gitlab.example.com")
 ```
 
+### Enterprise Deployment with Local Artifact Mirrors
+
+**Overview**:
+
+Mirror Maestro v1.2.0+ supports deployment in air-gapped or enterprise environments where external internet access is restricted. All dependencies can be pulled from local mirrors such as Nexus, Artifactory, or Harbor.
+
+**Artifact Sources**:
+
+Mirror Maestro pulls artifacts from these external sources, all of which can be redirected to local mirrors:
+
+1. **Docker Images**: python:3.11-slim, postgres:16-alpine, nginx:1.25-alpine
+2. **APT Packages**: gcc, libpq-dev, postgresql-client (from deb.debian.org)
+3. **Python Packages**: All packages from requirements.txt (from PyPI)
+4. **Frontend Assets**: Chart.js and D3.js (from jsDelivr CDN)
+
+**Configuration via Environment Variables**:
+
+All mirror configuration is done through `.env` file:
+
+```bash
+# Docker Registry Mirror
+DOCKER_REGISTRY=harbor.company.com/proxy/
+
+# APT Package Mirror
+APT_MIRROR=http://nexus.company.com/repository/debian-proxy
+
+# Python Package Index Mirror
+PIP_INDEX_URL=http://nexus.company.com/repository/pypi-proxy/simple
+PIP_TRUSTED_HOST=nexus.company.com  # For HTTP mirrors
+
+# Frontend Vendor Assets
+USE_LOCAL_VENDOR_ASSETS=true  # Use local copies instead of CDN
+CDN_CHARTJS_URL=http://nexus.company.com/repository/raw/chart.js/...  # Or custom CDN
+CDN_D3JS_URL=http://nexus.company.com/repository/raw/d3/...  # Or custom CDN
+```
+
+**Build Process**:
+
+The Dockerfile and docker-compose.yml support build-time configuration:
+
+```dockerfile
+# Dockerfile uses ARG for configurable mirrors
+ARG DOCKER_REGISTRY=""
+ARG APT_MIRROR=""
+ARG PIP_INDEX_URL="https://pypi.org/simple"
+ARG PIP_TRUSTED_HOST=""
+
+FROM ${DOCKER_REGISTRY}python:3.11-slim
+
+# APT mirror configuration
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|http://deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
+
+# Pip configuration with custom index
+RUN pip install --index-url="$PIP_INDEX_URL" --trusted-host="$PIP_TRUSTED_HOST" -r requirements.txt
+```
+
+**Frontend Asset Management**:
+
+For air-gapped deployments:
+
+```bash
+# Download vendor assets (from internet-connected machine)
+./scripts/download-vendor-assets.sh
+
+# Copy to deployment: app/static/vendor/chart.umd.min.js, d3.min.js
+
+# Enable in .env
+USE_LOCAL_VENDOR_ASSETS=true
+```
+
+Templates conditionally load assets based on configuration:
+
+```jinja2
+{% if use_local_vendor_assets %}
+<script src="/static/vendor/chart.umd.min.js"></script>
+{% else %}
+<script src="{{ cdn_chartjs_url }}"></script>
+{% endif %}
+```
+
+**Settings Configuration** (app/config.py):
+
+```python
+class Settings(BaseSettings):
+    # Frontend Asset Configuration
+    cdn_chartjs_url: str = "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
+    cdn_d3js_url: str = "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"
+    use_local_vendor_assets: bool = False
+```
+
+**Deployment Steps**:
+
+1. Configure `.env` with local mirror URLs
+2. Download vendor assets (if using local copies)
+3. Build with: `docker-compose build`
+4. Deploy with: `docker-compose up -d`
+
+**Example Nexus Configuration**:
+
+- Docker proxy: Type=docker, Remote=https://registry-1.docker.io
+- APT proxy: Type=apt, Distribution=bookworm, Remote=http://deb.debian.org/debian
+- PyPI proxy: Type=pypi, Remote=https://pypi.org
+- Raw proxy (optional): Type=raw, Remote=https://cdn.jsdelivr.net
+
+**Verification**:
+
+```bash
+# Check Docker registry usage
+docker-compose pull  # Should show your registry
+
+# Check APT mirror during build
+docker-compose build --no-cache app 2>&1 | grep -i "apt\|mirror"
+
+# Check pip index during build
+docker-compose build --no-cache app 2>&1 | grep -i "pypi\|index"
+
+# Check frontend assets in browser console
+# Local: Should load from /static/vendor/
+# CDN: Should load from configured URL
+```
+
+**Documentation**:
+
+See [docs/ENTERPRISE_DEPLOYMENT.md](docs/ENTERPRISE_DEPLOYMENT.md) for comprehensive enterprise deployment guide, including detailed Nexus configuration examples and troubleshooting.
+
+**Key Files**:
+
+- `Dockerfile` - Build-time mirror configuration with ARG
+- `docker-compose.yml` - Passes mirror settings as build args
+- `app/config.py` - Frontend asset configuration
+- `app/templates/index.html` - Conditional asset loading
+- `scripts/download-vendor-assets.sh` - Vendor asset downloader
+- `.env.example` - Example mirror configuration
+
 ---
 
 This guide should serve as your comprehensive reference when working on the GitLab Mirror Wizard codebase. Follow these patterns and conventions to maintain consistency and quality across the project.
