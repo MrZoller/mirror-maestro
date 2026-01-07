@@ -2104,15 +2104,48 @@ async def list_mirrors(
 
 ## CI/CD and Distribution
 
+### Overview
+
+Mirror Maestro supports both **GitHub Actions** and **GitLab CI/CD** pipelines for continuous integration and distribution:
+
+- **GitHub Actions**: Configured in `.github/workflows/*.yml` (pushes to GitHub Container Registry)
+- **GitLab CI/CD**: Configured in `.gitlab-ci.yml` (pushes to GitLab Container Registry)
+
+Both systems can coexist peacefully - GitHub ignores `.gitlab-ci.yml` and GitLab ignores `.github/workflows/`. This allows you to mirror the repository between platforms and build/test in both environments.
+
 ### GitHub Workflows
 
-The project uses GitHub Actions for continuous integration and distribution:
+GitHub Actions workflows provide CI/CD for the primary GitHub repository:
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
 | Tests | `tests.yml` | Push/PR to any branch | Run pytest on Python 3.11 and 3.12 |
 | Live GitLab E2E | `e2e-live-gitlab.yml` | Manual dispatch | Run E2E tests against real GitLab instances |
 | Release | `release.yml` | Tag push (`v*.*.*`) | Build/push Docker images, create GitHub release |
+
+### GitLab CI/CD Pipeline
+
+GitLab CI/CD pipeline (`.gitlab-ci.yml`) mirrors GitHub Actions functionality:
+
+| Stage | Job | Trigger | Purpose |
+|-------|-----|---------|---------|
+| **test** | `test:python-3.11` | Push/MR/Tag | Run pytest on Python 3.11 |
+| **test** | `test:python-3.12` | Push/MR/Tag | Run pytest on Python 3.12 |
+| **test** | `test:e2e-live` | Manual | Run E2E tests against live GitLab instances |
+| **build** | `build:docker` | Tag push (`v*.*.*`) | Build multi-arch Docker images, push to GitLab Container Registry |
+| **release** | `release:gitlab` | Tag push (`v*.*.*`) | Create GitLab release with auto-generated changelog |
+
+**Container Registries**:
+- GitHub: `ghcr.io/mrzoller/mirror-maestro:tag`
+- GitLab: `registry.gitlab.com/yourname/mirror-maestro:tag`
+
+**Key Differences**:
+- GitLab uses stages/jobs instead of workflows
+- GitLab has built-in Container Registry (no additional configuration needed)
+- GitLab E2E tests are manual jobs (click play button in pipeline)
+- Both use identical test suites and build processes
+
+**Setup**: See [docs/GITLAB_CICD.md](docs/GITLAB_CICD.md) for detailed GitLab CI/CD setup instructions.
 
 ### Release Workflow
 
