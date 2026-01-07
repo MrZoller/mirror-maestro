@@ -3,30 +3,44 @@ ARG APT_MIRROR=""
 ARG PIP_INDEX_URL="https://pypi.org/simple"
 ARG PIP_TRUSTED_HOST=""
 
-FROM ${DOCKER_REGISTRY}python:3.11-slim
+FROM ${DOCKER_REGISTRY}ubuntu:22.04
 
 # Re-declare build args after FROM to make them available in build stage
 ARG APT_MIRROR=""
 ARG PIP_INDEX_URL="https://pypi.org/simple"
 ARG PIP_TRUSTED_HOST=""
 
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
 WORKDIR /app
 
 # Configure APT mirror if provided (for enterprise environments)
-# Replaces the full base URL including /debian path
+# Ubuntu uses /ubuntu path, replaces both archive and security URLs
 RUN if [ -n "$APT_MIRROR" ]; then \
         echo "Configuring APT mirror: $APT_MIRROR" && \
-        sed -i "s|http://deb.debian.org/debian|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-        sed -i "s|http://deb.debian.org/debian|$APT_MIRROR|g" /etc/apt/sources.list; \
+        sed -i "s|http://archive.ubuntu.com/ubuntu|$APT_MIRROR|g" /etc/apt/sources.list && \
+        sed -i "s|http://security.ubuntu.com/ubuntu|$APT_MIRROR|g" /etc/apt/sources.list; \
     fi
 
-# Install system dependencies (including PostgreSQL client for pg_dump)
+# Install Python 3.11 and system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3.11-dev \
+    python3-pip \
     gcc \
     libpq-dev \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
+
+# Make python3.11 the default python3
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Upgrade pip
+RUN python3.11 -m pip install --upgrade pip
 
 # Copy requirements first for better caching
 COPY requirements.txt .
