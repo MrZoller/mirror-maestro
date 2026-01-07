@@ -284,6 +284,9 @@ async def root(request: Request):
             "title": settings.app_title,
             "auth_enabled": settings.auth_enabled,
             "multi_user_enabled": settings.multi_user_enabled,
+            "use_local_vendor_assets": settings.use_local_vendor_assets,
+            "cdn_chartjs_url": settings.cdn_chartjs_url,
+            "cdn_d3js_url": settings.cdn_d3js_url,
         },
     )
 

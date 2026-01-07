@@ -79,3 +79,6 @@ ssl/
 
 # nginx generated configuration (keep templates only)
 nginx/nginx.conf
+
+# Vendor assets (downloaded locally for air-gapped deployments)
+app/static/vendor/
