@@ -577,6 +577,41 @@ For production monitoring, consider:
 - **Logs**: Configure log aggregation for the `app` container
 - **Metrics**: Monitor request latency, error rates, and sync job status
 
+#### Enterprise Deployment with Local Artifact Mirrors
+
+**New in v1.2.0**: Mirror Maestro supports deployment in air-gapped or enterprise environments where external internet access is restricted.
+
+All dependencies can be pulled from local mirrors (Nexus, Artifactory, Harbor) instead of public repositories:
+
+- **Docker Images**: Redirect to private Docker registry
+- **APT Packages**: Use internal Ubuntu mirror
+- **Python Packages**: Use internal PyPI mirror
+- **Frontend Assets**: Use local copies or custom CDN
+
+**Quick Configuration**:
+
+```bash
+# In .env file
+DOCKER_REGISTRY=harbor.company.com/proxy/
+APT_MIRROR=http://nexus.company.com/repository/ubuntu-proxy/ubuntu
+PIP_INDEX_URL=http://nexus.company.com/repository/pypi-proxy/simple
+PIP_TRUSTED_HOST=nexus.company.com
+USE_LOCAL_VENDOR_ASSETS=true  # Use local Chart.js/D3.js copies
+```
+
+**For air-gapped deployments**, download frontend vendor assets:
+
+```bash
+./scripts/download-vendor-assets.sh  # Run on internet-connected machine
+# Copy app/static/vendor/ directory to your deployment
+```
+
+**Complete Documentation**: See [docs/ENTERPRISE_DEPLOYMENT.md](docs/ENTERPRISE_DEPLOYMENT.md) for:
+- Detailed Nexus/Artifactory configuration examples
+- Step-by-step deployment guide
+- Troubleshooting common issues
+- SSL/TLS certificate handling for internal mirrors
+
 ## Usage Guide
 
 ### 1. Add GitLab Instances
