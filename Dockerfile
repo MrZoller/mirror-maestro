@@ -5,13 +5,19 @@ ARG PIP_TRUSTED_HOST=""
 
 FROM ${DOCKER_REGISTRY}python:3.11-slim
 
+# Re-declare build args after FROM to make them available in build stage
+ARG APT_MIRROR=""
+ARG PIP_INDEX_URL="https://pypi.org/simple"
+ARG PIP_TRUSTED_HOST=""
+
 WORKDIR /app
 
 # Configure APT mirror if provided (for enterprise environments)
+# Replaces the full base URL including /debian path
 RUN if [ -n "$APT_MIRROR" ]; then \
         echo "Configuring APT mirror: $APT_MIRROR" && \
-        sed -i "s|http://deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-        sed -i "s|http://deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list; \
+        sed -i "s|http://deb.debian.org/debian|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+        sed -i "s|http://deb.debian.org/debian|$APT_MIRROR|g" /etc/apt/sources.list; \
     fi
 
 # Install system dependencies (including PostgreSQL client for pg_dump)

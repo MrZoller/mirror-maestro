@@ -74,7 +74,7 @@ This will prefix all Docker image names:
 
 ### APT Package Mirror
 
-**Public Default**: `http://deb.debian.org`
+**Public Default**: `http://deb.debian.org/debian`
 
 **Local Mirror Setup**:
 
@@ -82,10 +82,13 @@ This will prefix all Docker image names:
 2. Set the `APT_MIRROR` environment variable in `.env`:
 
 ```bash
-APT_MIRROR=http://nexus.company.com/repository/debian-proxy
+# IMPORTANT: Include the full path including /debian
+APT_MIRROR=http://nexus.company.com/repository/debian-proxy/debian
 ```
 
-This replaces the default Debian mirror in the container's `sources.list` during build.
+This replaces `http://deb.debian.org/debian` in the container's `sources.list` during build.
+
+**Note**: The `APT_MIRROR` value must include the full repository path (including `/debian`). The Dockerfile replaces the entire base URL `http://deb.debian.org/debian` with your mirror URL.
 
 ### Python Package Index (PyPI) Mirror
 
@@ -177,7 +180,7 @@ AUTH_PASSWORD=<secure-password>
 
 # Enterprise artifact mirrors
 DOCKER_REGISTRY=harbor.company.com/proxy/
-APT_MIRROR=http://nexus.company.com/repository/debian-proxy
+APT_MIRROR=http://nexus.company.com/repository/debian-proxy/debian
 PIP_INDEX_URL=http://nexus.company.com/repository/pypi-proxy/simple
 PIP_TRUSTED_HOST=nexus.company.com
 USE_LOCAL_VENDOR_ASSETS=true
@@ -257,7 +260,7 @@ Here's how to configure Sonatype Nexus as your artifact mirror.
 
 2. **Configure in `.env`**:
    ```bash
-   APT_MIRROR=http://nexus.company.com/repository/debian-proxy
+   APT_MIRROR=http://nexus.company.com/repository/debian-proxy/debian
    ```
 
 ### 3. PyPI Repository Proxy
