@@ -593,7 +593,7 @@ All dependencies can be pulled from local mirrors (Nexus, Artifactory, Harbor) i
 ```bash
 # In .env file
 DOCKER_REGISTRY=harbor.company.com/proxy/
-APT_MIRROR=http://nexus.company.com/repository/debian-proxy
+APT_MIRROR=http://nexus.company.com/repository/debian-proxy/debian
 PIP_INDEX_URL=http://nexus.company.com/repository/pypi-proxy/simple
 PIP_TRUSTED_HOST=nexus.company.com
 USE_LOCAL_VENDOR_ASSETS=true  # Use local Chart.js/D3.js copies

@@ -2667,8 +2667,8 @@ All mirror configuration is done through `.env` file:
 # Docker Registry Mirror
 DOCKER_REGISTRY=harbor.company.com/proxy/
 
-# APT Package Mirror
-APT_MIRROR=http://nexus.company.com/repository/debian-proxy
+# APT Package Mirror (must include /debian path)
+APT_MIRROR=http://nexus.company.com/repository/debian-proxy/debian
 
 # Python Package Index Mirror
 PIP_INDEX_URL=http://nexus.company.com/repository/pypi-proxy/simple
