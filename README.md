@@ -584,7 +584,7 @@ For production monitoring, consider:
 All dependencies can be pulled from local mirrors (Nexus, Artifactory, Harbor) instead of public repositories:
 
 - **Docker Images**: Redirect to private Docker registry
-- **APT Packages**: Use internal Debian mirror
+- **APT Packages**: Use internal Ubuntu mirror
 - **Python Packages**: Use internal PyPI mirror
 - **Frontend Assets**: Use local copies or custom CDN
 
@@ -593,7 +593,7 @@ All dependencies can be pulled from local mirrors (Nexus, Artifactory, Harbor) i
 ```bash
 # In .env file
 DOCKER_REGISTRY=harbor.company.com/proxy/
-APT_MIRROR=http://nexus.company.com/repository/debian-proxy/debian
+APT_MIRROR=http://nexus.company.com/repository/ubuntu-proxy/ubuntu
 PIP_INDEX_URL=http://nexus.company.com/repository/pypi-proxy/simple
 PIP_TRUSTED_HOST=nexus.company.com
 USE_LOCAL_VENDOR_ASSETS=true  # Use local Chart.js/D3.js copies

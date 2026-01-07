@@ -21,12 +21,12 @@ This guide explains how to deploy Mirror Maestro in air-gapped or enterprise env
 Mirror Maestro pulls artifacts from the following external sources:
 
 1. **Docker Images**:
-   - `python:3.11-slim` (base application image)
+   - `ubuntu:22.04` (base application image)
    - `postgres:16-alpine` (database)
    - `nginx:1.25-alpine` (reverse proxy)
 
-2. **APT Packages** (Debian packages in the Docker build):
-   - gcc, libpq-dev, postgresql-client
+2. **APT Packages** (Ubuntu packages in the Docker build):
+   - python3.11, python3.11-dev, gcc, libpq-dev, postgresql-client
 
 3. **Python Packages** (from PyPI):
    - See `requirements.txt` for the full list
@@ -42,7 +42,7 @@ All of these can be redirected to use local mirrors.
 - Local artifact repository (Nexus, Artifactory, Harbor, etc.)
 - The following repositories configured in your artifact manager:
   - Docker registry proxy
-  - Debian/APT repository proxy
+  - Ubuntu/APT repository proxy
   - PyPI repository proxy
   - Raw/generic repository (for frontend assets, optional)
 
@@ -68,27 +68,27 @@ DOCKER_REGISTRY=nexus.company.com:5000/
 ```
 
 This will prefix all Docker image names:
-- `python:3.11-slim` → `harbor.company.com/proxy/python:3.11-slim`
+- `ubuntu:22.04` → `harbor.company.com/proxy/ubuntu:22.04`
 - `postgres:16-alpine` → `harbor.company.com/proxy/postgres:16-alpine`
 - `nginx:1.25-alpine` → `harbor.company.com/proxy/nginx:1.25-alpine`
 
 ### APT Package Mirror
 
-**Public Default**: `http://deb.debian.org/debian`
+**Public Default**: `http://archive.ubuntu.com/ubuntu`
 
 **Local Mirror Setup**:
 
-1. Configure a Debian/APT repository proxy in your artifact manager
+1. Configure an Ubuntu/APT repository proxy in your artifact manager
 2. Set the `APT_MIRROR` environment variable in `.env`:
 
 ```bash
-# IMPORTANT: Include the full path including /debian
-APT_MIRROR=http://nexus.company.com/repository/debian-proxy/debian
+# IMPORTANT: Include the full path including /ubuntu
+APT_MIRROR=http://nexus.company.com/repository/ubuntu-proxy/ubuntu
 ```
 
-This replaces `http://deb.debian.org/debian` in the container's `sources.list` during build.
+This replaces `http://archive.ubuntu.com/ubuntu` and `http://security.ubuntu.com/ubuntu` in the container's `sources.list` during build.
 
-**Note**: The `APT_MIRROR` value must include the full repository path (including `/debian`). The Dockerfile replaces the entire base URL `http://deb.debian.org/debian` with your mirror URL.
+**Note**: The `APT_MIRROR` value must include the full repository path (including `/ubuntu`). The Dockerfile replaces both the main archive URL and the security URL with your mirror URL. The base image is Ubuntu 22.04 (Jammy Jellyfish).
 
 ### Python Package Index (PyPI) Mirror
 
@@ -180,7 +180,7 @@ AUTH_PASSWORD=<secure-password>
 
 # Enterprise artifact mirrors
 DOCKER_REGISTRY=harbor.company.com/proxy/
-APT_MIRROR=http://nexus.company.com/repository/debian-proxy/debian
+APT_MIRROR=http://nexus.company.com/repository/ubuntu-proxy/ubuntu
 PIP_INDEX_URL=http://nexus.company.com/repository/pypi-proxy/simple
 PIP_TRUSTED_HOST=nexus.company.com
 USE_LOCAL_VENDOR_ASSETS=true
@@ -254,13 +254,13 @@ Here's how to configure Sonatype Nexus as your artifact mirror.
 
 1. **Create APT Proxy Repository**:
    - Type: apt (proxy)
-   - Name: debian-proxy
-   - Distribution: bookworm (Debian 12, for Python 3.11-slim)
-   - Remote storage: http://deb.debian.org/debian
+   - Name: ubuntu-proxy
+   - Distribution: jammy (Ubuntu 22.04)
+   - Remote storage: http://archive.ubuntu.com/ubuntu
 
 2. **Configure in `.env`**:
    ```bash
-   APT_MIRROR=http://nexus.company.com/repository/debian-proxy/debian
+   APT_MIRROR=http://nexus.company.com/repository/ubuntu-proxy/ubuntu
    ```
 
 ### 3. PyPI Repository Proxy

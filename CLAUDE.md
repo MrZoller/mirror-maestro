@@ -2654,8 +2654,8 @@ Mirror Maestro v1.2.0+ supports deployment in air-gapped or enterprise environme
 
 Mirror Maestro pulls artifacts from these external sources, all of which can be redirected to local mirrors:
 
-1. **Docker Images**: python:3.11-slim, postgres:16-alpine, nginx:1.25-alpine
-2. **APT Packages**: gcc, libpq-dev, postgresql-client (from deb.debian.org)
+1. **Docker Images**: ubuntu:22.04, postgres:16-alpine, nginx:1.25-alpine
+2. **APT Packages**: python3.11, python3.11-dev, gcc, libpq-dev, postgresql-client (from archive.ubuntu.com)
 3. **Python Packages**: All packages from requirements.txt (from PyPI)
 4. **Frontend Assets**: Chart.js and D3.js (from jsDelivr CDN)
 
@@ -2667,8 +2667,8 @@ All mirror configuration is done through `.env` file:
 # Docker Registry Mirror
 DOCKER_REGISTRY=harbor.company.com/proxy/
 
-# APT Package Mirror (must include /debian path)
-APT_MIRROR=http://nexus.company.com/repository/debian-proxy/debian
+# Ubuntu APT Package Mirror (must include /ubuntu path)
+APT_MIRROR=http://nexus.company.com/repository/ubuntu-proxy/ubuntu
 
 # Python Package Index Mirror
 PIP_INDEX_URL=http://nexus.company.com/repository/pypi-proxy/simple
@@ -2691,12 +2691,20 @@ ARG APT_MIRROR=""
 ARG PIP_INDEX_URL="https://pypi.org/simple"
 ARG PIP_TRUSTED_HOST=""
 
-FROM ${DOCKER_REGISTRY}python:3.11-slim
+FROM ${DOCKER_REGISTRY}ubuntu:22.04
 
-# APT mirror configuration
+# Re-declare build args after FROM
+ARG APT_MIRROR=""
+ARG PIP_INDEX_URL="https://pypi.org/simple"
+ARG PIP_TRUSTED_HOST=""
+
+# APT mirror configuration (Ubuntu)
 RUN if [ -n "$APT_MIRROR" ]; then \
-        sed -i "s|http://deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+        sed -i "s|http://archive.ubuntu.com/ubuntu|$APT_MIRROR|g" /etc/apt/sources.list; \
     fi
+
+# Install Python 3.11 and pip
+RUN apt-get update && apt-get install -y python3.11 python3-pip
 
 # Pip configuration with custom index
 RUN pip install --index-url="$PIP_INDEX_URL" --trusted-host="$PIP_TRUSTED_HOST" -r requirements.txt
@@ -2746,7 +2754,7 @@ class Settings(BaseSettings):
 **Example Nexus Configuration**:
 
 - Docker proxy: Type=docker, Remote=https://registry-1.docker.io
-- APT proxy: Type=apt, Distribution=bookworm, Remote=http://deb.debian.org/debian
+- APT proxy: Type=apt, Distribution=jammy, Remote=http://archive.ubuntu.com/ubuntu
 - PyPI proxy: Type=pypi, Remote=https://pypi.org
 - Raw proxy (optional): Type=raw, Remote=https://cdn.jsdelivr.net
 
