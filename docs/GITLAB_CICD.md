@@ -86,6 +86,147 @@ If your GitLab instance has the Container Registry disabled:
 
 The pipeline will push Docker images to `$CI_REGISTRY_IMAGE` (e.g., `registry.gitlab.com/yourname/mirror-maestro`).
 
+### 4. Air-Gapped / Restricted Network Configuration
+
+If your GitLab runners **cannot access the internet**, you need to configure local mirrors for all external dependencies. The pipeline supports this through CI/CD variables.
+
+#### Required Mirrors
+
+The pipeline needs to pull from these external sources:
+
+1. **Docker Images** (for CI jobs):
+   - `python:3.11`, `python:3.12`
+   - `docker:24`, `docker:24-dind`
+   - `registry.gitlab.com/gitlab-org/release-cli:latest`
+
+2. **Python Packages** (for pip install):
+   - All packages from `requirements.txt` and `requirements-dev.txt`
+
+3. **Docker Build Dependencies** (during image build):
+   - Ubuntu base image (`ubuntu:22.04`)
+   - APT packages (python3.11, gcc, libpq-dev, etc.)
+   - Python packages (from PyPI)
+
+#### Configure Local Mirrors
+
+**Settings > CI/CD > Variables** - Add these variables:
+
+| Variable | Example Value | Description |
+|----------|---------------|-------------|
+| **CI Job Configuration** | | |
+| `CI_DOCKER_REGISTRY` | `harbor.company.com/proxy/` | Docker registry mirror for CI job images (include trailing slash) |
+| `CI_PIP_INDEX_URL` | `http://nexus.company.com/repository/pypi-proxy/simple` | PyPI mirror for pip install in CI jobs |
+| `CI_PIP_TRUSTED_HOST` | `nexus.company.com` | Trusted host for HTTP PyPI mirror (no `http://` prefix) |
+| `CI_RELEASE_CLI_IMAGE` | `harbor.company.com/gitlab-org/release-cli:latest` | Local mirror of GitLab release-cli image |
+| **Docker Build Configuration** | | |
+| `DOCKER_REGISTRY` | `harbor.company.com/proxy/` | Docker registry for base images in Dockerfile (include trailing slash) |
+| `APT_MIRROR` | `http://nexus.company.com/repository/ubuntu-proxy/ubuntu` | Ubuntu APT mirror (must include `/ubuntu` path) |
+| `PIP_INDEX_URL` | `http://nexus.company.com/repository/pypi-proxy/simple` | PyPI mirror for pip install during Docker build |
+| `PIP_TRUSTED_HOST` | `nexus.company.com` | Trusted host for HTTP PyPI mirror |
+
+**Important Notes**:
+- `CI_*` variables configure the CI jobs (test/build/release stages)
+- Non-prefixed variables (`DOCKER_REGISTRY`, `APT_MIRROR`, etc.) are passed to the Dockerfile build
+- All variables are **optional** - if not set, defaults to public registries/mirrors
+- Docker registry variables should include trailing slash: `harbor.company.com/proxy/`
+- APT mirror must include full path: `http://nexus.company.com/repository/ubuntu-proxy/ubuntu`
+
+#### Example: Nexus Configuration
+
+**1. Create Nexus Repositories**:
+
+```bash
+# Docker proxy repository
+Type: docker (proxy)
+Name: docker-proxy
+Remote URL: https://registry-1.docker.io
+Docker Index: Use Docker Hub
+
+# PyPI proxy repository
+Type: pypi (proxy)
+Name: pypi-proxy
+Remote URL: https://pypi.org
+
+# APT proxy repository
+Type: apt (proxy)
+Name: ubuntu-proxy
+Distribution: jammy
+Remote URL: http://archive.ubuntu.com/ubuntu
+
+# GitLab Container Registry proxy (optional, for release-cli)
+Type: docker (proxy)
+Name: gitlab-registry-proxy
+Remote URL: https://registry.gitlab.com
+```
+
+**2. Set GitLab CI/CD Variables**:
+
+```bash
+CI_DOCKER_REGISTRY=nexus.company.com:5000/docker-proxy/
+CI_PIP_INDEX_URL=http://nexus.company.com:8081/repository/pypi-proxy/simple
+CI_PIP_TRUSTED_HOST=nexus.company.com
+CI_RELEASE_CLI_IMAGE=nexus.company.com:5000/gitlab-registry-proxy/gitlab-org/release-cli:latest
+
+DOCKER_REGISTRY=nexus.company.com:5000/docker-proxy/
+APT_MIRROR=http://nexus.company.com:8081/repository/ubuntu-proxy/ubuntu
+PIP_INDEX_URL=http://nexus.company.com:8081/repository/pypi-proxy/simple
+PIP_TRUSTED_HOST=nexus.company.com
+```
+
+**3. Pre-populate Mirrors** (from internet-connected machine):
+
+```bash
+# Pull Docker images through Nexus
+docker pull nexus.company.com:5000/docker-proxy/python:3.11
+docker pull nexus.company.com:5000/docker-proxy/python:3.12
+docker pull nexus.company.com:5000/docker-proxy/docker:24
+docker pull nexus.company.com:5000/docker-proxy/ubuntu:22.04
+
+# Pre-download Python packages (uploads to Nexus on first request)
+pip install --index-url http://nexus.company.com:8081/repository/pypi-proxy/simple \
+  -r requirements.txt -r requirements-dev.txt
+```
+
+#### Verification
+
+Test the configuration by triggering a pipeline:
+
+```bash
+# Check CI job logs for:
+# - "Using local registry: harbor.company.com/proxy/"
+# - "Installing packages from: http://nexus.company.com/..."
+
+# Check Docker build logs for:
+# - "Build args: --build-arg DOCKER_REGISTRY=... --build-arg APT_MIRROR=..."
+```
+
+If you see errors about unreachable hosts, verify:
+1. Runner can reach your Nexus/Harbor server
+2. Registry URLs are correct (including trailing slashes and paths)
+3. Nexus/Harbor has cached the required images/packages
+
+#### Alternative: Harbor Configuration
+
+Harbor is often preferred over Nexus for Docker registries:
+
+**1. Create Harbor Projects**:
+
+```bash
+# Create proxy projects in Harbor
+# Project: docker-hub-proxy (Proxy for Docker Hub)
+# Project: gitlab-registry-proxy (Proxy for registry.gitlab.com)
+```
+
+**2. Set GitLab CI/CD Variables**:
+
+```bash
+CI_DOCKER_REGISTRY=harbor.company.com/docker-hub-proxy/
+CI_RELEASE_CLI_IMAGE=harbor.company.com/gitlab-registry-proxy/gitlab-org/release-cli:latest
+
+DOCKER_REGISTRY=harbor.company.com/docker-hub-proxy/
+# ... (use Nexus for PyPI and APT as Harbor doesn't support those)
+```
+
 ## Usage
 
 ### Running Automatic Tests

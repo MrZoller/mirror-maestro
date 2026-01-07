@@ -6,17 +6,44 @@
 # - e2e-live-gitlab.yml: Manual E2E tests against live GitLab instances
 #
 # GitHub will ignore this file, allowing both CI/CD systems to coexist.
+#
+# AIR-GAPPED / RESTRICTED NETWORK SUPPORT:
+# Configure these CI/CD variables for environments without internet access:
+# - CI_DOCKER_REGISTRY: Local Docker registry mirror (e.g., "harbor.company.com/proxy/")
+# - CI_PIP_INDEX_URL: Local PyPI mirror (e.g., "http://nexus.company.com/repository/pypi-proxy/simple")
+# - CI_PIP_TRUSTED_HOST: Trusted host for HTTP PyPI mirror (e.g., "nexus.company.com")
+# - DOCKER_REGISTRY: Docker registry for base images (passed to Dockerfile build)
+# - APT_MIRROR: APT package mirror (passed to Dockerfile build)
+# - PIP_INDEX_URL: PyPI mirror (passed to Dockerfile build)
+# - PIP_TRUSTED_HOST: Trusted host (passed to Dockerfile build)
+#
+# See docs/GITLAB_CICD.md for detailed configuration instructions.
 
 stages:
   - test
   - build
   - release
 
+# Variables for local mirror support
+variables:
+  # CI job image registry (defaults to Docker Hub if not set)
+  CI_DOCKER_REGISTRY: "${CI_DOCKER_REGISTRY}"
+  # CI pip configuration (defaults to PyPI if not set)
+  CI_PIP_INDEX_URL: "${CI_PIP_INDEX_URL}"
+  CI_PIP_TRUSTED_HOST: "${CI_PIP_TRUSTED_HOST}"
+
 # Default settings for all jobs
 default:
-  image: python:3.11
+  # Use local registry if configured, otherwise default to Docker Hub
+  image: ${CI_DOCKER_REGISTRY}python:3.11
   before_script:
-    - python -m pip install --upgrade pip
+    # Configure pip to use local mirror if set
+    - |
+      if [ -n "$CI_PIP_INDEX_URL" ]; then
+        python -m pip install --upgrade pip --index-url="$CI_PIP_INDEX_URL" ${CI_PIP_TRUSTED_HOST:+--trusted-host="$CI_PIP_TRUSTED_HOST"}
+      else
+        python -m pip install --upgrade pip
+      fi
 
 # Cache pip packages to speed up subsequent runs
 .cache_template: &cache_template
@@ -25,6 +52,17 @@ default:
     paths:
       - .cache/pip
 
+# Template for pip install with mirror support
+.pip_install: &pip_install
+  - |
+    if [ -n "$CI_PIP_INDEX_URL" ]; then
+      pip install -r requirements.txt -r requirements-dev.txt \
+        --index-url="$CI_PIP_INDEX_URL" \
+        ${CI_PIP_TRUSTED_HOST:+--trusted-host="$CI_PIP_TRUSTED_HOST"}
+    else
+      pip install -r requirements.txt -r requirements-dev.txt
+    fi
+
 # ============================================================================
 # TEST STAGE
 # ============================================================================
@@ -32,10 +70,10 @@ default:
 # Run tests on Python 3.11
 test:python-3.11:
   stage: test
-  image: python:3.11
+  image: ${CI_DOCKER_REGISTRY}python:3.11
   <<: *cache_template
   script:
-    - pip install -r requirements.txt -r requirements-dev.txt
+    - *pip_install
     - python -m pytest -q
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push"'
@@ -45,10 +83,10 @@ test:python-3.11:
 # Run tests on Python 3.12
 test:python-3.12:
   stage: test
-  image: python:3.12
+  image: ${CI_DOCKER_REGISTRY}python:3.12
   <<: *cache_template
   script:
-    - pip install -r requirements.txt -r requirements-dev.txt
+    - *pip_install
     - python -m pytest -q
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push"'
@@ -59,10 +97,10 @@ test:python-3.12:
 # Equivalent to GitHub's workflow_dispatch in e2e-live-gitlab.yml
 test:e2e-live:
   stage: test
-  image: python:3.12
+  image: ${CI_DOCKER_REGISTRY}python:3.12
   <<: *cache_template
   script:
-    - pip install -r requirements.txt -r requirements-dev.txt
+    - *pip_install
     - |
       # Set test scope based on E2E_TEST_SCOPE variable (default: single)
       TEST_SCOPE="${E2E_TEST_SCOPE:-single}"
@@ -113,9 +151,10 @@ test:e2e-live:
 # Only runs on version tags (v1.2.3)
 build:docker:
   stage: build
-  image: docker:24
+  image: ${CI_DOCKER_REGISTRY}docker:24
   services:
-    - docker:24-dind
+    - name: ${CI_DOCKER_REGISTRY}docker:24-dind
+      alias: docker
   variables:
     DOCKER_DRIVER: overlay2
     DOCKER_TLS_CERTDIR: "/certs"
@@ -135,6 +174,24 @@ build:docker:
     - export MAJOR=$(echo $VERSION | cut -d. -f1)
     - export MINOR=$(echo $VERSION | cut -d. -f1,2)
 
+    # Prepare build args for local mirrors (if configured)
+    - |
+      BUILD_ARGS=""
+      if [ -n "$DOCKER_REGISTRY" ]; then
+        BUILD_ARGS="$BUILD_ARGS --build-arg DOCKER_REGISTRY=$DOCKER_REGISTRY"
+      fi
+      if [ -n "$APT_MIRROR" ]; then
+        BUILD_ARGS="$BUILD_ARGS --build-arg APT_MIRROR=$APT_MIRROR"
+      fi
+      if [ -n "$PIP_INDEX_URL" ]; then
+        BUILD_ARGS="$BUILD_ARGS --build-arg PIP_INDEX_URL=$PIP_INDEX_URL"
+      fi
+      if [ -n "$PIP_TRUSTED_HOST" ]; then
+        BUILD_ARGS="$BUILD_ARGS --build-arg PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST"
+      fi
+
+      echo "Build args: $BUILD_ARGS"
+
     # Build and push multi-architecture image
     - |
       docker buildx build \
@@ -146,6 +203,7 @@ build:docker:
         --tag "$IMAGE_NAME:latest" \
         --cache-from type=registry,ref=$IMAGE_NAME:buildcache \
         --cache-to type=registry,ref=$IMAGE_NAME:buildcache,mode=max \
+        $BUILD_ARGS \
         .
 
     - echo "Successfully built and pushed image:"
@@ -167,7 +225,10 @@ build:docker:
 # Only runs on version tags (v1.2.3)
 release:gitlab:
   stage: release
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  # Note: release-cli is from registry.gitlab.com, may need to be mirrored
+  # If using local registry, mirror registry.gitlab.com/gitlab-org/release-cli:latest
+  # and set CI_RELEASE_CLI_IMAGE variable to your local mirror path
+  image: ${CI_RELEASE_CLI_IMAGE:-registry.gitlab.com/gitlab-org/release-cli:latest}
   before_script:
     - apk add --no-cache git
   script:

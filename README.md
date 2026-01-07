@@ -1126,6 +1126,7 @@ Mirror Maestro includes full GitLab CI/CD pipeline support in `.gitlab-ci.yml`, 
 **Detailed Documentation:** See [docs/GITLAB_CICD.md](docs/GITLAB_CICD.md) for:
 - Complete setup instructions
 - CI/CD variable configuration
+- **Air-gapped / restricted network configuration** (local mirrors for Docker, PyPI, APT)
 - How to run manual E2E tests
 - Release creation process
 - Docker image usage from GitLab Container Registry
