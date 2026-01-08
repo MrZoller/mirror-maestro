@@ -1,5 +1,6 @@
 ARG DOCKER_REGISTRY=""
 ARG APT_MIRROR=""
+ARG APT_SKIP_SSL_VERIFY=""
 ARG PIP_INDEX_URL="https://pypi.org/simple"
 ARG PIP_TRUSTED_HOST=""
 
@@ -7,6 +8,7 @@ FROM ${DOCKER_REGISTRY}ubuntu:22.04
 
 # Re-declare build args after FROM to make them available in build stage
 ARG APT_MIRROR=""
+ARG APT_SKIP_SSL_VERIFY=""
 ARG PIP_INDEX_URL="https://pypi.org/simple"
 ARG PIP_TRUSTED_HOST=""
 
@@ -24,8 +26,15 @@ RUN if [ -n "$APT_MIRROR" ]; then \
     fi
 
 # Install Python 3.11 and system dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+# APT_SKIP_SSL_VERIFY: Set to "true" to bypass SSL certificate verification
+# (for environments with corporate proxies or self-signed certificates)
+RUN APT_OPTS="" && \
+    if [ "$APT_SKIP_SSL_VERIFY" = "true" ]; then \
+        APT_OPTS="-o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false"; \
+        echo "WARNING: APT SSL verification disabled"; \
+    fi && \
+    apt-get $APT_OPTS update && \
+    apt-get $APT_OPTS install -y --no-install-recommends \
     python3.11 \
     python3.11-venv \
     python3.11-dev \
