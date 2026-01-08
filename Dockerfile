@@ -53,6 +53,7 @@ RUN python3.11 -m pip install --upgrade pip
 
 # Copy requirements first for better caching
 COPY requirements.txt .
+COPY pyproject.toml .
 
 # Configure pip for custom PyPI mirror (for enterprise environments)
 RUN if [ -n "$PIP_TRUSTED_HOST" ]; then \
@@ -63,6 +64,15 @@ RUN if [ -n "$PIP_TRUSTED_HOST" ]; then \
 
 # Copy application code
 COPY app ./app
+
+# Install the package to make version metadata available
+# This registers the package with importlib.metadata so version() works
+# Use same mirror settings as requirements install for air-gapped environments
+RUN if [ -n "$PIP_TRUSTED_HOST" ]; then \
+        pip install --no-cache-dir --index-url="$PIP_INDEX_URL" --trusted-host="$PIP_TRUSTED_HOST" .; \
+    else \
+        pip install --no-cache-dir --index-url="$PIP_INDEX_URL" .; \
+    fi
 
 # Create non-root user for security
 # Using UID 1000 for compatibility with common host user IDs
