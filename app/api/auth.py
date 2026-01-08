@@ -91,6 +91,23 @@ async def login(
     This endpoint is only used in multi-user mode.
     In legacy mode, use HTTP Basic Auth instead.
     """
+    try:
+        return await _perform_login(login_data, db)
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is (these are expected errors)
+        raise
+    except Exception as e:
+        # Log unexpected errors and return a generic error message
+        # This ensures we always return JSON, even for unexpected failures
+        logger.error(f"Unexpected error during login: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred during login. Please check the server logs."
+        )
+
+
+async def _perform_login(login_data: LoginRequest, db: AsyncSession) -> LoginResponse:
+    """Internal login logic, separated for cleaner exception handling."""
     if not settings.multi_user_enabled:
         # In legacy mode, check against env credentials using constant-time comparison
         # to prevent timing attacks

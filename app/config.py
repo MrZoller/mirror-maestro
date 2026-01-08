@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     cdn_d3js_url: str = "https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"
     use_local_vendor_assets: bool = False  # Set to true to use local copies from /static/vendor
 
+    # SSRF Protection
+    # Set to True to allow GitLab URLs that resolve to private/internal IP addresses
+    # This is required for air-gapped or enterprise environments with internal GitLab instances
+    allow_private_ips: bool = False
+
     # Rate Limiting (for batch operations and imports)
     # Delay between GitLab API operations to avoid overwhelming instances
     gitlab_api_delay_ms: int = 200  # Delay in milliseconds (200ms = ~300 ops/min, well under 600/min limit)
