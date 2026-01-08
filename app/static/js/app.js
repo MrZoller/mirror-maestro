@@ -3664,8 +3664,22 @@ async function handleLogin(event) {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Login failed');
+            // Handle non-JSON error responses (e.g., HTML error pages from proxy/server)
+            let errorMessage = 'Login failed';
+            try {
+                const error = await response.json();
+                errorMessage = error.detail || errorMessage;
+            } catch {
+                // Response is not JSON (e.g., HTML error page)
+                if (response.status === 500) {
+                    errorMessage = 'Server error. Please check the server logs and try again.';
+                } else if (response.status === 502 || response.status === 503 || response.status === 504) {
+                    errorMessage = 'Service unavailable. Please check the server is running.';
+                } else {
+                    errorMessage = `Server error (${response.status}). Please try again.`;
+                }
+            }
+            throw new Error(errorMessage);
         }
 
         const data = await response.json();
