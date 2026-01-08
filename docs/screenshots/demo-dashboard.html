@@ -48,26 +48,35 @@
 
         <!-- Dashboard Tab -->
         <div id="dashboard-tab" class="tab-content active">
+            <!-- Stats Cards -->
             <div class="dashboard-stats">
                 <div class="stat-card stat-card-primary">
-                    <div class="stat-label">Total Mirrors</div>
-                    <div class="stat-value" id="dashboard-total-mirrors">247</div>
-                    <div class="stat-sublabel">Across 5 instance pairs</div>
+                    <div class="stat-icon">📦</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="stat-total-mirrors">247</div>
+                        <div class="stat-label">Total Mirrors</div>
+                    </div>
                 </div>
                 <div class="stat-card stat-card-success">
-                    <div class="stat-label">Health</div>
-                    <div class="stat-value" id="dashboard-health">94.3<span class="stat-unit">%</span></div>
-                    <div class="stat-sublabel">233 mirrors healthy</div>
+                    <div class="stat-icon">✓</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="stat-health-percentage">94.3%</div>
+                        <div class="stat-label">Health</div>
+                    </div>
                 </div>
                 <div class="stat-card stat-card-danger">
-                    <div class="stat-label">Failed</div>
-                    <div class="stat-value" id="dashboard-failed">8</div>
-                    <div class="stat-sublabel">Needs attention</div>
+                    <div class="stat-icon">⚠</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="stat-failed-mirrors">8</div>
+                        <div class="stat-label">Failed</div>
+                    </div>
                 </div>
-                <div class="stat-card stat-card-warning">
-                    <div class="stat-label">Syncing Now</div>
-                    <div class="stat-value stat-value-pulse" id="dashboard-syncing">3</div>
-                    <div class="stat-sublabel">Updates in progress</div>
+                <div class="stat-card stat-card-info">
+                    <div class="stat-icon">↻</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="stat-syncing-mirrors">3</div>
+                        <div class="stat-label">Syncing Now</div>
+                    </div>
                 </div>
             </div>
 
