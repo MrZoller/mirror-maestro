@@ -2028,6 +2028,45 @@ app.add_middleware(
 3. Make sure async operations complete before starting new ones
 4. Check that PostgreSQL service is healthy: `docker-compose ps`
 
+#### Docker Build SSL Certificate Errors
+
+**Problem**: APT package installation fails with SSL certificate errors during Docker build
+```
+Certificate verification failed: The certificate is NOT trusted.
+E: Failed to fetch https://...
+```
+
+**Solution**: This typically occurs in enterprise environments with SSL-inspecting proxies or self-signed certificates on internal mirrors.
+
+1. Set `APT_SKIP_SSL_VERIFY=true` in your `.env` file to bypass SSL verification:
+```bash
+# In .env
+APT_SKIP_SSL_VERIFY=true
+```
+
+2. Rebuild the image:
+```bash
+docker-compose build --no-cache app
+```
+
+**Note**: This reduces security by disabling certificate verification. Only use when necessary in controlled environments.
+
+#### Multi-User Login Returns HTML Error
+
+**Problem**: Login in multi-user mode shows error like `Unexpected token 'I', "Internal S"...`
+
+**Solution**: The server is returning an HTML error page instead of JSON. This can happen due to:
+1. Database connection issues
+2. JWT secret key generation failure
+3. Missing dependencies
+
+Check the server logs for the actual error:
+```bash
+docker-compose logs app
+```
+
+The login endpoint now returns proper JSON errors with diagnostic information.
+
 ### Debugging Tips
 
 **Enable Debug Logging**:
@@ -2670,6 +2709,9 @@ DOCKER_REGISTRY=harbor.company.com/proxy/
 # Ubuntu APT Package Mirror (must include /ubuntu path)
 APT_MIRROR=http://nexus.company.com/repository/ubuntu-proxy/ubuntu
 
+# APT SSL Verification Bypass (for corporate proxies or self-signed certs)
+APT_SKIP_SSL_VERIFY=true
+
 # Python Package Index Mirror
 PIP_INDEX_URL=http://nexus.company.com/repository/pypi-proxy/simple
 PIP_TRUSTED_HOST=nexus.company.com  # For HTTP mirrors
@@ -2688,6 +2730,7 @@ The Dockerfile and docker-compose.yml support build-time configuration:
 # Dockerfile uses ARG for configurable mirrors
 ARG DOCKER_REGISTRY=""
 ARG APT_MIRROR=""
+ARG APT_SKIP_SSL_VERIFY=""
 ARG PIP_INDEX_URL="https://pypi.org/simple"
 ARG PIP_TRUSTED_HOST=""
 
@@ -2695,6 +2738,7 @@ FROM ${DOCKER_REGISTRY}ubuntu:22.04
 
 # Re-declare build args after FROM
 ARG APT_MIRROR=""
+ARG APT_SKIP_SSL_VERIFY=""
 ARG PIP_INDEX_URL="https://pypi.org/simple"
 ARG PIP_TRUSTED_HOST=""
 
@@ -2703,8 +2747,12 @@ RUN if [ -n "$APT_MIRROR" ]; then \
         sed -i "s|http://archive.ubuntu.com/ubuntu|$APT_MIRROR|g" /etc/apt/sources.list; \
     fi
 
-# Install Python 3.11 and pip
-RUN apt-get update && apt-get install -y python3.11 python3-pip
+# Install Python 3.11 and pip (with optional SSL bypass for corporate proxies)
+RUN APT_OPTS="" && \
+    if [ "$APT_SKIP_SSL_VERIFY" = "true" ]; then \
+        APT_OPTS="-o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false"; \
+    fi && \
+    apt-get $APT_OPTS update && apt-get $APT_OPTS install -y python3.11 python3-pip
 
 # Pip configuration with custom index
 RUN pip install --index-url="$PIP_INDEX_URL" --trusted-host="$PIP_TRUSTED_HOST" -r requirements.txt
