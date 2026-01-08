@@ -80,17 +80,22 @@ def _validate_url_for_ssrf_sync(url: str) -> None:
             raise ValueError(f"Invalid port {parsed.port}. Port must be between 1 and 65535")
 
     # Resolve hostname and check if it points to a private IP
-    try:
-        addr_info = socket.getaddrinfo(hostname, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
-        for family, socktype, proto, canonname, sockaddr in addr_info:
-            ip_str = sockaddr[0]
-            if _is_private_ip(ip_str):
-                raise ValueError(
-                    f"Hostname '{hostname}' resolves to private IP address '{ip_str}'. "
-                    "URLs pointing to internal networks are not allowed for security reasons"
-                )
-    except socket.gaierror as e:
-        raise ValueError(f"Could not resolve hostname '{hostname}': {e}")
+    # Skip this check if ALLOW_PRIVATE_IPS is enabled (for enterprise/air-gapped environments)
+    if not settings.allow_private_ips:
+        try:
+            addr_info = socket.getaddrinfo(hostname, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+            for family, socktype, proto, canonname, sockaddr in addr_info:
+                ip_str = sockaddr[0]
+                if _is_private_ip(ip_str):
+                    raise ValueError(
+                        f"Hostname '{hostname}' resolves to private IP address '{ip_str}'. "
+                        "URLs pointing to internal networks are not allowed for security reasons. "
+                        "Set ALLOW_PRIVATE_IPS=true if you're using internal GitLab instances."
+                    )
+        except socket.gaierror:
+            # DNS resolution failed - this is OK in air-gapped environments
+            # The actual connection test will validate reachability later
+            logger.debug(f"DNS resolution failed for hostname '{hostname}' - skipping SSRF IP check")
 
 
 class GitLabInstanceCreate(BaseModel):
@@ -259,6 +264,22 @@ async def create_instance(
     _: str = Depends(verify_credentials)
 ):
     """Create a new GitLab instance."""
+    try:
+        return await _create_instance_impl(instance, db)
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        # Log unexpected errors and return a JSON error response
+        logger.error(f"Unexpected error creating instance: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"An unexpected error occurred while creating the instance: {type(e).__name__}. Please check the server logs."
+        )
+
+
+async def _create_instance_impl(instance: GitLabInstanceCreate, db: AsyncSession) -> GitLabInstanceResponse:
+    """Internal implementation of create_instance for cleaner exception handling."""
     # Check if instance with same name already exists
     existing_result = await db.execute(
         select(GitLabInstance).where(GitLabInstance.name == instance.name)
