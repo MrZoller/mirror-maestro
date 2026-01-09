@@ -3849,7 +3849,8 @@ function renderUsers(users) {
         const statusClass = user.is_active ? 'status-active' : 'status-inactive';
         const statusText = user.is_active ? 'Active' : 'Inactive';
 
-        const isSelf = authState.user && authState.user.id === user.id;
+        // Compare by username (unique and reliable) rather than id to correctly identify current user
+        const isSelf = authState.user && authState.user.username === user.username;
         const deleteDisabled = isSelf ? 'disabled title="Cannot delete yourself"' : '';
 
         return `
@@ -3962,6 +3963,10 @@ async function handleEditUser(event) {
     const payload = { username, email, is_admin: isAdmin, is_active: isActive };
     if (password) payload.password = password;
 
+    // Find the user being edited before the update to check if it's the current user
+    const editedUser = usersData.find(u => u.id === parseInt(userId));
+    const isEditingSelf = authState.user && editedUser && authState.user.username === editedUser.username;
+
     try {
         submitBtn.disabled = true;
         submitBtn.textContent = 'Saving...';
@@ -3976,7 +3981,7 @@ async function handleEditUser(event) {
         await loadUsers();
 
         // Reload current user in case they edited themselves
-        if (authState.user && authState.user.id === parseInt(userId)) {
+        if (isEditingSelf) {
             await loadCurrentUser();
         }
 
@@ -3992,7 +3997,9 @@ async function handleEditUser(event) {
 }
 
 async function deleteUser(userId) {
-    if (authState.user && authState.user.id === userId) {
+    // Find the user to get their username for comparison
+    const targetUser = usersData.find(u => u.id === userId);
+    if (authState.user && targetUser && authState.user.username === targetUser.username) {
         showMessage('Cannot delete your own account', 'error');
         return;
     }
