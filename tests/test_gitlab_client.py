@@ -599,24 +599,25 @@ def test_gitlab_client_filter_remote_mirror_payload_no_direction():
     assert result == data
 
 
-def test_gitlab_client_create_pull_mirror_verifies_direction(monkeypatch):
-    """Test that creating a pull mirror verifies GitLab created it with correct direction."""
-    import pytest
+def test_gitlab_client_create_pull_mirror_uses_pull_endpoint(monkeypatch):
+    """Test that creating a pull mirror uses the /mirror/pull endpoint (GitLab 17.6+)."""
     from app.core import gitlab_client as mod
 
     class FakeGL:
         def __init__(self, url, private_token, timeout=60):
-            pass
+            self.requests = []
 
-        def http_post(self, path, post_data):
-            # Simulate GitLab ignoring mirror_direction and creating a push mirror instead
-            assert post_data.get("mirror_direction") == "pull"
-            return {
-                "id": 123,
-                "url": post_data["url"],
-                "mirror_direction": "push",  # BUG: GitLab created push instead of pull!
-                "enabled": True,
-            }
+        def http_put(self, path, post_data):
+            self.requests.append(("PUT", path, post_data))
+            # Simulate GitLab 17.6+ pull mirror API response
+            if path == "/projects/456/mirror/pull":
+                return {
+                    "id": 456,  # Project ID
+                    "import_url": post_data["url"],
+                    "mirror": True,
+                    "mirror_trigger_builds": post_data.get("trigger_builds", False),
+                }
+            raise Exception(f"Unexpected path: {path}")
 
     class FakeGitlabModule:
         Gitlab = FakeGL
@@ -626,7 +627,51 @@ def test_gitlab_client_create_pull_mirror_verifies_direction(monkeypatch):
 
     client = mod.GitLabClient("https://example.com", "enc:any")
 
-    # This should raise an error because GitLab created a push mirror instead of pull
+    result = client.create_pull_mirror(
+        project_id=456,
+        mirror_url="https://source.com/repo.git",
+        enabled=True,
+        trigger_builds=True,
+    )
+
+    # Verify it used the correct endpoint
+    assert len(client.gl.requests) == 1
+    method, path, data = client.gl.requests[0]
+    assert method == "PUT"
+    assert path == "/projects/456/mirror/pull"
+    assert data["url"] == "https://source.com/repo.git"
+    assert data["enabled"] == True
+    assert data["trigger_builds"] == True
+
+    # Verify response is normalized
+    assert result["mirror_direction"] == "pull"
+
+
+def test_gitlab_client_create_pull_mirror_fallback_for_old_gitlab(monkeypatch):
+    """Test that creating a pull mirror fails gracefully on older GitLab versions."""
+    import pytest
+    from app.core import gitlab_client as mod
+    from gitlab.exceptions import GitlabHttpError
+
+    class FakeGL:
+        def __init__(self, url, private_token, timeout=60):
+            pass
+
+        def http_put(self, path, post_data):
+            # Simulate GitLab < 17.6 not having the /mirror/pull endpoint
+            if "/mirror/pull" in path:
+                raise GitlabHttpError("404 Not Found")
+            raise Exception(f"Unexpected path: {path}")
+
+    class FakeGitlabModule:
+        Gitlab = FakeGL
+
+    monkeypatch.setattr(mod, "gitlab", FakeGitlabModule())
+    monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
+
+    client = mod.GitLabClient("https://example.com", "enc:any")
+
+    # This should raise an error explaining that the GitLab version doesn't support it
     with pytest.raises(mod.GitLabClientError) as exc_info:
         client.create_pull_mirror(
             project_id=456,
@@ -634,43 +679,8 @@ def test_gitlab_client_create_pull_mirror_verifies_direction(monkeypatch):
             enabled=True,
         )
 
-    assert "wrong direction" in str(exc_info.value).lower()
-    assert "push" in str(exc_info.value)
-    assert "pull" in str(exc_info.value)
-
-
-def test_gitlab_client_create_pull_mirror_success(monkeypatch):
-    """Test successful pull mirror creation when GitLab respects the direction."""
-    from app.core import gitlab_client as mod
-
-    class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
-            pass
-
-        def http_post(self, path, post_data):
-            # GitLab correctly respects the mirror_direction parameter
-            return {
-                "id": 123,
-                "url": post_data["url"],
-                "mirror_direction": post_data.get("mirror_direction", "push"),
-                "enabled": post_data.get("enabled", True),
-            }
-
-    class FakeGitlabModule:
-        Gitlab = FakeGL
-
-    monkeypatch.setattr(mod, "gitlab", FakeGitlabModule())
-    monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
-
-    client = mod.GitLabClient("https://example.com", "enc:any")
-
-    # This should succeed because GitLab created the mirror with correct direction
-    result = client.create_pull_mirror(
-        project_id=456,
-        mirror_url="https://source.com/repo.git",
-        enabled=True,
-    )
-
-    assert result["id"] == 123
-    assert result["mirror_direction"] == "pull"
+    error_msg = str(exc_info.value).lower()
+    assert "17.6" in error_msg
+    assert "pull" in error_msg
+    assert "endpoint" in error_msg or "api" in error_msg
 

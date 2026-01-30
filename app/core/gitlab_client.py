@@ -334,19 +334,66 @@ class GitLabClient:
         mirror_branch_regex: str | None = None,
         mirror_user_id: int | None = None,
     ) -> Dict[str, Any]:
-        """Create a pull mirror for a project (target pulls from source)."""
+        """
+        Create a pull mirror for a project (target pulls from source).
+
+        Note: GitLab 17.6+ uses a dedicated /mirror/pull endpoint for pull mirrors.
+        For older versions, pull mirrors may need to be configured through the UI.
+        """
         try:
-            return self._create_remote_mirror(
-                project_id=project_id,
-                mirror_url=mirror_url,
-                enabled=enabled,
-                only_protected_branches=only_protected_branches,
-                keep_divergent_refs=keep_divergent_refs,
-                trigger_builds=trigger_builds,
-                mirror_branch_regex=mirror_branch_regex,
-                mirror_user_id=mirror_user_id,
-                mirror_direction="pull",
-            )
+            # Try the new pull mirror API (GitLab 17.6+)
+            # https://docs.gitlab.com/api/project_pull_mirroring/
+            try:
+                data: Dict[str, Any] = {
+                    "url": mirror_url,
+                    "enabled": enabled,
+                    "only_protected_branches": only_protected_branches,
+                }
+                if keep_divergent_refs is not None:
+                    data["keep_divergent_refs"] = keep_divergent_refs
+                if trigger_builds is not None:
+                    data["trigger_builds"] = trigger_builds
+                if mirror_branch_regex is not None:
+                    data["mirror_branch_regex"] = mirror_branch_regex
+                if mirror_user_id is not None:
+                    data["mirror_user_id"] = mirror_user_id
+
+                logger.info(f"Creating pull mirror on project {project_id} using /mirror/pull endpoint")
+                result = self.gl.http_put(f"/projects/{project_id}/mirror/pull", post_data=data)
+
+                # The pull mirror API returns the full project object, not just the mirror
+                # We need to extract mirror info from it
+                if isinstance(result, dict):
+                    # Return a normalized response similar to remote_mirrors endpoint
+                    import_url = result.get("import_url")
+                    return {
+                        "id": result.get("id"),  # This is the project ID, not mirror ID
+                        "url": import_url if import_url else mirror_url,
+                        "enabled": enabled,
+                        "mirror_direction": "pull",
+                        "only_protected_branches": only_protected_branches,
+                    }
+                return result
+
+            except (GitlabHttpError, GitlabGetError, GitlabUpdateError) as api_err:
+                # If 404 or method not found, this GitLab version doesn't support the pull mirror API
+                error_str = str(api_err)
+                if "404" in error_str or "not found" in error_str.lower() or "405" in error_str:
+                    logger.warning(
+                        f"Pull mirror API not available (GitLab 17.6+ required). "
+                        f"Falling back to remote_mirrors endpoint (may create push mirror instead). "
+                        f"Error: {error_str}"
+                    )
+                    # Fall back to old method (will likely create a push mirror)
+                    raise GitLabClientError(
+                        f"Pull mirrors require GitLab 17.6+ with the /mirror/pull API endpoint. "
+                        f"This GitLab instance (version unknown) does not support this endpoint. "
+                        f"Please configure pull mirrors through the GitLab UI or upgrade to GitLab 17.6+."
+                    )
+                else:
+                    # Some other API error, re-raise
+                    raise
+
         except GitLabClientError:
             raise
         except Exception as e:
@@ -506,18 +553,22 @@ class GitLabClient:
         result = self.gl.http_post(f"/projects/{project_id}/remote_mirrors", post_data=data)
 
         # Verify that GitLab created the mirror with the correct direction
+        # Note: The /remote_mirrors endpoint only creates PUSH mirrors.
+        # Pull mirrors require the /mirror/pull endpoint (GitLab 17.6+)
         if mirror_direction is not None and isinstance(result, dict):
             created_direction = result.get("mirror_direction")
             if created_direction and created_direction.lower() != mirror_direction.lower():
                 logger.error(
                     f"GitLab created mirror with wrong direction! "
                     f"Expected: {mirror_direction}, Got: {created_direction}. "
-                    f"Mirror ID: {result.get('id')}"
+                    f"Mirror ID: {result.get('id')}. "
+                    f"This is expected - the /remote_mirrors endpoint only creates push mirrors."
                 )
                 raise GitLabClientError(
-                    f"GitLab created mirror with direction '{created_direction}' instead of requested '{mirror_direction}'. "
-                    f"This GitLab instance may not support setting mirror direction via API. "
-                    f"Pull mirroring may require GitLab Premium/Ultimate or a different configuration method."
+                    f"Cannot create {mirror_direction} mirror using /remote_mirrors endpoint. "
+                    f"GitLab's /remote_mirrors API only supports PUSH mirrors. "
+                    f"Pull mirrors require GitLab 17.6+ and the /mirror/pull API endpoint. "
+                    f"See https://docs.gitlab.com/api/project_pull_mirroring/"
                 )
 
         return result
