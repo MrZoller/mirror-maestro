@@ -1792,6 +1792,7 @@ async def rotate_mirror_token(
                     enabled=True,
                     only_protected_branches=effective_settings.get("only_mirror_protected_branches", False),
                     keep_divergent_refs=not effective_settings.get("mirror_overwrite_diverged", False),
+                    mirror_direction=direction,
                 ),
                 operation_name=f"update_mirror({mirror_project_id}, {mirror.mirror_id})",
             )
