@@ -501,7 +501,26 @@ class GitLabClient:
             data["mirror_direction"] = mirror_direction
 
         data = self._filter_remote_mirror_payload(mirror_direction, data)
-        return self.gl.http_post(f"/projects/{project_id}/remote_mirrors", post_data=data)
+
+        logger.info(f"Creating remote mirror on project {project_id} with direction={mirror_direction}, payload keys: {list(data.keys())}")
+        result = self.gl.http_post(f"/projects/{project_id}/remote_mirrors", post_data=data)
+
+        # Verify that GitLab created the mirror with the correct direction
+        if mirror_direction is not None and isinstance(result, dict):
+            created_direction = result.get("mirror_direction")
+            if created_direction and created_direction.lower() != mirror_direction.lower():
+                logger.error(
+                    f"GitLab created mirror with wrong direction! "
+                    f"Expected: {mirror_direction}, Got: {created_direction}. "
+                    f"Mirror ID: {result.get('id')}"
+                )
+                raise GitLabClientError(
+                    f"GitLab created mirror with direction '{created_direction}' instead of requested '{mirror_direction}'. "
+                    f"This GitLab instance may not support setting mirror direction via API. "
+                    f"Pull mirroring may require GitLab Premium/Ultimate or a different configuration method."
+                )
+
+        return result
 
     @staticmethod
     def _filter_remote_mirror_payload(mirror_direction: str | None, data: Dict[str, Any]) -> Dict[str, Any]:
