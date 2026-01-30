@@ -961,24 +961,49 @@ async function loadSystemHealth() {
     }
 }
 
-function refreshSystemHealth() {
-    loadSystemHealth();
+async function refreshSystemHealth() {
+    try {
+        await loadSystemHealth();
+        showMessage('System health refreshed', 'success');
+    } catch (error) {
+        // Error already shown by loadSystemHealth
+    }
 }
 
-function refreshInstances() {
-    loadInstances();
+async function refreshInstances() {
+    try {
+        await loadInstances();
+        showMessage('Instances refreshed', 'success');
+    } catch (error) {
+        // Error already shown by loadInstances
+    }
 }
 
-function refreshPairs() {
-    loadPairs();
+async function refreshPairs() {
+    try {
+        await loadPairs();
+        showMessage('Pairs refreshed', 'success');
+    } catch (error) {
+        // Error already shown by loadPairs
+    }
 }
 
-function refreshMirrors() {
-    loadMirrors(true);
+async function refreshMirrors() {
+    try {
+        await loadMirrors(true);
+        showMessage('Mirrors refreshed', 'success');
+    } catch (error) {
+        // Error already shown by loadMirrors
+    }
 }
 
-function refreshUsers() {
-    loadUsers();
+async function refreshUsers() {
+    try {
+        await loadUsers();
+        showMessage('Users refreshed', 'success');
+    } catch (error) {
+        // Error already shown by loadUsers
+    }
 }
 
 function renderSystemHealth(health, container) {
