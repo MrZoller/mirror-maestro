@@ -692,3 +692,174 @@ def test_gitlab_client_create_pull_mirror_fallback_for_old_gitlab(monkeypatch):
     assert "pull" in error_msg
     assert "endpoint" in error_msg or "api" in error_msg
 
+
+def test_gitlab_client_update_pull_mirror(monkeypatch):
+    """Test updating a pull mirror using the /mirror/pull endpoint."""
+    from app.core import gitlab_client as mod
+
+    class FakeGL:
+        def __init__(self, url, private_token, timeout=60):
+            self.requests = []
+
+        def http_put(self, path, post_data):
+            self.requests.append(("PUT", path, post_data))
+            if path == "/projects/123/mirror/pull":
+                return {
+                    "id": 123,
+                    "import_url": post_data.get("url", "https://source.com/repo.git"),
+                    "mirror": post_data.get("enabled", True),
+                    "mirror_trigger_builds": post_data.get("mirror_trigger_builds", False),
+                }
+            raise Exception(f"Unexpected path: {path}")
+
+    class FakeGitlabModule:
+        Gitlab = FakeGL
+
+    monkeypatch.setattr(mod, "gitlab", FakeGitlabModule())
+    monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
+
+    client = mod.GitLabClient("https://example.com", "enc:any")
+    result = client.update_pull_mirror(
+        project_id=123,
+        enabled=True,
+        only_protected_branches=True,
+        keep_divergent_refs=False,  # Should be inverted
+        trigger_builds=True,
+        url="https://source.com/repo.git"
+    )
+
+    # Verify correct endpoint was used
+    assert len(client.gl.requests) == 1
+    method, path, data = client.gl.requests[0]
+    assert method == "PUT"
+    assert path == "/projects/123/mirror/pull"
+
+    # Verify parameter name transformations
+    assert data["url"] == "https://source.com/repo.git"
+    assert data["enabled"] is True
+    assert data["only_mirror_protected_branches"] is True  # Note: "only_mirror_" prefix
+    assert data["mirror_overwrites_diverged_branches"] is True  # Inverted from keep_divergent_refs=False
+    assert data["mirror_trigger_builds"] is True  # Note: "mirror_" prefix
+
+
+def test_gitlab_client_update_mirror_routes_to_pull_endpoint(monkeypatch):
+    """Test that update_mirror routes to update_pull_mirror when mirror_direction is 'pull'."""
+    from app.core import gitlab_client as mod
+
+    class FakeGL:
+        def __init__(self, url, private_token, timeout=60):
+            self.requests = []
+
+        def http_put(self, path, post_data):
+            self.requests.append(("PUT", path, post_data))
+            if "/mirror/pull" in path:
+                return {
+                    "id": 123,
+                    "import_url": post_data.get("url", "https://source.com/repo.git"),
+                    "mirror": post_data.get("enabled", True),
+                }
+            return {"id": 456, **post_data}
+
+    class FakeGitlabModule:
+        Gitlab = FakeGL
+
+    monkeypatch.setattr(mod, "gitlab", FakeGitlabModule())
+    monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
+
+    client = mod.GitLabClient("https://example.com", "enc:any")
+
+    # Call update_mirror with mirror_direction="pull"
+    result = client.update_mirror(
+        project_id=123,
+        mirror_id=456,
+        mirror_direction="pull",
+        url="https://source.com/repo.git",
+        enabled=True,
+        only_protected_branches=True,
+        keep_divergent_refs=False
+    )
+
+    # Should have routed to /mirror/pull endpoint
+    assert len(client.gl.requests) == 1
+    method, path, data = client.gl.requests[0]
+    assert method == "PUT"
+    assert "/mirror/pull" in path
+    assert "only_mirror_protected_branches" in data  # Pull endpoint parameter name
+
+
+def test_gitlab_client_update_mirror_with_url_for_push(monkeypatch):
+    """Test that update_mirror accepts url parameter for push mirrors."""
+    from app.core import gitlab_client as mod
+
+    class FakeGL:
+        def __init__(self, url, private_token, timeout=60):
+            self.requests = []
+
+        def http_put(self, path, post_data):
+            self.requests.append(("PUT", path, post_data))
+            return {"id": 456, **post_data}
+
+    class FakeGitlabModule:
+        Gitlab = FakeGL
+
+    monkeypatch.setattr(mod, "gitlab", FakeGitlabModule())
+    monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
+
+    client = mod.GitLabClient("https://example.com", "enc:any")
+
+    # Call update_mirror with url (e.g., for token rotation)
+    result = client.update_mirror(
+        project_id=123,
+        mirror_id=456,
+        mirror_direction="push",
+        url="https://new-token:password@example.com/repo.git",
+        enabled=True
+    )
+
+    # Should use /remote_mirrors endpoint for push
+    assert len(client.gl.requests) == 1
+    method, path, data = client.gl.requests[0]
+    assert method == "PUT"
+    assert path == "/projects/123/remote_mirrors/456"
+    assert data["url"] == "https://new-token:password@example.com/repo.git"
+    assert data["enabled"] is True
+
+
+def test_gitlab_client_update_pull_mirror_with_url(monkeypatch):
+    """Test updating pull mirror URL (token rotation scenario)."""
+    from app.core import gitlab_client as mod
+
+    class FakeGL:
+        def __init__(self, url, private_token, timeout=60):
+            self.requests = []
+
+        def http_put(self, path, post_data):
+            self.requests.append(("PUT", path, post_data))
+            return {
+                "id": 123,
+                "import_url": post_data.get("url"),
+                "mirror": True,
+            }
+
+    class FakeGitlabModule:
+        Gitlab = FakeGL
+
+    monkeypatch.setattr(mod, "gitlab", FakeGitlabModule())
+    monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
+
+    client = mod.GitLabClient("https://example.com", "enc:any")
+
+    new_url = "https://new-token:password@source.example.com/repo.git"
+    result = client.update_pull_mirror(
+        project_id=123,
+        url=new_url,
+        enabled=True
+    )
+
+    # Verify URL was updated
+    assert len(client.gl.requests) == 1
+    method, path, data = client.gl.requests[0]
+    assert path == "/projects/123/mirror/pull"
+    assert data["url"] == new_url
+    assert data["enabled"] is True
+

@@ -88,6 +88,7 @@ class FakeGitLabClient:
         mirror_branch_regex=None,
         mirror_user_id=None,
         mirror_direction=None,
+        url=None,
     ):
         self.__class__.update_calls.append(
             (
@@ -100,6 +101,7 @@ class FakeGitLabClient:
                 mirror_branch_regex,
                 mirror_user_id,
                 mirror_direction,
+                url,
             )
         )
         return {"id": mirror_id}
@@ -1365,4 +1367,226 @@ async def test_verify_mirrors_batch_empty(client):
     resp = await client.post("/api/mirrors/verify", json={"mirror_ids": []})
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_rotate_token_push_mirror(client, session_maker, monkeypatch):
+    """Test rotating token for a push mirror."""
+    # Seed test data
+    src_id = await seed_instance(session_maker, name="Source", url="https://source.example.com")
+    tgt_id = await seed_instance(session_maker, name="Target", url="https://target.example.com")
+    pair_id = await seed_pair(
+        session_maker,
+        name="Test Pair",
+        source_instance_id=src_id,
+        target_instance_id=tgt_id,
+        mirror_direction="push"
+    )
+
+    # Create mirror with existing token
+    async with session_maker() as s:
+        mirror = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=10,
+            source_project_path="group/source-project",
+            target_project_id=20,
+            target_project_path="group/target-project",
+            mirror_id=401,
+            enabled=True,
+            gitlab_token_id=123,
+            token_project_id=20,  # Push: token on target
+            mirror_token_name="old-token",
+        )
+        s.add(mirror)
+        await s.commit()
+        await s.refresh(mirror)
+        mirror_id = mirror.id
+
+    # Mock GitLabClient
+    monkeypatch.setattr("app.api.mirrors.GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.token_create_calls.clear()
+    FakeGitLabClient.token_delete_calls.clear()
+    FakeGitLabClient.update_calls.clear()
+
+    # Rotate token
+    resp = await client.post(f"/api/mirrors/{mirror_id}/rotate-token")
+    assert resp.status_code == 200
+
+    # Verify old token was deleted
+    assert len(FakeGitLabClient.token_delete_calls) == 1
+    deleted_project_id, deleted_token_id = FakeGitLabClient.token_delete_calls[0]
+    assert deleted_project_id == 20  # Target project
+    assert deleted_token_id == 123
+
+    # Verify new token was created on target (push mirror)
+    assert len(FakeGitLabClient.token_create_calls) == 1
+    created_project_id, token_name, scopes, expires_at, access_level = FakeGitLabClient.token_create_calls[0]
+    assert created_project_id == 20  # Target project
+    assert "mirror-maestro" in token_name
+    assert scopes == ["write_repository"]  # Push needs write on target
+
+    # Verify mirror was updated in GitLab with new URL
+    assert len(FakeGitLabClient.update_calls) == 1
+    (
+        update_project_id,
+        update_mirror_id,
+        enabled,
+        only_protected,
+        keep_divergent,
+        trigger_builds,
+        branch_regex,
+        user_id,
+        direction,
+        url,
+    ) = FakeGitLabClient.update_calls[0]
+    assert update_project_id == 10  # Source project (has the mirror config)
+    assert update_mirror_id == 401
+    assert direction == "push"
+    assert url is not None  # Should have new authenticated URL
+    assert "fake-token-value" in url  # New token in URL
+
+    # Verify database was updated
+    async with session_maker() as s:
+        result = await s.execute(select(Mirror).where(Mirror.id == mirror_id))
+        updated_mirror = result.scalar_one()
+        assert updated_mirror.gitlab_token_id == 999  # New token ID
+        assert updated_mirror.mirror_token_name.startswith("mirror-maestro")
+        assert updated_mirror.encrypted_mirror_token is not None
+
+
+@pytest.mark.asyncio
+async def test_rotate_token_pull_mirror(client, session_maker, monkeypatch):
+    """Test rotating token for a pull mirror."""
+    # Seed test data
+    src_id = await seed_instance(session_maker, name="Source", url="https://source.example.com")
+    tgt_id = await seed_instance(session_maker, name="Target", url="https://target.example.com")
+    pair_id = await seed_pair(
+        session_maker,
+        name="Test Pair",
+        source_instance_id=src_id,
+        target_instance_id=tgt_id,
+        mirror_direction="pull"
+    )
+
+    # Create mirror with existing token
+    async with session_maker() as s:
+        mirror = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=10,
+            source_project_path="group/source-project",
+            target_project_id=20,
+            target_project_path="group/target-project",
+            mirror_id=402,
+            enabled=True,
+            gitlab_token_id=456,
+            token_project_id=10,  # Pull: token on source
+            mirror_token_name="old-token",
+        )
+        s.add(mirror)
+        await s.commit()
+        await s.refresh(mirror)
+        mirror_id = mirror.id
+
+    # Mock GitLabClient
+    monkeypatch.setattr("app.api.mirrors.GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.token_create_calls.clear()
+    FakeGitLabClient.token_delete_calls.clear()
+    FakeGitLabClient.update_calls.clear()
+
+    # Rotate token
+    resp = await client.post(f"/api/mirrors/{mirror_id}/rotate-token")
+    assert resp.status_code == 200
+
+    # Verify old token was deleted
+    assert len(FakeGitLabClient.token_delete_calls) == 1
+    deleted_project_id, deleted_token_id = FakeGitLabClient.token_delete_calls[0]
+    assert deleted_project_id == 10  # Source project
+    assert deleted_token_id == 456
+
+    # Verify new token was created on source (pull mirror)
+    assert len(FakeGitLabClient.token_create_calls) == 1
+    created_project_id, token_name, scopes, expires_at, access_level = FakeGitLabClient.token_create_calls[0]
+    assert created_project_id == 10  # Source project
+    assert scopes == ["read_repository"]  # Pull needs read on source
+
+    # Verify mirror was updated in GitLab with new URL
+    assert len(FakeGitLabClient.update_calls) == 1
+    (
+        update_project_id,
+        update_mirror_id,
+        enabled,
+        only_protected,
+        keep_divergent,
+        trigger_builds,
+        branch_regex,
+        user_id,
+        direction,
+        url,
+    ) = FakeGitLabClient.update_calls[0]
+    assert update_project_id == 20  # Target project (has the mirror config for pull)
+    assert update_mirror_id == 402
+    assert direction == "pull"  # Critical: direction must be passed
+    assert url is not None
+    assert "fake-token-value" in url
+
+
+@pytest.mark.asyncio
+async def test_rotate_token_not_found(client):
+    """Test rotating token for non-existent mirror returns 404."""
+    resp = await client.post("/api/mirrors/99999/rotate-token")
+    assert resp.status_code == 404
+    assert "not found" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_rotate_token_without_mirror_id(client, session_maker, monkeypatch):
+    """Test rotating token when mirror doesn't have a mirror_id yet."""
+    # Seed test data
+    src_id = await seed_instance(session_maker, name="Source", url="https://source.example.com")
+    tgt_id = await seed_instance(session_maker, name="Target", url="https://target.example.com")
+    pair_id = await seed_pair(
+        session_maker,
+        name="Test Pair",
+        source_instance_id=src_id,
+        target_instance_id=tgt_id,
+        mirror_direction="push"
+    )
+
+    # Create mirror without mirror_id (not yet created in GitLab)
+    async with session_maker() as s:
+        mirror = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=10,
+            source_project_path="group/source-project",
+            target_project_id=20,
+            target_project_path="group/target-project",
+            mirror_id=None,  # No GitLab mirror yet
+            enabled=True,
+        )
+        s.add(mirror)
+        await s.commit()
+        await s.refresh(mirror)
+        mirror_id = mirror.id
+
+    # Mock GitLabClient
+    monkeypatch.setattr("app.api.mirrors.GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.token_create_calls.clear()
+    FakeGitLabClient.update_calls.clear()
+
+    # Rotate token
+    resp = await client.post(f"/api/mirrors/{mirror_id}/rotate-token")
+    assert resp.status_code == 200
+
+    # Token should be created
+    assert len(FakeGitLabClient.token_create_calls) == 1
+
+    # But mirror should NOT be updated in GitLab (no mirror_id)
+    assert len(FakeGitLabClient.update_calls) == 0
+
+    # Database should still be updated with new token info
+    async with session_maker() as s:
+        result = await s.execute(select(Mirror).where(Mirror.id == mirror_id))
+        updated_mirror = result.scalar_one()
+        assert updated_mirror.gitlab_token_id == 999
+        assert updated_mirror.encrypted_mirror_token is not None
 
