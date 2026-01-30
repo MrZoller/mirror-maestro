@@ -632,6 +632,8 @@ def test_gitlab_client_create_pull_mirror_uses_pull_endpoint(monkeypatch):
         mirror_url="https://source.com/repo.git",
         enabled=True,
         trigger_builds=True,
+        only_protected_branches=True,
+        keep_divergent_refs=False,  # Should be inverted to mirror_overwrites_diverged_branches=True
     )
 
     # Verify it used the correct endpoint
@@ -639,12 +641,18 @@ def test_gitlab_client_create_pull_mirror_uses_pull_endpoint(monkeypatch):
     method, path, data = client.gl.requests[0]
     assert method == "PUT"
     assert path == "/projects/456/mirror/pull"
+
+    # Verify correct parameter names for pull mirror API
     assert data["url"] == "https://source.com/repo.git"
     assert data["enabled"] == True
-    assert data["trigger_builds"] == True
+    assert data["mirror_trigger_builds"] == True  # Note: "mirror_" prefix
+    assert data["only_mirror_protected_branches"] == True  # Note: "mirror_" prefix
+    assert data["mirror_overwrites_diverged_branches"] == True  # Inverted from keep_divergent_refs=False
 
     # Verify response is normalized
     assert result["mirror_direction"] == "pull"
+    assert result["mirror_trigger_builds"] == True
+    assert result["keep_divergent_refs"] == False
 
 
 def test_gitlab_client_create_pull_mirror_fallback_for_old_gitlab(monkeypatch):
