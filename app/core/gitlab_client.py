@@ -367,14 +367,15 @@ class GitLabClient:
                 result = self.gl.http_put(f"/projects/{project_id}/mirror/pull", post_data=data)
 
                 # The pull mirror API returns the full project object, not just the mirror
-                # We need to extract mirror info from it and normalize to match remote_mirrors format
+                # IMPORTANT: Pull mirrors don't have a separate mirror ID like push mirrors
+                # The mirror is part of the project configuration itself
                 if isinstance(result, dict):
                     # Return a normalized response similar to remote_mirrors endpoint
                     import_url = result.get("import_url")
                     # Note: We normalize only_mirror_protected_branches back to only_protected_branches
                     # for consistency with the rest of our codebase
                     return {
-                        "id": result.get("id"),  # This is the project ID, not mirror ID
+                        "id": None,  # Pull mirrors don't have a separate mirror ID
                         "url": import_url if import_url else mirror_url,
                         "enabled": enabled,
                         "mirror_direction": "pull",
@@ -589,15 +590,16 @@ class GitLabClient:
                 data["mirror_user_id"] = mirror_user_id
 
             if not data:
-                return {"id": project_id, "mirror_direction": "pull"}
+                return {"id": None, "mirror_direction": "pull"}
 
             logger.info(f"Updating pull mirror on project {project_id} using /mirror/pull endpoint")
             result = self.gl.http_put(f"/projects/{project_id}/mirror/pull", post_data=data)
 
             # Normalize response
+            # IMPORTANT: Pull mirrors don't have a separate mirror ID
             if isinstance(result, dict):
                 return {
-                    "id": project_id,
+                    "id": None,  # Pull mirrors don't have a separate mirror ID
                     "url": result.get("import_url", url),
                     "enabled": enabled if enabled is not None else result.get("mirror"),
                     "mirror_direction": "pull",
