@@ -569,27 +569,9 @@ function setupEventListeners() {
         }
     });
 
-    // Project typeahead for large instances (Mirrors tab)
-    const srcSearch = document.getElementById('mirror-source-project-search');
-    const tgtSearch = document.getElementById('mirror-target-project-search');
-    if (srcSearch) {
-        srcSearch.addEventListener('input', debounce(() => searchProjectsForMirror('source'), 250));
-    }
-    if (tgtSearch) {
-        tgtSearch.addEventListener('input', debounce(() => searchProjectsForMirror('target'), 250));
-    }
-
-    // Keep the search field synced with selection
-    document.getElementById('mirror-source-project')?.addEventListener('change', (e) => {
-        const opt = e.target.selectedOptions?.[0];
-        const path = opt?.dataset?.path;
-        if (srcSearch && path) srcSearch.value = path;
-    });
-    document.getElementById('mirror-target-project')?.addEventListener('change', (e) => {
-        const opt = e.target.selectedOptions?.[0];
-        const path = opt?.dataset?.path;
-        if (tgtSearch && path) tgtSearch.value = path;
-    });
+    // Project autocomplete for large instances (Mirrors tab)
+    setupProjectAutocomplete('mirror-source-project', 'source');
+    setupProjectAutocomplete('mirror-target-project', 'target');
 
     // Backup buttons
     document.getElementById('create-backup-btn')?.addEventListener('click', async () => {
@@ -2639,66 +2621,165 @@ async function loadProjectsForPair() {
         resetMirrorOverrides();
         applyMirrorDirectionUI(pair.mirror_direction);
 
-        // Avoid loading every project up-front (can be very large). Use
-        // a server-backed typeahead instead.
+        // Set instance IDs for autocomplete
         state.mirrorProjectInstances.source = pair.source_instance_id;
         state.mirrorProjectInstances.target = pair.target_instance_id;
 
-        const sourceSelect = document.getElementById('mirror-source-project');
-        const targetSelect = document.getElementById('mirror-target-project');
-        if (sourceSelect) sourceSelect.innerHTML = '<option value="">Type to search for a source project...</option>';
-        if (targetSelect) targetSelect.innerHTML = '<option value="">Type to search for a target project...</option>';
+        // Clear autocomplete inputs
+        const sourceInput = document.getElementById('mirror-source-project');
+        const targetInput = document.getElementById('mirror-target-project');
+        const sourceIdInput = document.getElementById('mirror-source-project-id');
+        const targetIdInput = document.getElementById('mirror-target-project-id');
+        const sourcePathInput = document.getElementById('mirror-source-project-path');
+        const targetPathInput = document.getElementById('mirror-target-project-path');
 
-        const srcSearch = document.getElementById('mirror-source-project-search');
-        const tgtSearch = document.getElementById('mirror-target-project-search');
-        if (srcSearch) srcSearch.value = '';
-        if (tgtSearch) tgtSearch.value = '';
+        if (sourceInput) sourceInput.value = '';
+        if (targetInput) targetInput.value = '';
+        if (sourceIdInput) sourceIdInput.value = '';
+        if (targetIdInput) targetIdInput.value = '';
+        if (sourcePathInput) sourcePathInput.value = '';
+        if (targetPathInput) targetPathInput.value = '';
     } catch (error) {
         console.error('Failed to load projects:', error);
     }
 }
 
-async function searchProjectsForMirror(side) {
-    const instanceId = side === 'source' ? state.mirrorProjectInstances.source : state.mirrorProjectInstances.target;
-    const inputId = side === 'source' ? 'mirror-source-project-search' : 'mirror-target-project-search';
-    const selectId = side === 'source' ? 'mirror-source-project' : 'mirror-target-project';
-    const placeholder = side === 'source' ? 'Select source project...' : 'Select target project...';
-
+// Setup autocomplete for project selection
+function setupProjectAutocomplete(inputId, side) {
     const input = document.getElementById(inputId);
-    const select = document.getElementById(selectId);
-    if (!input || !select) return;
+    const dropdown = document.getElementById(`${inputId}-dropdown`);
+    const idInput = document.getElementById(`${inputId}-id`);
+    const pathInput = document.getElementById(`${inputId}-path`);
 
-    if (!instanceId) {
-        select.innerHTML = '<option value="">Select an instance pair first...</option>';
-        return;
+    if (!input || !dropdown) return;
+
+    let selectedIndex = -1;
+    let currentResults = [];
+
+    // Input event - search as user types
+    input.addEventListener('input', debounce(async () => {
+        const query = input.value.trim();
+
+        // Clear selection when input changes
+        if (idInput) idInput.value = '';
+        if (pathInput) pathInput.value = '';
+
+        if (query.length < 2) {
+            dropdown.innerHTML = '';
+            dropdown.classList.remove('show');
+            return;
+        }
+
+        const instanceId = side === 'source' ? state.mirrorProjectInstances.source : state.mirrorProjectInstances.target;
+        if (!instanceId) {
+            dropdown.innerHTML = '<div class="autocomplete-item disabled">Select an instance pair first</div>';
+            dropdown.classList.add('show');
+            return;
+        }
+
+        // Show loading
+        dropdown.innerHTML = '<div class="autocomplete-loading">Searching...</div>';
+        dropdown.classList.add('show');
+
+        try {
+            const perPage = 50;
+            const res = await apiRequest(
+                `/api/instances/${instanceId}/projects?search=${encodeURIComponent(query)}&per_page=${perPage}&page=1&get_all=false`
+            );
+            const projects = res?.projects || [];
+            currentResults = projects;
+            selectedIndex = -1;
+
+            if (projects.length === 0) {
+                dropdown.innerHTML = '<div class="autocomplete-item disabled">No projects found</div>';
+            } else {
+                const items = projects.map((p, idx) => {
+                    const fullPath = p.path_with_namespace || p.name || '';
+                    return `<div class="autocomplete-item" data-index="${idx}" data-id="${p.id}" data-path="${escapeHtml(fullPath)}">${escapeHtml(fullPath)}</div>`;
+                }).join('');
+
+                const moreHint = projects.length >= perPage
+                    ? '<div class="autocomplete-item disabled">Showing first 50 matches — refine search to narrow</div>'
+                    : '';
+
+                dropdown.innerHTML = items + moreHint;
+            }
+
+            dropdown.classList.add('show');
+        } catch (error) {
+            console.error('Failed to search projects:', error);
+            dropdown.innerHTML = '<div class="autocomplete-item disabled">Search failed</div>';
+            dropdown.classList.add('show');
+        }
+    }, 250));
+
+    // Keyboard navigation
+    input.addEventListener('keydown', (e) => {
+        const items = dropdown.querySelectorAll('.autocomplete-item:not(.disabled)');
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (selectedIndex < items.length - 1) {
+                selectedIndex++;
+                updateSelection(items);
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (selectedIndex > 0) {
+                selectedIndex--;
+                updateSelection(items);
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (selectedIndex >= 0 && selectedIndex < items.length) {
+                selectItem(items[selectedIndex]);
+            }
+        } else if (e.key === 'Escape') {
+            dropdown.classList.remove('show');
+            selectedIndex = -1;
+        }
+    });
+
+    // Click to select
+    dropdown.addEventListener('click', (e) => {
+        const item = e.target.closest('.autocomplete-item:not(.disabled)');
+        if (item) {
+            selectItem(item);
+        }
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.classList.remove('show');
+            selectedIndex = -1;
+        }
+    });
+
+    function updateSelection(items) {
+        items.forEach((item, idx) => {
+            if (idx === selectedIndex) {
+                item.classList.add('selected');
+                item.scrollIntoView({ block: 'nearest' });
+            } else {
+                item.classList.remove('selected');
+            }
+        });
     }
 
-    const q = (input.value || '').toString().trim();
-    if (q.length < 2) {
-        select.innerHTML = '<option value="">Type at least 2 characters to search...</option>';
-        return;
-    }
+    function selectItem(item) {
+        const projectId = item.dataset.id;
+        const projectPath = item.dataset.path;
 
-    const perPage = 50;
-    try {
-        const res = await apiRequest(
-            `/api/instances/${instanceId}/projects?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`
-        );
-        const projects = res?.projects || [];
+        input.value = projectPath;
+        if (idInput) idInput.value = projectId;
+        if (pathInput) pathInput.value = projectPath;
 
-        const options = projects.map(p => {
-            const fullPath = (p.path_with_namespace || p.name || '').toString();
-            // Show full namespace path (supports multi-level groups).
-            return `<option value="${p.id}" data-path="${escapeHtml(fullPath)}">${escapeHtml(fullPath)}</option>`;
-        }).join('');
+        dropdown.classList.remove('show');
+        selectedIndex = -1;
 
-        const moreHint = projects.length >= perPage
-            ? `<option value="" disabled>Showing first ${perPage} matches — refine search to narrow</option>`
-            : '';
-
-        select.innerHTML = `<option value="">${placeholder}</option>` + options + moreHint;
-    } catch (error) {
-        console.error('Failed to search projects:', error);
+        // Trigger mirror check
+        checkProjectMirrors(side);
     }
 }
 
@@ -2736,15 +2817,15 @@ function clearProjectMirrorBadges() {
 // Check for existing mirrors on a selected project
 async function checkProjectMirrors(side) {
     const instanceId = side === 'source' ? state.mirrorProjectInstances.source : state.mirrorProjectInstances.target;
-    const selectId = side === 'source' ? 'mirror-source-project' : 'mirror-target-project';
+    const projectIdInputId = side === 'source' ? 'mirror-source-project-id' : 'mirror-target-project-id';
     const badgeId = side === 'source' ? 'source-project-mirrors-badge' : 'target-project-mirrors-badge';
 
-    const select = document.getElementById(selectId);
+    const projectIdInput = document.getElementById(projectIdInputId);
     const badge = document.getElementById(badgeId);
 
     if (!badge) return;
 
-    const projectId = select?.value;
+    const projectId = projectIdInput?.value;
     if (!projectId || !instanceId) {
         badge.innerHTML = '';
         return;
@@ -2843,18 +2924,23 @@ async function createMirror() {
     const form = document.getElementById('mirror-form');
     const formData = new FormData(form);
 
-    const sourceSelect = document.getElementById('mirror-source-project');
-    const targetSelect = document.getElementById('mirror-target-project');
+    // Get values from hidden inputs
+    const sourceProjectId = document.getElementById('mirror-source-project-id')?.value;
+    const targetProjectId = document.getElementById('mirror-target-project-id')?.value;
+    const sourceProjectPath = document.getElementById('mirror-source-project-path')?.value;
+    const targetProjectPath = document.getElementById('mirror-target-project-path')?.value;
 
-    const sourceOption = sourceSelect.selectedOptions[0];
-    const targetOption = targetSelect.selectedOptions[0];
+    if (!sourceProjectId || !targetProjectId) {
+        showMessage('Please select both source and target projects', 'error');
+        return;
+    }
 
     const data = {
         instance_pair_id: state.selectedPair,
-        source_project_id: parseInt(sourceSelect.value),
-        source_project_path: sourceOption.dataset.path,
-        target_project_id: parseInt(targetSelect.value),
-        target_project_path: targetOption.dataset.path,
+        source_project_id: parseInt(sourceProjectId),
+        source_project_path: sourceProjectPath,
+        target_project_id: parseInt(targetProjectId),
+        target_project_path: targetProjectPath,
         enabled: formData.get('enabled') === 'on'
     };
 

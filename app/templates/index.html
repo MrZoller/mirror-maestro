@@ -381,19 +381,33 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label for="mirror-source-project">Source Project *</label>
-                            <input type="text" id="mirror-source-project-search" placeholder="Type to search (min 2 chars)…">
-                            <select id="mirror-source-project" required onchange="checkProjectMirrors('source')">
-                                <option value="">Select source project...</option>
-                            </select>
+                            <div class="autocomplete-container">
+                                <input type="text"
+                                       id="mirror-source-project"
+                                       class="autocomplete-input"
+                                       placeholder="Type to search (min 2 chars)…"
+                                       autocomplete="off"
+                                       required>
+                                <input type="hidden" id="mirror-source-project-id">
+                                <input type="hidden" id="mirror-source-project-path">
+                                <div id="mirror-source-project-dropdown" class="autocomplete-dropdown"></div>
+                            </div>
                             <div id="source-project-mirrors-badge" class="project-mirrors-badge"></div>
                             <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
                         </div>
                         <div class="form-group">
                             <label for="mirror-target-project">Target Project *</label>
-                            <input type="text" id="mirror-target-project-search" placeholder="Type to search (min 2 chars)…">
-                            <select id="mirror-target-project" required onchange="checkProjectMirrors('target')">
-                                <option value="">Select target project...</option>
-                            </select>
+                            <div class="autocomplete-container">
+                                <input type="text"
+                                       id="mirror-target-project"
+                                       class="autocomplete-input"
+                                       placeholder="Type to search (min 2 chars)…"
+                                       autocomplete="off"
+                                       required>
+                                <input type="hidden" id="mirror-target-project-id">
+                                <input type="hidden" id="mirror-target-project-path">
+                                <div id="mirror-target-project-dropdown" class="autocomplete-dropdown"></div>
+                            </div>
                             <div id="target-project-mirrors-badge" class="project-mirrors-badge"></div>
                             <div class="text-muted" style="margin-top: 6px;">Results show full path (e.g. <code>group/subgroup/project</code>).</div>
                         </div>
