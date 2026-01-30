@@ -235,7 +235,10 @@
             </div>
 
             <div class="card">
-                <h3>Configured Instances</h3>
+                <div class="flex-between">
+                    <h3>Configured Instances</h3>
+                    <button class="btn btn-small btn-secondary" onclick="refreshInstances()" title="Refresh instances list">↻</button>
+                </div>
                 <table id="instances-table" class="enhanced-table">
                     <thead>
                         <tr>
@@ -320,7 +323,10 @@
             </div>
 
             <div class="card">
-                <h3>Configured Pairs</h3>
+                <div class="flex-between">
+                    <h3>Configured Pairs</h3>
+                    <button class="btn btn-small btn-secondary" onclick="refreshPairs()" title="Refresh pairs list">↻</button>
+                </div>
                 <table id="pairs-table" class="enhanced-table">
                     <thead>
                         <tr>
@@ -435,6 +441,7 @@
                 <div class="flex-between">
                     <h3>Configured Mirrors</h3>
                     <div class="flex" style="gap:10px;">
+                        <button class="btn btn-small btn-secondary" onclick="refreshMirrors()" title="Refresh mirrors list">↻</button>
                         <button class="btn btn-secondary btn-small" onclick="toggleMirrorViewMode()" title="Toggle between flat list and tree view">
                             <span id="view-mode-icon">🌳</span> Tree View
                         </button>
@@ -736,7 +743,10 @@
             </div>
 
             <div class="card">
-                <h3>Users</h3>
+                <div class="flex-between">
+                    <h3>Users</h3>
+                    <button class="btn btn-small btn-secondary" onclick="refreshUsers()" title="Refresh users list">↻</button>
+                </div>
                 <table id="users-table" class="enhanced-table">
                     <thead>
                         <tr>

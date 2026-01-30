@@ -965,6 +965,22 @@ function refreshSystemHealth() {
     loadSystemHealth();
 }
 
+function refreshInstances() {
+    loadInstances();
+}
+
+function refreshPairs() {
+    loadPairs();
+}
+
+function refreshMirrors() {
+    loadMirrors(true);
+}
+
+function refreshUsers() {
+    loadUsers();
+}
+
 function renderSystemHealth(health, container) {
     const statusIcons = {
         healthy: '✓',
