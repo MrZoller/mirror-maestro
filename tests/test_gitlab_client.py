@@ -343,7 +343,7 @@ def test_gitlab_client_get_project_mirrors_error(monkeypatch):
     monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
 
     client = mod.GitLabClient("https://example.com", "enc:any")
-    with pytest.raises(Exception, match="Failed to fetch mirrors"):
+    with pytest.raises(Exception, match="Failed to fetch push mirrors"):
         client.get_project_mirrors(123)
 
 
@@ -389,7 +389,7 @@ def test_gitlab_client_trigger_mirror_update_error(monkeypatch):
     monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
 
     client = mod.GitLabClient("https://example.com", "enc:any")
-    with pytest.raises(Exception, match="Failed to trigger mirror update"):
+    with pytest.raises(Exception, match="Failed to trigger push mirror update"):
         client.trigger_mirror_update(123, 456)
 
 
@@ -434,7 +434,7 @@ def test_gitlab_client_delete_mirror_error(monkeypatch):
     monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
 
     client = mod.GitLabClient("https://example.com", "enc:any")
-    with pytest.raises(Exception, match="Failed to delete mirror"):
+    with pytest.raises(Exception, match="Failed to delete push mirror"):
         client.delete_mirror(123, 789)
 
 
@@ -497,41 +497,6 @@ def test_gitlab_client_update_mirror_no_changes(monkeypatch):
     assert len(client.gl.updates) == 0  # No API call made
 
 
-def test_gitlab_client_update_mirror_filters_push_settings(monkeypatch):
-    """Test that push mirror updates filter out pull-only settings."""
-    from app.core import gitlab_client as mod
-
-    class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
-            self.updates = []
-
-        def http_put(self, path, post_data):
-            self.updates.append((path, post_data))
-            return post_data
-
-    class FakeGitlabModule:
-        Gitlab = FakeGL
-
-    monkeypatch.setattr(mod, "gitlab", FakeGitlabModule())
-    monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
-
-    client = mod.GitLabClient("https://example.com", "enc:any")
-    client.update_mirror(
-        project_id=123,
-        mirror_id=456,
-        enabled=True,
-        trigger_builds=True,  # Should be filtered for push
-        mirror_branch_regex="main",  # Should be filtered for push
-        mirror_user_id=99,  # Should be filtered for push
-        mirror_direction="push"
-    )
-    path, data = client.gl.updates[0]
-    assert "enabled" in data
-    assert "trigger_builds" not in data
-    assert "mirror_branch_regex" not in data
-    assert "mirror_user_id" not in data
-
-
 def test_gitlab_client_update_mirror_error(monkeypatch):
     """Test error handling when updating mirror fails."""
     from app.core import gitlab_client as mod
@@ -550,51 +515,8 @@ def test_gitlab_client_update_mirror_error(monkeypatch):
     monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
 
     client = mod.GitLabClient("https://example.com", "enc:any")
-    with pytest.raises(Exception, match="Failed to update mirror"):
+    with pytest.raises(Exception, match="Failed to update push mirror"):
         client.update_mirror(123, 456, enabled=False)
 
 
-def test_gitlab_client_filter_remote_mirror_payload_pull():
-    """Test that pull mirror payloads keep all settings."""
-    from app.core.gitlab_client import GitLabClient
-
-    data = {
-        "url": "https://example.com/repo.git",
-        "enabled": True,
-        "trigger_builds": True,
-        "mirror_branch_regex": "main",
-        "mirror_user_id": 42
-    }
-    result = GitLabClient._filter_remote_mirror_payload("pull", data.copy())
-    assert result == data  # All fields preserved for pull mirrors
-
-
-def test_gitlab_client_filter_remote_mirror_payload_push():
-    """Test that push mirror payloads filter pull-only settings."""
-    from app.core.gitlab_client import GitLabClient
-
-    data = {
-        "url": "https://example.com/repo.git",
-        "enabled": True,
-        "only_protected_branches": False,
-        "trigger_builds": True,
-        "mirror_branch_regex": "main",
-        "mirror_user_id": 42
-    }
-    result = GitLabClient._filter_remote_mirror_payload("push", data.copy())
-    assert "url" in result
-    assert "enabled" in result
-    assert "only_protected_branches" in result
-    assert "trigger_builds" not in result
-    assert "mirror_branch_regex" not in result
-    assert "mirror_user_id" not in result
-
-
-def test_gitlab_client_filter_remote_mirror_payload_no_direction():
-    """Test that payloads without direction are returned as-is."""
-    from app.core.gitlab_client import GitLabClient
-
-    data = {"url": "https://example.com/repo.git", "enabled": True}
-    result = GitLabClient._filter_remote_mirror_payload(None, data.copy())
-    assert result == data
 
