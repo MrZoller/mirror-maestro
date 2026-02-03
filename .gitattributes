@@ -1,2 +1,13 @@
+# Git LFS tracking for large binary files
+
+# Screenshots and documentation images
 docs/screenshots/*.png filter=lfs diff=lfs merge=lfs -text
+# Application images (favicons, icons)
 app/static/images/*.png filter=lfs diff=lfs merge=lfs -text
+# Other common binary formats (for future use)
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.jpeg filter=lfs diff=lfs merge=lfs -text
+*.gif filter=lfs diff=lfs merge=lfs -text
+*.webp filter=lfs diff=lfs merge=lfs -text
+*.ico filter=lfs diff=lfs merge=lfs -text
+*.svg filter=lfs diff=lfs merge=lfs -text
