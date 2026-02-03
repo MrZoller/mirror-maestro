@@ -28,7 +28,11 @@ class FakeGitLabClient:
         return self.current_user
 
     def delete_mirror(self, project_id: int, mirror_id: int):
-        """Mock delete_mirror for cleanup operations."""
+        """Mock delete_mirror (push mirror) for cleanup operations."""
+        pass
+
+    def delete_pull_mirror(self, project_id: int):
+        """Mock delete_pull_mirror for cleanup operations."""
         pass
 
     def delete_project_access_token(self, project_id: int, token_id: int):
