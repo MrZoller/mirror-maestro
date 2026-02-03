@@ -127,6 +127,7 @@ async def test_import_pair_mirrors_imports_and_skips_duplicates(client, session_
         mock_mirrors_client.create_push_mirror.return_value = {"id": 456}
         mock_mirrors_client.create_pull_mirror.return_value = {"id": 789}
         mock_mirrors_client.get_project_mirrors.return_value = []
+        mock_mirrors_client.get_pull_mirror.return_value = None
         MockMirrorsClient.return_value = mock_mirrors_client
 
         resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
@@ -260,6 +261,7 @@ async def test_import_pair_with_all_mirror_settings(client, session_maker):
         mock_mirrors_client.create_push_mirror.return_value = {"id": 456}
         mock_mirrors_client.create_pull_mirror.return_value = {"id": 789}
         mock_mirrors_client.get_project_mirrors.return_value = []
+        mock_mirrors_client.get_pull_mirror.return_value = None
         MockMirrorsClient.return_value = mock_mirrors_client
 
         resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
@@ -341,6 +343,7 @@ async def test_import_pair_multiple_mirrors(client, session_maker):
         mock_mirrors_client.create_push_mirror.return_value = {"id": 456}
         mock_mirrors_client.create_pull_mirror.return_value = {"id": 789}
         mock_mirrors_client.get_project_mirrors.return_value = []
+        mock_mirrors_client.get_pull_mirror.return_value = None
         MockMirrorsClient.return_value = mock_mirrors_client
 
         resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)
@@ -398,6 +401,7 @@ async def test_export_import_roundtrip(client, session_maker):
         mock_mirrors_client.create_push_mirror.return_value = {"id": 456}
         mock_mirrors_client.create_pull_mirror.return_value = {"id": 789}
         mock_mirrors_client.get_project_mirrors.return_value = []
+        mock_mirrors_client.get_pull_mirror.return_value = None
         MockMirrorsClient.return_value = mock_mirrors_client
 
         import_resp = await client.post(f"/api/export/pair/{pair2_id}", json=import_payload)
@@ -497,6 +501,7 @@ async def test_import_mixed_success_and_skips(client, session_maker):
         mock_mirrors_client.create_push_mirror.return_value = {"id": 456}
         mock_mirrors_client.create_pull_mirror.return_value = {"id": 789}
         mock_mirrors_client.get_project_mirrors.return_value = []
+        mock_mirrors_client.get_pull_mirror.return_value = None
         MockMirrorsClient.return_value = mock_mirrors_client
 
         resp = await client.post(f"/api/export/pair/{pair_id}", json=payload)

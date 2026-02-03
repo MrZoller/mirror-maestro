@@ -296,10 +296,20 @@ class GitLabClient:
 **Key Methods**:
 - `test_connection()` - Validate credentials
 - `get_projects()` / `get_groups()` - Fetch resources
-- `create_mirror()` - Create push/pull mirrors
-- `get_mirror_status()` - Check mirror sync status
-- `trigger_mirror_update()` - Force sync
-- `delete_mirror()` - Remove mirror
+- **Push Mirrors** (use `/projects/:id/remote_mirrors` endpoint):
+  - `create_push_mirror()` - Create a push mirror with embedded credentials in URL
+  - `get_project_mirrors()` - List all push mirrors for a project
+  - `trigger_mirror_update()` - Trigger immediate push sync
+  - `update_mirror()` - Update push mirror settings
+  - `delete_mirror()` - Delete a push mirror
+- **Pull Mirrors** (use `/projects/:id/mirror/pull` endpoint):
+  - `create_pull_mirror()` - Create pull mirror with separate auth credentials
+  - `get_pull_mirror()` - Get pull mirror configuration for a project
+  - `trigger_pull_mirror_update()` - Trigger immediate pull sync
+  - `update_pull_mirror()` - Update pull mirror settings
+  - `delete_pull_mirror()` - Disable pull mirroring
+
+**Note**: Push and pull mirrors use completely different GitLab API endpoints with different parameter formats. Push mirrors embed credentials in the URL, while pull mirrors use separate `auth_user` and `auth_password` parameters. GitLab allows only ONE pull mirror per project but multiple push mirrors.
 
 #### 5. Encryption (`app/core/encryption.py`)
 
@@ -702,9 +712,12 @@ async def create_mirror(db: AsyncSession, mirror_data: MirrorCreate) -> Mirror:
     result = await db.execute(select(InstancePair).where(InstancePair.id == mirror_data.instance_pair_id))
     pair = result.scalar_one_or_none()
 
-    # GitLab API call - use sync wrapper in async context
+    # GitLab API call - use appropriate method based on direction
     client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
-    gitlab_mirror = client.create_mirror(...)  # Sync call wrapped in async function
+    if pair.mirror_direction == "push":
+        gitlab_mirror = client.create_push_mirror(...)
+    else:
+        gitlab_mirror = client.create_pull_mirror(...)
 
     # Database operation - async
     await db.commit()
@@ -1613,10 +1626,14 @@ from unittest.mock import MagicMock, patch
 async def test_create_mirror_success(client: AsyncClient, sample_pair):
     """Test successful mirror creation."""
 
-    # Mock GitLab client
+    # Mock GitLab client - mock both push and pull mirror methods
     with patch('app.api.mirrors.GitLabClient') as MockClient:
         mock_client = MagicMock()
-        mock_client.create_mirror.return_value = {"id": 123}
+        mock_client.create_push_mirror.return_value = {"id": 123}
+        mock_client.create_pull_mirror.return_value = {"id": 456}
+        mock_client.get_project_mirrors.return_value = []
+        mock_client.get_pull_mirror.return_value = None  # No existing pull mirror
+        mock_client.create_project_access_token.return_value = {"id": 1, "token": "test"}
         MockClient.return_value = mock_client
 
         response = await client.post("/api/mirrors", json={
@@ -1628,7 +1645,8 @@ async def test_create_mirror_success(client: AsyncClient, sample_pair):
         })
 
         assert response.status_code == 201
-        assert mock_client.create_mirror.called
+        # Check direction-appropriate method was called
+        assert mock_client.create_push_mirror.called or mock_client.create_pull_mirror.called
 ```
 
 ### Testing Patterns
