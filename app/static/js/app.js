@@ -569,27 +569,9 @@ function setupEventListeners() {
         }
     });
 
-    // Project typeahead for large instances (Mirrors tab)
-    const srcSearch = document.getElementById('mirror-source-project-search');
-    const tgtSearch = document.getElementById('mirror-target-project-search');
-    if (srcSearch) {
-        srcSearch.addEventListener('input', debounce(() => searchProjectsForMirror('source'), 250));
-    }
-    if (tgtSearch) {
-        tgtSearch.addEventListener('input', debounce(() => searchProjectsForMirror('target'), 250));
-    }
-
-    // Keep the search field synced with selection
-    document.getElementById('mirror-source-project')?.addEventListener('change', (e) => {
-        const opt = e.target.selectedOptions?.[0];
-        const path = opt?.dataset?.path;
-        if (srcSearch && path) srcSearch.value = path;
-    });
-    document.getElementById('mirror-target-project')?.addEventListener('change', (e) => {
-        const opt = e.target.selectedOptions?.[0];
-        const path = opt?.dataset?.path;
-        if (tgtSearch && path) tgtSearch.value = path;
-    });
+    // Project autocomplete for mirrors (Mirrors tab)
+    initProjectAutocomplete('source');
+    initProjectAutocomplete('target');
 
     // Backup buttons
     document.getElementById('create-backup-btn')?.addEventListener('click', async () => {
@@ -2603,40 +2585,153 @@ async function loadProjectsForPair() {
         state.mirrorProjectInstances.source = pair.source_instance_id;
         state.mirrorProjectInstances.target = pair.target_instance_id;
 
-        const sourceSelect = document.getElementById('mirror-source-project');
-        const targetSelect = document.getElementById('mirror-target-project');
-        if (sourceSelect) sourceSelect.innerHTML = '<option value="">Type to search for a source project...</option>';
-        if (targetSelect) targetSelect.innerHTML = '<option value="">Type to search for a target project...</option>';
-
-        const srcSearch = document.getElementById('mirror-source-project-search');
-        const tgtSearch = document.getElementById('mirror-target-project-search');
-        if (srcSearch) srcSearch.value = '';
-        if (tgtSearch) tgtSearch.value = '';
+        // Clear the autocomplete inputs and hidden values
+        clearProjectAutocomplete('source');
+        clearProjectAutocomplete('target');
     } catch (error) {
         console.error('Failed to load projects:', error);
     }
 }
 
+// Project autocomplete state
+const autocompleteState = {
+    source: { highlightedIndex: -1, projects: [] },
+    target: { highlightedIndex: -1, projects: [] }
+};
+
+function clearProjectAutocomplete(side) {
+    const input = document.getElementById(`mirror-${side}-project-input`);
+    const hidden = document.getElementById(`mirror-${side}-project`);
+    const dropdown = document.getElementById(`${side}-project-dropdown`);
+
+    if (input) {
+        input.value = '';
+        input.classList.remove('has-selection');
+    }
+    if (hidden) hidden.value = '';
+    if (dropdown) {
+        dropdown.innerHTML = '';
+        dropdown.classList.remove('active');
+    }
+    autocompleteState[side].highlightedIndex = -1;
+    autocompleteState[side].projects = [];
+}
+
+function initProjectAutocomplete(side) {
+    const input = document.getElementById(`mirror-${side}-project-input`);
+    const hidden = document.getElementById(`mirror-${side}-project`);
+    const dropdown = document.getElementById(`${side}-project-dropdown`);
+
+    if (!input || !hidden || !dropdown) return;
+
+    // Debounced search on input
+    input.addEventListener('input', debounce(() => searchProjectsForMirror(side), 250));
+
+    // Keyboard navigation
+    input.addEventListener('keydown', (e) => {
+        const items = dropdown.querySelectorAll('.autocomplete-item');
+        const state = autocompleteState[side];
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (!dropdown.classList.contains('active') && items.length > 0) {
+                dropdown.classList.add('active');
+            }
+            state.highlightedIndex = Math.min(state.highlightedIndex + 1, items.length - 1);
+            updateHighlight(dropdown, state.highlightedIndex);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            state.highlightedIndex = Math.max(state.highlightedIndex - 1, 0);
+            updateHighlight(dropdown, state.highlightedIndex);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (state.highlightedIndex >= 0 && items[state.highlightedIndex]) {
+                selectProject(side, state.projects[state.highlightedIndex]);
+            }
+        } else if (e.key === 'Escape') {
+            dropdown.classList.remove('active');
+            state.highlightedIndex = -1;
+        }
+    });
+
+    // Show dropdown on focus if there are results
+    input.addEventListener('focus', () => {
+        if (autocompleteState[side].projects.length > 0 && !hidden.value) {
+            dropdown.classList.add('active');
+        }
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        const wrapper = document.getElementById(`${side}-project-autocomplete`);
+        if (wrapper && !wrapper.contains(e.target)) {
+            dropdown.classList.remove('active');
+        }
+    });
+}
+
+function updateHighlight(dropdown, index) {
+    const items = dropdown.querySelectorAll('.autocomplete-item');
+    items.forEach((item, i) => {
+        if (i === index) {
+            item.classList.add('highlighted');
+            item.scrollIntoView({ block: 'nearest' });
+        } else {
+            item.classList.remove('highlighted');
+        }
+    });
+}
+
+function selectProject(side, project) {
+    const input = document.getElementById(`mirror-${side}-project-input`);
+    const hidden = document.getElementById(`mirror-${side}-project`);
+    const dropdown = document.getElementById(`${side}-project-dropdown`);
+
+    if (!project || !input || !hidden) return;
+
+    const fullPath = project.path_with_namespace || project.name || '';
+    input.value = fullPath;
+    input.classList.add('has-selection');
+    hidden.value = project.id;
+    dropdown.classList.remove('active');
+    autocompleteState[side].highlightedIndex = -1;
+
+    // Check for existing mirrors on the selected project
+    checkProjectMirrors(side);
+}
+
 async function searchProjectsForMirror(side) {
     const instanceId = side === 'source' ? state.mirrorProjectInstances.source : state.mirrorProjectInstances.target;
-    const inputId = side === 'source' ? 'mirror-source-project-search' : 'mirror-target-project-search';
-    const selectId = side === 'source' ? 'mirror-source-project' : 'mirror-target-project';
-    const placeholder = side === 'source' ? 'Select source project...' : 'Select target project...';
+    const input = document.getElementById(`mirror-${side}-project-input`);
+    const hidden = document.getElementById(`mirror-${side}-project`);
+    const dropdown = document.getElementById(`${side}-project-dropdown`);
 
-    const input = document.getElementById(inputId);
-    const select = document.getElementById(selectId);
-    if (!input || !select) return;
+    if (!input || !dropdown) return;
+
+    // Clear selection when user types (they're searching for something new)
+    if (hidden) {
+        hidden.value = '';
+        input.classList.remove('has-selection');
+    }
 
     if (!instanceId) {
-        select.innerHTML = '<option value="">Select an instance pair first...</option>';
+        dropdown.innerHTML = '<div class="autocomplete-hint">Select an instance pair first</div>';
+        dropdown.classList.add('active');
+        autocompleteState[side].projects = [];
         return;
     }
 
     const q = (input.value || '').toString().trim();
     if (q.length < 2) {
-        select.innerHTML = '<option value="">Type at least 2 characters to search...</option>';
+        dropdown.innerHTML = '<div class="autocomplete-hint">Type at least 2 characters to search</div>';
+        dropdown.classList.add('active');
+        autocompleteState[side].projects = [];
         return;
     }
+
+    // Show loading state
+    dropdown.innerHTML = '<div class="autocomplete-loading"><div class="spinner"></div> Searching...</div>';
+    dropdown.classList.add('active');
 
     const perPage = 50;
     try {
@@ -2644,20 +2739,41 @@ async function searchProjectsForMirror(side) {
             `/api/instances/${instanceId}/projects?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`
         );
         const projects = res?.projects || [];
+        autocompleteState[side].projects = projects;
+        autocompleteState[side].highlightedIndex = -1;
 
-        const options = projects.map(p => {
+        if (projects.length === 0) {
+            dropdown.innerHTML = '<div class="autocomplete-empty">No projects found</div>';
+            return;
+        }
+
+        const items = projects.map((p, i) => {
             const fullPath = (p.path_with_namespace || p.name || '').toString();
-            // Show full namespace path (supports multi-level groups).
-            return `<option value="${p.id}" data-path="${escapeHtml(fullPath)}">${escapeHtml(fullPath)}</option>`;
+            return `
+                <div class="autocomplete-item" data-index="${i}">
+                    <span class="autocomplete-item-path">${escapeHtml(fullPath)}</span>
+                    <span class="autocomplete-item-id">ID: ${p.id}</span>
+                </div>
+            `;
         }).join('');
 
         const moreHint = projects.length >= perPage
-            ? `<option value="" disabled>Showing first ${perPage} matches — refine search to narrow</option>`
+            ? '<div class="autocomplete-more-hint">Showing first 50 matches — refine search to narrow</div>'
             : '';
 
-        select.innerHTML = `<option value="">${placeholder}</option>` + options + moreHint;
+        dropdown.innerHTML = items + moreHint;
+
+        // Add click handlers to items
+        dropdown.querySelectorAll('.autocomplete-item').forEach((item) => {
+            item.addEventListener('click', () => {
+                const index = parseInt(item.dataset.index);
+                selectProject(side, projects[index]);
+            });
+        });
+
     } catch (error) {
         console.error('Failed to search projects:', error);
+        dropdown.innerHTML = '<div class="autocomplete-empty">Search failed</div>';
     }
 }
 
@@ -2802,18 +2918,22 @@ async function createMirror() {
     const form = document.getElementById('mirror-form');
     const formData = new FormData(form);
 
-    const sourceSelect = document.getElementById('mirror-source-project');
-    const targetSelect = document.getElementById('mirror-target-project');
+    const sourceHidden = document.getElementById('mirror-source-project');
+    const targetHidden = document.getElementById('mirror-target-project');
+    const sourceInput = document.getElementById('mirror-source-project-input');
+    const targetInput = document.getElementById('mirror-target-project-input');
 
-    const sourceOption = sourceSelect.selectedOptions[0];
-    const targetOption = targetSelect.selectedOptions[0];
+    if (!sourceHidden?.value || !targetHidden?.value) {
+        showMessage('Please select both source and target projects', 'error');
+        return;
+    }
 
     const data = {
         instance_pair_id: state.selectedPair,
-        source_project_id: parseInt(sourceSelect.value),
-        source_project_path: sourceOption.dataset.path,
-        target_project_id: parseInt(targetSelect.value),
-        target_project_path: targetOption.dataset.path,
+        source_project_id: parseInt(sourceHidden.value),
+        source_project_path: sourceInput?.value || '',
+        target_project_id: parseInt(targetHidden.value),
+        target_project_path: targetInput?.value || '',
         enabled: formData.get('enabled') === 'on'
     };
 
