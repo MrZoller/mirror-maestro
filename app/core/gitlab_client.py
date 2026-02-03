@@ -329,24 +329,75 @@ class GitLabClient:
         mirror_url: str,
         enabled: bool = True,
         only_protected_branches: bool = False,
-        keep_divergent_refs: bool | None = None,
+        mirror_overwrites_diverged_branches: bool | None = None,
         trigger_builds: bool | None = None,
         mirror_branch_regex: str | None = None,
-        mirror_user_id: int | None = None,
+        auth_user: str | None = None,
+        auth_password: str | None = None,
     ) -> Dict[str, Any]:
-        """Create a pull mirror for a project (target pulls from source)."""
+        """
+        Create/configure a pull mirror for a project (target pulls from source).
+
+        Uses the dedicated pull mirror API: PUT /projects/:id/mirror/pull
+        This is the correct endpoint for pull mirrors (not /remote_mirrors which is push-only).
+
+        Args:
+            project_id: The project ID to configure pull mirroring on.
+            mirror_url: The URL of the source repository to pull from.
+            enabled: Whether the mirror is enabled.
+            only_protected_branches: If True, only mirror protected branches.
+            mirror_overwrites_diverged_branches: If True, overwrite diverged branches on pull.
+            trigger_builds: If True, trigger CI/CD pipelines when mirror updates.
+            mirror_branch_regex: Regex pattern to filter which branches to mirror.
+            auth_user: Username for authentication (typically the token name).
+            auth_password: Password/token for authentication.
+
+        Returns:
+            Dict with pull mirror configuration details.
+        """
         try:
-            return self._create_remote_mirror(
-                project_id=project_id,
-                mirror_url=mirror_url,
-                enabled=enabled,
-                only_protected_branches=only_protected_branches,
-                keep_divergent_refs=keep_divergent_refs,
-                trigger_builds=trigger_builds,
-                mirror_branch_regex=mirror_branch_regex,
-                mirror_user_id=mirror_user_id,
-                mirror_direction="pull",
-            )
+            data: Dict[str, Any] = {
+                "url": mirror_url,
+                "enabled": enabled,
+            }
+
+            # Add authentication if provided
+            if auth_user is not None:
+                data["auth_user"] = auth_user
+            if auth_password is not None:
+                data["auth_password"] = auth_password
+
+            # Add optional settings
+            if only_protected_branches is not None:
+                data["only_mirror_protected_branches"] = only_protected_branches
+            if mirror_overwrites_diverged_branches is not None:
+                data["mirror_overwrites_diverged_branches"] = mirror_overwrites_diverged_branches
+            if trigger_builds is not None:
+                data["mirror_trigger_builds"] = trigger_builds
+            if mirror_branch_regex is not None:
+                data["mirror_branch_regex"] = mirror_branch_regex
+
+            # Use the dedicated pull mirror endpoint (PUT /projects/:id/mirror/pull)
+            result = self.gl.http_put(f"/projects/{project_id}/mirror/pull", post_data=data)
+
+            if not isinstance(result, dict):
+                raise GitLabClientError(
+                    f"Failed to configure pull mirror on project {project_id}: Unexpected response from GitLab API"
+                )
+
+            return {
+                "id": result.get("id"),
+                "url": result.get("url"),
+                "enabled": result.get("enabled"),
+                "update_status": result.get("update_status"),
+                "last_update_at": result.get("last_update_at"),
+                "last_successful_update_at": result.get("last_successful_update_at"),
+                "last_error": result.get("last_error"),
+                "only_mirror_protected_branches": result.get("only_mirror_protected_branches"),
+                "mirror_overwrites_diverged_branches": result.get("mirror_overwrites_diverged_branches"),
+                "mirror_trigger_builds": result.get("mirror_trigger_builds"),
+                "mirror_branch_regex": result.get("mirror_branch_regex"),
+            }
         except GitLabClientError:
             raise
         except Exception as e:
@@ -360,9 +411,12 @@ class GitLabClient:
         keep_divergent_refs: bool | None = None,
         only_protected_branches: bool = False,
         mirror_branch_regex: str | None = None,
-        mirror_user_id: int | None = None,
     ) -> Dict[str, Any]:
-        """Create a push mirror for a project (source pushes to target)."""
+        """
+        Create a push mirror for a project (source pushes to target).
+
+        Uses the remote mirrors API: POST /projects/:id/remote_mirrors
+        """
         try:
             return self._create_remote_mirror(
                 project_id=project_id,
@@ -371,8 +425,6 @@ class GitLabClient:
                 only_protected_branches=only_protected_branches,
                 keep_divergent_refs=keep_divergent_refs,
                 mirror_branch_regex=mirror_branch_regex,
-                mirror_user_id=mirror_user_id,
-                mirror_direction="push",
             )
         except GitLabClientError:
             raise
@@ -380,7 +432,12 @@ class GitLabClient:
             _handle_gitlab_error(e, f"Failed to create push mirror on project {project_id}")
 
     def get_project_mirrors(self, project_id: int) -> List[Dict[str, Any]]:
-        """Get all mirrors for a project."""
+        """
+        Get all push mirrors (remote mirrors) for a project.
+
+        Note: This only returns push mirrors. Use get_pull_mirror() to get
+        pull mirror configuration.
+        """
         try:
             mirrors = self.gl.http_get(f"/projects/{project_id}/remote_mirrors")
             if not isinstance(mirrors, list):
@@ -394,69 +451,153 @@ class GitLabClient:
                     "id": m.get("id"),
                     "url": m.get("url"),
                     "enabled": m.get("enabled"),
-                    "mirror_direction": m.get("mirror_direction"),
+                    "mirror_direction": "push",  # remote_mirrors are always push
                     "only_protected_branches": m.get("only_protected_branches"),
                     "keep_divergent_refs": m.get("keep_divergent_refs"),
-                    "trigger_builds": m.get("trigger_builds"),
                     "mirror_branch_regex": m.get("mirror_branch_regex"),
-                    "mirror_user_id": m.get("mirror_user_id"),
                     "update_status": m.get("update_status"),
                     "last_update_at": m.get("last_update_at"),
                     "last_successful_update_at": m.get("last_successful_update_at"),
                 })
             return out
         except Exception as e:
-            _handle_gitlab_error(e, f"Failed to fetch mirrors for project {project_id}")
+            _handle_gitlab_error(e, f"Failed to fetch push mirrors for project {project_id}")
+
+    def get_pull_mirror(self, project_id: int) -> Dict[str, Any] | None:
+        """
+        Get pull mirror configuration for a project.
+
+        Uses the dedicated pull mirror API: GET /projects/:id/mirror/pull
+
+        Returns:
+            Dict with pull mirror config, or None if no pull mirror is configured.
+        """
+        try:
+            result = self.gl.http_get(f"/projects/{project_id}/mirror/pull")
+            if not isinstance(result, dict):
+                return None
+
+            # Check if pull mirroring is actually configured
+            # If there's no URL, the project doesn't have pull mirroring set up
+            if not result.get("url"):
+                return None
+
+            return {
+                "id": result.get("id"),
+                "url": result.get("url"),
+                "enabled": result.get("enabled"),
+                "mirror_direction": "pull",
+                "update_status": result.get("update_status"),
+                "last_update_at": result.get("last_update_at"),
+                "last_successful_update_at": result.get("last_successful_update_at"),
+                "last_error": result.get("last_error"),
+                "only_mirror_protected_branches": result.get("only_mirror_protected_branches"),
+                "mirror_overwrites_diverged_branches": result.get("mirror_overwrites_diverged_branches"),
+                "mirror_trigger_builds": result.get("mirror_trigger_builds"),
+                "mirror_branch_regex": result.get("mirror_branch_regex"),
+            }
+        except Exception as e:
+            # 404 means no pull mirror configured - return None
+            error_msg = str(e).lower()
+            if "404" in error_msg or "not found" in error_msg:
+                return None
+            _handle_gitlab_error(e, f"Failed to fetch pull mirror for project {project_id}")
 
     def trigger_mirror_update(self, project_id: int, mirror_id: int) -> bool:
-        """Trigger an immediate update of a mirror."""
+        """
+        Trigger an immediate update of a push mirror.
+
+        Note: For pull mirrors, use trigger_pull_mirror_update() instead.
+        """
         try:
             # GitLab: POST /projects/:id/remote_mirrors/:mirror_id/sync
             self.gl.http_post(f"/projects/{project_id}/remote_mirrors/{mirror_id}/sync")
             return True
         except Exception as e:
-            _handle_gitlab_error(e, f"Failed to trigger mirror update for mirror {mirror_id} on project {project_id}")
+            _handle_gitlab_error(e, f"Failed to trigger push mirror update for mirror {mirror_id} on project {project_id}")
+
+    def trigger_pull_mirror_update(self, project_id: int) -> bool:
+        """
+        Trigger an immediate update of a pull mirror.
+
+        Uses the dedicated pull mirror API: POST /projects/:id/mirror/pull
+        """
+        try:
+            self.gl.http_post(f"/projects/{project_id}/mirror/pull")
+            return True
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to trigger pull mirror update for project {project_id}")
 
     def delete_mirror(self, project_id: int, mirror_id: int) -> bool:
-        """Delete a mirror."""
+        """
+        Delete a push mirror (remote mirror).
+
+        Note: For pull mirrors, use delete_pull_mirror() instead.
+        """
         try:
             self.gl.http_delete(f"/projects/{project_id}/remote_mirrors/{mirror_id}")
             return True
         except Exception as e:
-            _handle_gitlab_error(e, f"Failed to delete mirror {mirror_id} from project {project_id}")
+            _handle_gitlab_error(e, f"Failed to delete push mirror {mirror_id} from project {project_id}")
+
+    def delete_pull_mirror(self, project_id: int) -> bool:
+        """
+        Delete/disable pull mirror configuration for a project.
+
+        This disables pull mirroring by setting enabled=false and clearing the URL.
+        GitLab doesn't have a dedicated DELETE endpoint for pull mirrors.
+        """
+        try:
+            # Disable pull mirroring by clearing the configuration
+            self.gl.http_put(
+                f"/projects/{project_id}/mirror/pull",
+                post_data={"enabled": False}
+            )
+            return True
+        except Exception as e:
+            # 404 is acceptable - means no pull mirror was configured
+            error_msg = str(e).lower()
+            if "404" in error_msg or "not found" in error_msg:
+                return True
+            _handle_gitlab_error(e, f"Failed to delete pull mirror from project {project_id}")
 
     def update_mirror(
         self,
         project_id: int,
         mirror_id: int,
+        url: Optional[str] = None,
         enabled: Optional[bool] = None,
         only_protected_branches: Optional[bool] = None,
         keep_divergent_refs: Optional[bool] = None,
-        trigger_builds: Optional[bool] = None,
         mirror_branch_regex: Optional[str] = None,
-        mirror_user_id: Optional[int] = None,
-        mirror_direction: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Update mirror settings."""
+        """
+        Update push mirror (remote mirror) settings.
+
+        Note: For pull mirrors, use update_pull_mirror() instead.
+
+        Args:
+            project_id: The project ID.
+            mirror_id: The push mirror ID.
+            url: New authenticated URL (used for token rotation).
+            enabled: Whether the mirror is enabled.
+            only_protected_branches: If True, only mirror protected branches.
+            keep_divergent_refs: If True, keep divergent refs on target.
+            mirror_branch_regex: Regex pattern to filter which branches to mirror.
+        """
         try:
             data: Dict[str, Any] = {}
+            if url is not None:
+                data["url"] = url
             if enabled is not None:
                 data["enabled"] = enabled
             if only_protected_branches is not None:
                 data["only_protected_branches"] = only_protected_branches
             if keep_divergent_refs is not None:
                 data["keep_divergent_refs"] = keep_divergent_refs
-            if trigger_builds is not None:
-                data["trigger_builds"] = trigger_builds
             if mirror_branch_regex is not None:
                 data["mirror_branch_regex"] = mirror_branch_regex
-            if mirror_user_id is not None:
-                data["mirror_user_id"] = mirror_user_id
 
-            if not data:
-                return {"id": mirror_id}
-
-            data = self._filter_remote_mirror_payload(mirror_direction, data)
             if not data:
                 return {"id": mirror_id}
 
@@ -465,7 +606,84 @@ class GitLabClient:
                 post_data=data,
             )
         except Exception as e:
-            _handle_gitlab_error(e, f"Failed to update mirror {mirror_id} on project {project_id}")
+            _handle_gitlab_error(e, f"Failed to update push mirror {mirror_id} on project {project_id}")
+
+    def update_pull_mirror(
+        self,
+        project_id: int,
+        url: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        auth_user: Optional[str] = None,
+        auth_password: Optional[str] = None,
+        only_mirror_protected_branches: Optional[bool] = None,
+        mirror_overwrites_diverged_branches: Optional[bool] = None,
+        mirror_trigger_builds: Optional[bool] = None,
+        mirror_branch_regex: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update pull mirror configuration.
+
+        Uses the dedicated pull mirror API: PUT /projects/:id/mirror/pull
+
+        Args:
+            project_id: The project ID.
+            url: New source repository URL.
+            enabled: Whether the mirror is enabled.
+            auth_user: Username for authentication.
+            auth_password: Password/token for authentication.
+            only_mirror_protected_branches: If True, only mirror protected branches.
+            mirror_overwrites_diverged_branches: If True, overwrite diverged branches.
+            mirror_trigger_builds: If True, trigger CI/CD on updates.
+            mirror_branch_regex: Regex pattern to filter branches.
+        """
+        try:
+            data: Dict[str, Any] = {}
+            if url is not None:
+                data["url"] = url
+            if enabled is not None:
+                data["enabled"] = enabled
+            if auth_user is not None:
+                data["auth_user"] = auth_user
+            if auth_password is not None:
+                data["auth_password"] = auth_password
+            if only_mirror_protected_branches is not None:
+                data["only_mirror_protected_branches"] = only_mirror_protected_branches
+            if mirror_overwrites_diverged_branches is not None:
+                data["mirror_overwrites_diverged_branches"] = mirror_overwrites_diverged_branches
+            if mirror_trigger_builds is not None:
+                data["mirror_trigger_builds"] = mirror_trigger_builds
+            if mirror_branch_regex is not None:
+                data["mirror_branch_regex"] = mirror_branch_regex
+
+            if not data:
+                # Return current config if no changes
+                return self.get_pull_mirror(project_id) or {}
+
+            result = self.gl.http_put(
+                f"/projects/{project_id}/mirror/pull",
+                post_data=data,
+            )
+
+            if not isinstance(result, dict):
+                raise GitLabClientError(
+                    f"Failed to update pull mirror on project {project_id}: Unexpected response"
+                )
+
+            return {
+                "id": result.get("id"),
+                "url": result.get("url"),
+                "enabled": result.get("enabled"),
+                "update_status": result.get("update_status"),
+                "last_update_at": result.get("last_update_at"),
+                "last_successful_update_at": result.get("last_successful_update_at"),
+                "last_error": result.get("last_error"),
+                "only_mirror_protected_branches": result.get("only_mirror_protected_branches"),
+                "mirror_overwrites_diverged_branches": result.get("mirror_overwrites_diverged_branches"),
+                "mirror_trigger_builds": result.get("mirror_trigger_builds"),
+                "mirror_branch_regex": result.get("mirror_branch_regex"),
+            }
+        except Exception as e:
+            _handle_gitlab_error(e, f"Failed to update pull mirror on project {project_id}")
 
     def _create_remote_mirror(
         self,
@@ -475,14 +693,22 @@ class GitLabClient:
         enabled: bool = True,
         only_protected_branches: bool = False,
         keep_divergent_refs: bool | None = None,
-        trigger_builds: bool | None = None,
         mirror_branch_regex: str | None = None,
-        mirror_user_id: int | None = None,
-        mirror_direction: str | None = None,
     ) -> Dict[str, Any]:
         """
-        Create a remote mirror using a raw API call (bypasses python-gitlab's
-        strict attribute whitelist so we can expose all GitLab UI settings).
+        Create a push mirror (remote mirror) using the GitLab API.
+
+        Note: This method is for PUSH mirrors only. The /remote_mirrors endpoint
+        only supports push mirroring. For pull mirrors, use create_pull_mirror().
+
+        Args:
+            project_id: The project ID to create the mirror on.
+            mirror_url: The authenticated URL to push to.
+            enabled: Whether the mirror is enabled.
+            only_protected_branches: If True, only mirror protected branches.
+            keep_divergent_refs: If True, keep divergent refs on target.
+            mirror_branch_regex: Regex pattern to filter which branches to mirror
+                                 (Premium/Ultimate only).
         """
         data: Dict[str, Any] = {
             "url": mirror_url,
@@ -491,37 +717,10 @@ class GitLabClient:
         }
         if keep_divergent_refs is not None:
             data["keep_divergent_refs"] = keep_divergent_refs
-        if trigger_builds is not None:
-            data["trigger_builds"] = trigger_builds
         if mirror_branch_regex is not None:
             data["mirror_branch_regex"] = mirror_branch_regex
-        if mirror_user_id is not None:
-            data["mirror_user_id"] = mirror_user_id
-        if mirror_direction is not None:
-            data["mirror_direction"] = mirror_direction
 
-        data = self._filter_remote_mirror_payload(mirror_direction, data)
         return self.gl.http_post(f"/projects/{project_id}/remote_mirrors", post_data=data)
-
-    @staticmethod
-    def _filter_remote_mirror_payload(mirror_direction: str | None, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        GitLab supports different remote mirror settings depending on direction.
-
-        We filter here so we don't send unsupported fields and cause 4xx errors.
-        """
-        if not mirror_direction:
-            return data
-
-        direction = mirror_direction.lower()
-        # Conservative direction-aware support:
-        # - Pull mirrors: all options supported.
-        # - Push mirrors: GitLab typically doesn't support trigger_builds / branch regex / mirror user.
-        if direction == "push":
-            data.pop("trigger_builds", None)
-            data.pop("mirror_branch_regex", None)
-            data.pop("mirror_user_id", None)
-        return data
 
     # -------------------------------------------------------------------------
     # File Operations (for E2E testing)
