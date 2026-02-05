@@ -458,6 +458,7 @@ class GitLabClient:
                     "update_status": m.get("update_status"),
                     "last_update_at": m.get("last_update_at"),
                     "last_successful_update_at": m.get("last_successful_update_at"),
+                    "last_error": m.get("last_error"),
                 })
             return out
         except Exception as e:
