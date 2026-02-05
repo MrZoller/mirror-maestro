@@ -355,7 +355,9 @@ class MirrorResponse(BaseModel):
     effective_mirror_branch_regex: str | None = None
     mirror_id: int | None
     last_successful_update: str | None
+    last_update_at: str | None  # Last update attempt timestamp
     last_update_status: str | None
+    last_error: str | None  # Error message from GitLab if last update failed
     enabled: bool
     # Token status fields
     mirror_token_expires_at: str | None = None
@@ -608,7 +610,9 @@ async def list_mirrors(
                 mirror_branch_regex=mirror.mirror_branch_regex,
                 mirror_id=mirror.mirror_id,
                 last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
+                last_update_at=mirror.last_update_at.isoformat() if mirror.last_update_at else None,
                 last_update_status=mirror.last_update_status,
+                last_error=mirror.last_error,
                 enabled=mirror.enabled,
                 mirror_token_expires_at=mirror.mirror_token_expires_at.isoformat() if mirror.mirror_token_expires_at else None,
                 token_status=_compute_token_status(mirror.mirror_token_expires_at),
@@ -1129,7 +1133,9 @@ async def create_mirror(
         effective_mirror_branch_regex=branch_regex if direction == "pull" else None,
         mirror_id=db_mirror.mirror_id,
         last_successful_update=db_mirror.last_successful_update.isoformat() if db_mirror.last_successful_update else None,
+        last_update_at=db_mirror.last_update_at.isoformat() if db_mirror.last_update_at else None,
         last_update_status=db_mirror.last_update_status,
+        last_error=db_mirror.last_error,
         enabled=db_mirror.enabled,
         mirror_token_expires_at=db_mirror.mirror_token_expires_at.isoformat() if db_mirror.mirror_token_expires_at else None,
         token_status=_compute_token_status(db_mirror.mirror_token_expires_at),
@@ -1332,7 +1338,9 @@ async def get_mirror(
         mirror_branch_regex=mirror.mirror_branch_regex,
         mirror_id=mirror.mirror_id,
         last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
+        last_update_at=mirror.last_update_at.isoformat() if mirror.last_update_at else None,
         last_update_status=mirror.last_update_status,
+        last_error=mirror.last_error,
         enabled=mirror.enabled,
         mirror_token_expires_at=mirror.mirror_token_expires_at.isoformat() if mirror.mirror_token_expires_at else None,
         token_status=_compute_token_status(mirror.mirror_token_expires_at),
@@ -1495,8 +1503,12 @@ async def update_mirror(
         mirror_branch_regex=mirror.mirror_branch_regex,
         mirror_id=mirror.mirror_id,
         last_successful_update=mirror.last_successful_update.isoformat() if mirror.last_successful_update else None,
+        last_update_at=mirror.last_update_at.isoformat() if mirror.last_update_at else None,
         last_update_status=mirror.last_update_status,
+        last_error=mirror.last_error,
         enabled=mirror.enabled,
+        mirror_token_expires_at=mirror.mirror_token_expires_at.isoformat() if mirror.mirror_token_expires_at else None,
+        token_status=_compute_token_status(mirror.mirror_token_expires_at),
         created_at=mirror.created_at.isoformat(),
         updated_at=mirror.updated_at.isoformat(),
         **eff,
@@ -2181,5 +2193,231 @@ async def verify_mirrors(
     for mirror in mirrors:
         verification = await _verify_single_mirror(db, mirror)
         results.append(verification)
+
+    return results
+
+
+class RefreshStatusRequest(BaseModel):
+    """Request body for refreshing mirror status."""
+    mirror_ids: List[int] = Field(..., min_length=1, max_length=100)
+
+
+class RefreshStatusResult(BaseModel):
+    """Result of refreshing a single mirror's status."""
+    mirror_id: int
+    success: bool
+    last_update_status: str | None = None
+    last_update_at: str | None = None
+    last_successful_update: str | None = None
+    last_error: str | None = None
+    error: str | None = None
+
+
+async def _refresh_mirror_status(
+    db: AsyncSession,
+    mirror: Mirror,
+) -> RefreshStatusResult:
+    """
+    Fetch current mirror status from GitLab and update the database.
+
+    Returns the updated status information.
+    """
+    # If mirror was never created on GitLab, nothing to refresh
+    if mirror.mirror_id is None:
+        return RefreshStatusResult(
+            mirror_id=mirror.id,
+            success=False,
+            error="Mirror has not been created on GitLab yet",
+        )
+
+    # Get pair and instances
+    pair_result = await db.execute(
+        select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+    )
+    pair = pair_result.scalar_one_or_none()
+    if not pair:
+        return RefreshStatusResult(
+            mirror_id=mirror.id,
+            success=False,
+            error="Instance pair not found",
+        )
+
+    src_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.source_instance_id)
+    )
+    tgt_result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == pair.target_instance_id)
+    )
+    source_instance = src_result.scalar_one_or_none()
+    target_instance = tgt_result.scalar_one_or_none()
+
+    if not source_instance or not target_instance:
+        return RefreshStatusResult(
+            mirror_id=mirror.id,
+            success=False,
+            error="Source or target instance not found",
+        )
+
+    # Direction comes from pair
+    direction = (pair.mirror_direction or "pull").lower()
+
+    # Determine owner project (where the mirror config lives on GitLab)
+    # Push: mirror config on source, Pull: mirror config on target
+    if direction == "push":
+        owner_project_id = mirror.source_project_id
+        owner_instance = source_instance
+    else:
+        owner_project_id = mirror.target_project_id
+        owner_instance = target_instance
+
+    # Get mirror from GitLab based on direction
+    try:
+        client = GitLabClient(owner_instance.url, owner_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
+        if direction == "push":
+            # Push mirrors use the remote_mirrors endpoint
+            gitlab_mirrors = await _execute_gitlab_op(
+                client=client,
+                operation=lambda c: c.get_project_mirrors(owner_project_id) or [],
+                operation_name=f"get_project_mirrors({owner_project_id})",
+            )
+            # Find our mirror by ID
+            gitlab_mirror = None
+            for gm in gitlab_mirrors:
+                if gm.get("id") == mirror.mirror_id:
+                    gitlab_mirror = gm
+                    break
+        else:
+            # Pull mirrors use the dedicated pull mirror endpoint
+            gitlab_mirror = await _execute_gitlab_op(
+                client=client,
+                operation=lambda c: c.get_pull_mirror(owner_project_id),
+                operation_name=f"get_pull_mirror({owner_project_id})",
+            )
+    except HTTPException as e:
+        return RefreshStatusResult(
+            mirror_id=mirror.id,
+            success=False,
+            error=f"Failed to fetch GitLab mirror status: {e.detail}",
+        )
+    except Exception as e:
+        return RefreshStatusResult(
+            mirror_id=mirror.id,
+            success=False,
+            error=f"Failed to fetch GitLab mirror status: {str(e)}",
+        )
+
+    # If mirror not found on GitLab, it may be orphaned
+    if gitlab_mirror is None:
+        return RefreshStatusResult(
+            mirror_id=mirror.id,
+            success=False,
+            error="Mirror not found on GitLab (may be orphaned)",
+        )
+
+    # Extract status information from GitLab response
+    update_status = gitlab_mirror.get("update_status")
+    last_update_at_str = gitlab_mirror.get("last_update_at")
+    last_successful_update_str = gitlab_mirror.get("last_successful_update_at")
+    last_error = gitlab_mirror.get("last_error")
+
+    # Parse timestamps
+    last_update_at = None
+    if last_update_at_str:
+        try:
+            # GitLab returns ISO 8601 timestamps
+            last_update_at = datetime.fromisoformat(last_update_at_str.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            pass
+
+    last_successful_update = None
+    if last_successful_update_str:
+        try:
+            last_successful_update = datetime.fromisoformat(last_successful_update_str.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            pass
+
+    # Update the database
+    mirror.last_update_status = update_status
+    mirror.last_update_at = last_update_at
+    mirror.last_successful_update = last_successful_update
+    mirror.last_error = last_error
+
+    await db.commit()
+    await db.refresh(mirror)
+
+    return RefreshStatusResult(
+        mirror_id=mirror.id,
+        success=True,
+        last_update_status=update_status,
+        last_update_at=last_update_at.isoformat() if last_update_at else None,
+        last_successful_update=last_successful_update.isoformat() if last_successful_update else None,
+        last_error=last_error,
+    )
+
+
+@router.post("/{mirror_id}/refresh-status", response_model=RefreshStatusResult)
+async def refresh_mirror_status(
+    mirror_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials),
+):
+    """
+    Refresh mirror status from GitLab.
+
+    Fetches the current mirror status directly from GitLab and updates the database
+    with the actual values for:
+    - update_status (e.g., 'finished', 'failed', 'started')
+    - last_update_at (timestamp of last sync attempt)
+    - last_successful_update (timestamp of last successful sync)
+    - last_error (error message if last sync failed)
+    """
+    result = await db.execute(select(Mirror).where(Mirror.id == mirror_id))
+    mirror = result.scalar_one_or_none()
+
+    if not mirror:
+        raise HTTPException(status_code=404, detail="Mirror not found")
+
+    return await _refresh_mirror_status(db, mirror)
+
+
+@router.post("/refresh-status", response_model=List[RefreshStatusResult])
+async def refresh_mirrors_status(
+    req: RefreshStatusRequest,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials),
+):
+    """
+    Refresh status for multiple mirrors from GitLab.
+
+    Fetches the current mirror status directly from GitLab for each requested mirror
+    and updates the database with actual values.
+
+    Returns results for all requested mirrors, including any errors encountered.
+    """
+    if not req.mirror_ids:
+        return []
+
+    # Fetch all requested mirrors
+    result = await db.execute(
+        select(Mirror).where(Mirror.id.in_(req.mirror_ids))
+    )
+    mirrors = result.scalars().all()
+
+    # Create a map for easy lookup
+    mirror_map = {m.id: m for m in mirrors}
+
+    # Process each requested mirror
+    results: List[RefreshStatusResult] = []
+    for mirror_id in req.mirror_ids:
+        mirror = mirror_map.get(mirror_id)
+        if mirror is None:
+            results.append(RefreshStatusResult(
+                mirror_id=mirror_id,
+                success=False,
+                error="Mirror not found",
+            ))
+        else:
+            refresh_result = await _refresh_mirror_status(db, mirror)
+            results.append(refresh_result)
 
     return results
