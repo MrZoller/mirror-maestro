@@ -1115,6 +1115,39 @@ async def create_mirror(
         else pair.mirror_branch_regex
     )
 
+    # Trigger initial sync after creation (best effort)
+    # This starts the actual data synchronization on GitLab
+    try:
+        if db_mirror.mirror_id:
+            trigger_client = GitLabClient(
+                source_instance.url if direction == "push" else target_instance.url,
+                source_instance.encrypted_token if direction == "push" else target_instance.encrypted_token,
+                timeout=settings.gitlab_api_timeout
+            )
+            trigger_project_id = db_mirror.source_project_id if direction == "push" else db_mirror.target_project_id
+
+            if direction == "push":
+                await _execute_gitlab_op(
+                    client=trigger_client,
+                    operation=lambda c: c.trigger_mirror_update(trigger_project_id, db_mirror.mirror_id),
+                    operation_name=f"trigger_mirror_update({trigger_project_id}, {db_mirror.mirror_id})",
+                )
+            else:
+                await _execute_gitlab_op(
+                    client=trigger_client,
+                    operation=lambda c: c.trigger_pull_mirror_update(trigger_project_id),
+                    operation_name=f"trigger_pull_mirror_update({trigger_project_id})",
+                )
+
+            # Update status to show sync is in progress
+            db_mirror.last_update_status = "pending"
+            await db.commit()
+            await db.refresh(db_mirror)
+            logger.info(f"Triggered initial sync for mirror {db_mirror.id}")
+    except Exception as e:
+        # Don't fail the creation if trigger fails
+        logger.debug(f"Could not trigger initial sync after creation: {e}")
+
     return MirrorResponse(
         id=db_mirror.id,
         instance_pair_id=db_mirror.instance_pair_id,
