@@ -32,6 +32,55 @@ async def init_db():
     """Initialize the database, creating all tables."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # Run migrations for existing databases
+    await _migrate_add_mirror_status_columns()
+
+
+async def _migrate_add_mirror_status_columns():
+    """
+    Add last_update_at and last_error columns to mirrors table if they don't exist.
+
+    These columns store the actual mirror status from GitLab:
+    - last_update_at: Timestamp of the last sync attempt
+    - last_error: Error message from GitLab if the last sync failed
+    """
+    import logging
+    from sqlalchemy import text, inspect
+
+    async with engine.begin() as conn:
+        # Get the inspector to check existing columns (works with both SQLite and PostgreSQL)
+        def get_columns(sync_conn):
+            inspector = inspect(sync_conn)
+            try:
+                columns = inspector.get_columns('mirrors')
+                return {col['name'] for col in columns}
+            except Exception:
+                # Table doesn't exist yet, will be created by metadata.create_all
+                return set()
+
+        existing_columns = await conn.run_sync(get_columns)
+
+        # Add last_update_at column if not present
+        if 'last_update_at' not in existing_columns:
+            logging.info("Adding last_update_at column to mirrors table")
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE mirrors ADD COLUMN last_update_at TIMESTAMP"
+                ))
+            except Exception as e:
+                # Column might already exist or table doesn't exist yet
+                logging.debug(f"Could not add last_update_at column: {e}")
+
+        # Add last_error column if not present
+        if 'last_error' not in existing_columns:
+            logging.info("Adding last_error column to mirrors table")
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE mirrors ADD COLUMN last_error TEXT"
+                ))
+            except Exception as e:
+                # Column might already exist or table doesn't exist yet
+                logging.debug(f"Could not add last_error column: {e}")
 
 
 async def get_db() -> AsyncSession:

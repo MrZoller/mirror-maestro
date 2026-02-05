@@ -24,9 +24,9 @@ async def get_dashboard_metrics(
         select(
             func.count(Mirror.id).label('total_mirrors'),
             func.count(case((Mirror.enabled == True, 1))).label('enabled_mirrors'),
-            func.count(case((Mirror.last_update_status == 'success', 1))).label('success'),
+            func.count(case(((Mirror.last_update_status == 'success') | (Mirror.last_update_status == 'finished'), 1))).label('success'),
             func.count(case((Mirror.last_update_status == 'failed', 1))).label('failed'),
-            func.count(case((Mirror.last_update_status == 'pending', 1))).label('pending'),
+            func.count(case(((Mirror.last_update_status == 'pending') | (Mirror.last_update_status == 'started'), 1))).label('pending'),
             func.count(case((Mirror.last_update_status.is_(None), 1))).label('unknown'),
         )
     )
@@ -69,7 +69,7 @@ async def get_dashboard_metrics(
         if mirror.created_at >= yesterday:
             activity_type = "created"
             icon = "✨"
-        elif mirror.last_update_status == "success":
+        elif mirror.last_update_status in ("success", "finished"):
             activity_type = "synced"
             icon = "✓"
         elif mirror.last_update_status == "failed":

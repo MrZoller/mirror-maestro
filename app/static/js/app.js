@@ -1868,9 +1868,35 @@ function renderMirrors(mirrors) {
             `<span class="badge badge-success">Enabled</span>` :
             `<span class="badge badge-warning">Disabled</span>`;
 
-        const updateStatus = mirror.last_update_status ?
-            `<span class="badge badge-info">${mirror.last_update_status}</span>` :
-            '<span class="text-muted">N/A</span>';
+        // Format update status with appropriate badge color
+        const updateStatus = (() => {
+            const status = mirror.last_update_status;
+            if (!status) {
+                return '<span class="text-muted">N/A</span>';
+            }
+            // Map GitLab status values to appropriate badge styles
+            let badgeClass = 'badge-info';
+            let displayStatus = status;
+            if (status === 'finished' || status === 'success') {
+                badgeClass = 'badge-success';
+                displayStatus = 'Success';
+            } else if (status === 'failed') {
+                badgeClass = 'badge-danger';
+                displayStatus = 'Failed';
+            } else if (status === 'started' || status === 'updating') {
+                badgeClass = 'badge-warning';
+                displayStatus = 'Syncing';
+            } else if (status === 'pending') {
+                badgeClass = 'badge-secondary';
+                displayStatus = 'Pending';
+            }
+            let badge = `<span class="badge ${badgeClass}">${escapeHtml(displayStatus)}</span>`;
+            // Add error tooltip if there's an error
+            if (mirror.last_error && status === 'failed') {
+                badge += `<br><small class="text-danger" title="${escapeHtml(mirror.last_error)}">${escapeHtml(mirror.last_error.substring(0, 50))}${mirror.last_error.length > 50 ? '...' : ''}</small>`;
+            }
+            return badge;
+        })();
 
         const dir = (mirror.effective_mirror_direction || '').toString().toLowerCase();
         const settingsCell = (() => {
@@ -1948,8 +1974,15 @@ function renderMirrors(mirrors) {
                         </div>
                     </td>
                     <td class="cell-locked">${updateStatus}</td>
-                    <td class="cell-locked" data-sort="${escapeHtml(mirror.last_successful_update || '')}">
-                        ${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}
+                    <td class="cell-locked" data-sort="${escapeHtml(mirror.last_update_at || mirror.last_successful_update || '')}">
+                        <div>
+                            ${mirror.last_successful_update
+                                ? `<span title="Last successful sync">${new Date(mirror.last_successful_update).toLocaleString()}</span>`
+                                : '<span class="text-muted">Never synced</span>'}
+                            ${mirror.last_update_at && mirror.last_update_at !== mirror.last_successful_update
+                                ? `<br><small class="text-muted" title="Last attempt">(attempt: ${new Date(mirror.last_update_at).toLocaleString()})</small>`
+                                : ''}
+                        </div>
                     </td>
                     <td>
                         <div class="table-actions">
@@ -1989,8 +2022,15 @@ function renderMirrors(mirrors) {
                 <td>${settingsCell}</td>
                 <td>${statusBadge}</td>
                 <td>${updateStatus}</td>
-                <td data-sort="${escapeHtml(mirror.last_successful_update || '')}">
-                    ${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}
+                <td data-sort="${escapeHtml(mirror.last_update_at || mirror.last_successful_update || '')}">
+                    <div>
+                        ${mirror.last_successful_update
+                            ? `<span title="Last successful sync">${new Date(mirror.last_successful_update).toLocaleString()}</span>`
+                            : '<span class="text-muted">Never synced</span>'}
+                        ${mirror.last_update_at && mirror.last_update_at !== mirror.last_successful_update
+                            ? `<br><small class="text-muted" title="Last attempt">(attempt: ${new Date(mirror.last_update_at).toLocaleString()})</small>`
+                            : ''}
+                    </div>
                 </td>
                 <td>${tokenStatusBadge}</td>
                 <td>${verifyBadge}</td>
@@ -1998,6 +2038,7 @@ function renderMirrors(mirrors) {
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
                         <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
+                        <button class="btn btn-secondary btn-small" data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id})" title="Refresh status from GitLab">Status</button>
                         <button class="btn btn-primary btn-small" onclick="showIssueMirrorConfig(${mirror.id})" title="Configure issue mirroring">Issue Sync</button>
                         <button class="btn btn-info btn-small" data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id})" title="Check if mirror exists and settings match GitLab">Verify</button>
                         <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate Token</button>
@@ -2022,6 +2063,69 @@ async function rotateMirrorToken(mirrorId) {
     } catch (error) {
         console.error('Failed to rotate token:', error);
         showMessage(`Failed to rotate token: ${error.message || 'Unknown error'}`, 'error');
+    }
+}
+
+// Refresh mirror status from GitLab
+async function refreshMirrorStatus(mirrorId) {
+    const btn = document.querySelector(`[data-refresh-btn="${mirrorId}"]`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '...';
+    }
+
+    try {
+        const result = await apiRequest(`/api/mirrors/${mirrorId}/refresh-status`, { method: 'POST' });
+
+        if (result.success) {
+            showMessage(`Mirror #${mirrorId}: Status refreshed - ${result.last_update_status || 'N/A'}`, 'success');
+        } else {
+            showMessage(`Mirror #${mirrorId}: ${result.error || 'Failed to refresh status'}`, 'warning');
+        }
+
+        // Reload mirrors to show updated status
+        await loadMirrors();
+    } catch (error) {
+        console.error('Failed to refresh status:', error);
+        showMessage(`Failed to refresh status: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Status';
+        }
+    }
+}
+
+// Refresh status for all visible mirrors
+async function refreshAllMirrorStatus() {
+    const mirrorIds = state.mirrors.map(m => m.id);
+    if (mirrorIds.length === 0) {
+        showMessage('No mirrors to refresh', 'info');
+        return;
+    }
+
+    showMessage(`Refreshing status for ${mirrorIds.length} mirrors...`, 'info');
+
+    try {
+        const results = await apiRequest('/api/mirrors/refresh-status', {
+            method: 'POST',
+            body: JSON.stringify({ mirror_ids: mirrorIds }),
+        });
+
+        const successCount = results.filter(r => r.success).length;
+        const failedCount = results.filter(r => !r.success).length;
+
+        if (failedCount === 0) {
+            showMessage(`Status refreshed for ${successCount} mirrors`, 'success');
+        } else {
+            showMessage(`Status refreshed: ${successCount} success, ${failedCount} failed`, 'warning');
+        }
+
+        // Reload mirrors to show updated status
+        await loadMirrors();
+    } catch (error) {
+        console.error('Failed to refresh all statuses:', error);
+        showMessage(`Failed to refresh status: ${error.message || 'Unknown error'}`, 'error');
     }
 }
 
@@ -2409,8 +2513,8 @@ function renderTreeNode(node, level, parentPath = '') {
                         <td>${formatProjectPath(mirror.target_project_path)}</td>
                         <td><!-- Settings --></td>
                         <td>${mirror.enabled ? '<span class="badge badge-success">Enabled</span>' : '<span class="badge badge-warning">Disabled</span>'}</td>
-                        <td>${mirror.last_update_status || 'N/A'}</td>
-                        <td>${mirror.last_successful_update ? new Date(mirror.last_successful_update).toLocaleString() : 'Never'}</td>
+                        <td>${formatMirrorStatus(mirror)}</td>
+                        <td>${formatMirrorSyncTime(mirror)}</td>
                         <td><!-- Token --></td>
                         <td>
                             <div class="table-actions">
@@ -3338,6 +3442,51 @@ function escapeHtml(text) {
         "'": '&#039;'
     };
     return text ? text.replace(/[&<>"']/g, m => map[m]) : '';
+}
+
+// Format mirror status with appropriate badge color
+function formatMirrorStatus(mirror) {
+    const status = mirror.last_update_status;
+    if (!status) {
+        return '<span class="text-muted">N/A</span>';
+    }
+    // Map GitLab status values to appropriate badge styles
+    let badgeClass = 'badge-info';
+    let displayStatus = status;
+    if (status === 'finished' || status === 'success') {
+        badgeClass = 'badge-success';
+        displayStatus = 'Success';
+    } else if (status === 'failed') {
+        badgeClass = 'badge-danger';
+        displayStatus = 'Failed';
+    } else if (status === 'started' || status === 'updating') {
+        badgeClass = 'badge-warning';
+        displayStatus = 'Syncing';
+    } else if (status === 'pending') {
+        badgeClass = 'badge-secondary';
+        displayStatus = 'Pending';
+    }
+    let badge = `<span class="badge ${badgeClass}">${escapeHtml(displayStatus)}</span>`;
+    // Add error tooltip if there's an error
+    if (mirror.last_error && status === 'failed') {
+        const truncatedError = mirror.last_error.substring(0, 50) + (mirror.last_error.length > 50 ? '...' : '');
+        badge += `<br><small class="text-danger" title="${escapeHtml(mirror.last_error)}">${escapeHtml(truncatedError)}</small>`;
+    }
+    return badge;
+}
+
+// Format mirror sync time showing last successful and last attempt
+function formatMirrorSyncTime(mirror) {
+    let html = '';
+    if (mirror.last_successful_update) {
+        html += `<span title="Last successful sync">${new Date(mirror.last_successful_update).toLocaleString()}</span>`;
+    } else {
+        html += '<span class="text-muted">Never synced</span>';
+    }
+    if (mirror.last_update_at && mirror.last_update_at !== mirror.last_successful_update) {
+        html += `<br><small class="text-muted" title="Last attempt">(attempt: ${new Date(mirror.last_update_at).toLocaleString()})</small>`;
+    }
+    return html;
 }
 
 function debounce(fn, delayMs) {

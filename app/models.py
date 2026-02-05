@@ -97,7 +97,9 @@ class Mirror(Base):
     # Status tracking
     mirror_id: Mapped[Optional[int]] = mapped_column(Integer)  # GitLab mirror ID
     last_successful_update: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_update_at: Mapped[Optional[datetime]] = mapped_column(DateTime)  # Last update attempt
     last_update_status: Mapped[Optional[str]] = mapped_column(String(50))
+    last_error: Mapped[Optional[str]] = mapped_column(Text)  # Error message from GitLab
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Project access token for mirror authentication (auto-managed)
