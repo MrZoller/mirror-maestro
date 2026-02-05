@@ -2315,10 +2315,21 @@ async def _refresh_mirror_status(
         )
 
     # Extract status information from GitLab response
-    update_status = gitlab_mirror.get("update_status")
+    raw_status = gitlab_mirror.get("update_status")
     last_update_at_str = gitlab_mirror.get("last_update_at")
     last_successful_update_str = gitlab_mirror.get("last_successful_update_at")
     last_error = gitlab_mirror.get("last_error")
+
+    # Normalize GitLab status to our internal status values
+    # GitLab returns: 'finished', 'failed', 'started', 'none'
+    # Our internal values (used by health/dashboard): 'success', 'failed', 'pending'
+    status_mapping = {
+        'finished': 'success',
+        'failed': 'failed',
+        'started': 'pending',
+        'none': None,
+    }
+    update_status = status_mapping.get(raw_status, raw_status)
 
     # Parse timestamps
     last_update_at = None

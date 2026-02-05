@@ -1877,7 +1877,7 @@ function renderMirrors(mirrors) {
             // Map GitLab status values to appropriate badge styles
             let badgeClass = 'badge-info';
             let displayStatus = status;
-            if (status === 'finished') {
+            if (status === 'finished' || status === 'success') {
                 badgeClass = 'badge-success';
                 displayStatus = 'Success';
             } else if (status === 'failed') {
@@ -3453,7 +3453,7 @@ function formatMirrorStatus(mirror) {
     // Map GitLab status values to appropriate badge styles
     let badgeClass = 'badge-info';
     let displayStatus = status;
-    if (status === 'finished') {
+    if (status === 'finished' || status === 'success') {
         badgeClass = 'badge-success';
         displayStatus = 'Success';
     } else if (status === 'failed') {
