@@ -80,13 +80,15 @@
                 </div>
             </div>
 
+            <!-- Main Dashboard Content -->
             <div class="dashboard-grid">
-                <div class="card">
-                    <div class="card-header">
+                <!-- Recent Activity -->
+                <div class="card dashboard-activity">
+                    <div class="flex-between">
                         <h3>Recent Activity</h3>
-                        <span class="text-muted">Last 24 hours</span>
+                        <span class="text-muted">Just now</span>
                     </div>
-                    <div class="activity-list" id="dashboard-recent-activity">
+                    <div class="activity-list mt-20">
                         <div class="activity-item">
                             <div class="activity-icon activity-icon-success">✓</div>
                             <div class="activity-content">
@@ -138,106 +140,115 @@
                     </div>
                 </div>
 
-                <div class="dashboard-sidebar">
-                    <div class="card">
-                        <div class="card-header">
-                            <h3>Health Distribution</h3>
+                <!-- Health Distribution -->
+                <div class="card dashboard-health">
+                    <h3>Mirror Health</h3>
+                    <div class="health-chart mt-20">
+                        <canvas id="health-chart"></canvas>
+                    </div>
+                    <div class="health-legend mt-20">
+                        <div class="health-legend-item">
+                            <span class="health-dot health-dot-success"></span>
+                            <span>233</span> Success
                         </div>
-                        <div class="health-chart">
-                            <canvas id="health-chart"></canvas>
+                        <div class="health-legend-item">
+                            <span class="health-dot health-dot-failed"></span>
+                            <span>8</span> Failed
                         </div>
-                        <div class="health-legend">
-                            <div class="health-legend-item">
-                                <span class="health-legend-dot health-legend-dot-success"></span>
-                                <span>Success: 233</span>
-                            </div>
-                            <div class="health-legend-item">
-                                <span class="health-legend-dot health-legend-dot-danger"></span>
-                                <span>Failed: 8</span>
-                            </div>
-                            <div class="health-legend-item">
-                                <span class="health-legend-dot health-legend-dot-warning"></span>
-                                <span>Pending: 6</span>
-                            </div>
+                        <div class="health-legend-item">
+                            <span class="health-dot health-dot-pending"></span>
+                            <span>6</span> Pending
+                        </div>
+                        <div class="health-legend-item">
+                            <span class="health-dot health-dot-unknown"></span>
+                            <span>0</span> Unknown
                         </div>
                     </div>
+                </div>
 
-                    <div class="card">
-                        <div class="card-header">
-                            <h3>Mirrors by Pair</h3>
+                <!-- Mirrors by Pair -->
+                <div class="card dashboard-pairs">
+                    <h3>Mirrors by Pair</h3>
+                    <div class="pairs-list mt-20">
+                        <div class="pairs-item">
+                            <div class="pairs-name">Production → Staging</div>
+                            <div class="pairs-bar">
+                                <div class="pairs-bar-fill" style="width: 100%"></div>
+                            </div>
+                            <div class="pairs-count">89</div>
                         </div>
-                        <div class="pairs-distribution">
-                            <div class="pairs-item">
-                                <div class="pairs-name">Production → Staging</div>
-                                <div class="pairs-bar">
-                                    <div class="pairs-bar-fill" style="width: 100%"></div>
-                                </div>
-                                <div class="pairs-count">89</div>
+                        <div class="pairs-item">
+                            <div class="pairs-name">GitLab.com → Internal</div>
+                            <div class="pairs-bar">
+                                <div class="pairs-bar-fill" style="width: 85%"></div>
                             </div>
-                            <div class="pairs-item">
-                                <div class="pairs-name">GitLab.com → Internal</div>
-                                <div class="pairs-bar">
-                                    <div class="pairs-bar-fill" style="width: 85%"></div>
-                                </div>
-                                <div class="pairs-count">76</div>
+                            <div class="pairs-count">76</div>
+                        </div>
+                        <div class="pairs-item">
+                            <div class="pairs-name">Dev → Test</div>
+                            <div class="pairs-bar">
+                                <div class="pairs-bar-fill" style="width: 62%"></div>
                             </div>
-                            <div class="pairs-item">
-                                <div class="pairs-name">Dev → Test</div>
-                                <div class="pairs-bar">
-                                    <div class="pairs-bar-fill" style="width: 62%"></div>
-                                </div>
-                                <div class="pairs-count">55</div>
+                            <div class="pairs-count">55</div>
+                        </div>
+                        <div class="pairs-item">
+                            <div class="pairs-name">Internal → Backup</div>
+                            <div class="pairs-bar">
+                                <div class="pairs-bar-fill" style="width: 31%"></div>
                             </div>
-                            <div class="pairs-item">
-                                <div class="pairs-name">Internal → Backup</div>
-                                <div class="pairs-bar">
-                                    <div class="pairs-bar-fill" style="width: 31%"></div>
-                                </div>
-                                <div class="pairs-count">27</div>
-                            </div>
+                            <div class="pairs-count">27</div>
                         </div>
                     </div>
+                </div>
 
-                    <div class="card">
-                        <div class="card-header">
-                            <h3>Quick Actions</h3>
-                        </div>
-                        <div class="quick-actions">
-                            <button style="width: 100%; padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #3b82f6; background: white; color: #3b82f6; border-radius: 0.375rem; cursor: pointer; font-weight: 500; margin-bottom: 0.5rem;">Create New Mirror</button>
-                            <button style="width: 100%; padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #d1d5db; background: white; color: #374151; border-radius: 0.375rem; cursor: pointer; font-weight: 500; margin-bottom: 0.5rem;">Add Instance</button>
-                            <button style="width: 100%; padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #d1d5db; background: white; color: #374151; border-radius: 0.375rem; cursor: pointer; font-weight: 500;">Import Configuration</button>
-                        </div>
+                <!-- Quick Actions -->
+                <div class="card dashboard-actions">
+                    <h3>Quick Actions</h3>
+                    <div class="quick-actions mt-20">
+                        <button class="btn btn-primary">
+                            Create Mirror
+                        </button>
+                        <button class="btn btn-secondary">
+                            Add Instance
+                        </button>
+                        <button class="btn btn-secondary">
+                            Create Pair
+                        </button>
+                        <button class="btn btn-secondary">
+                            View Topology
+                        </button>
                     </div>
+                </div>
 
-                    <div class="card dashboard-system-health">
-                        <div class="flex-between">
-                            <h3>System Health</h3>
-                            <button style="padding: 0.375rem 0.75rem; font-size: 0.875rem; border: 1px solid #d1d5db; background: white; color: #374151; border-radius: 0.375rem; cursor: pointer; font-weight: 500;" title="Refresh health status">↻</button>
-                        </div>
-                        <div id="system-health-content" class="mt-20">
-                            <div class="system-health-status healthy">
-                                <div class="status-icon">✓</div>
-                                <div class="status-details">
-                                    <strong>All Systems Healthy</strong>
-                                    <span class="text-muted">v0.1.0</span>
-                                </div>
+                <!-- System Health -->
+                <div class="card dashboard-system-health">
+                    <div class="flex-between">
+                        <h3>System Health</h3>
+                        <button class="btn btn-small btn-secondary" title="Refresh health status">↻</button>
+                    </div>
+                    <div id="system-health-content" class="mt-20">
+                        <div class="system-health-status healthy">
+                            <div class="status-icon">✓</div>
+                            <div class="status-details">
+                                <strong>All Systems Healthy</strong>
+                                <span class="text-muted">v1.2.0</span>
                             </div>
-                            <div class="health-components">
-                                <div class="health-component">
-                                    <span class="health-status-dot healthy"></span>
-                                    <span>Database</span>
-                                    <span class="text-muted">Connected (2.3ms)</span>
-                                </div>
-                                <div class="health-component">
-                                    <span class="health-status-dot healthy"></span>
-                                    <span>Mirrors</span>
-                                    <span class="text-muted">233/247 synced</span>
-                                </div>
-                                <div class="health-component">
-                                    <span class="health-status-dot healthy"></span>
-                                    <span>Tokens</span>
-                                    <span class="text-muted">All valid</span>
-                                </div>
+                        </div>
+                        <div class="health-components">
+                            <div class="health-component">
+                                <span class="health-status-dot healthy"></span>
+                                <span>Database</span>
+                                <span class="text-muted">Connected (2.3ms)</span>
+                            </div>
+                            <div class="health-component">
+                                <span class="health-status-dot healthy"></span>
+                                <span>Mirrors</span>
+                                <span class="text-muted">233/247 synced</span>
+                            </div>
+                            <div class="health-component">
+                                <span class="health-status-dot healthy"></span>
+                                <span>Tokens</span>
+                                <span class="text-muted">All valid</span>
                             </div>
                         </div>
                     </div>
