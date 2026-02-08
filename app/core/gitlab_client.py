@@ -524,11 +524,19 @@ class GitLabClient:
         Trigger an immediate update of a pull mirror.
 
         Uses the dedicated pull mirror API: POST /projects/:id/mirror/pull
+
+        Returns:
+            True if sync was triggered, False if no pull mirror is configured.
         """
         try:
             self.gl.http_post(f"/projects/{project_id}/mirror/pull")
             return True
         except Exception as e:
+            # 400 "not mirrored" means pull mirror was removed externally.
+            # Return False instead of raising so the circuit breaker isn't tripped.
+            error_msg = str(e).lower()
+            if "400" in error_msg and "not mirrored" in error_msg:
+                return False
             _handle_gitlab_error(e, f"Failed to trigger pull mirror update for project {project_id}")
 
     def delete_mirror(self, project_id: int, mirror_id: int) -> bool:
@@ -687,7 +695,15 @@ class GitLabClient:
                 "mirror_trigger_builds": result.get("mirror_trigger_builds"),
                 "mirror_branch_regex": result.get("mirror_branch_regex"),
             }
+        except GitLabClientError:
+            raise
         except Exception as e:
+            # 400 "not mirrored" means pull mirror was removed externally
+            error_msg = str(e).lower()
+            if "400" in error_msg and "not mirrored" in error_msg:
+                raise GitLabNotFoundError(
+                    f"Pull mirror is not configured on project {project_id}"
+                )
             _handle_gitlab_error(e, f"Failed to update pull mirror on project {project_id}")
 
     def _create_remote_mirror(
