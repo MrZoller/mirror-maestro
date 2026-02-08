@@ -1896,17 +1896,5 @@ Safe and controlled cleanup</code></pre>
     <script src="{{ cdn_d3js_url }}"></script>
     {% endif %}
     <script src="/static/js/topology.js"></script>
-    <script>
-        // Update stats on dashboard
-        setInterval(async () => {
-            if (state.instances.length > 0) {
-                document.getElementById('stats-instances').textContent = state.instances.length;
-                document.getElementById('stats-pairs').textContent = state.pairs.length;
-
-                const allMirrors = await apiRequest('/api/mirrors').catch(() => []);
-                document.getElementById('stats-mirrors').textContent = allMirrors.length;
-            }
-        }, 5000);
-    </script>
 </body>
 </html>
