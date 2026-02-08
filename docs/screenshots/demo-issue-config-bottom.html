@@ -468,17 +468,16 @@
     </div>
 
     <!-- Issue Mirroring Configuration Modal -->
-    <div id="issue-mirror-config-modal" class="modal" style="display: block;">
+    <div id="issue-mirror-config-modal" class="modal" style="display: flex;">
         <div class="modal-backdrop"></div>
-        <div class="modal-content" style="max-height: 90vh; overflow-y: auto; margin-top: 2vh;">
+        <div class="modal-content">
             <div class="modal-header">
                 <h2>Issue Mirroring Configuration</h2>
                 <button class="modal-close" aria-label="Close">&times;</button>
             </div>
             <form id="issue-mirror-config-form">
-                <p class="text-muted" style="margin-bottom: 1.5rem;">
-                    Mirror: <strong>platform/core/services/api-gateway</strong> → <strong>backup/platform/core/services/api-gateway</strong>
-                </p>
+                <input type="hidden" id="issue-config-mirror-id" name="mirror_id" value="1">
+                <input type="hidden" id="issue-config-id" name="config_id" value="1">
 
                 <div class="form-group">
                     <label>
@@ -490,30 +489,82 @@
                     </p>
                 </div>
 
-                <details style="margin-top: 1.5rem;">
-                    <summary style="cursor: pointer; font-weight: bold; margin-bottom: 1rem;">Sync Options (collapsed)</summary>
-                    <p class="text-muted">Sync Comments, Labels, Attachments, Weight, Time Estimate, Time Spent, Closed Issues - all enabled ✓</p>
-                </details>
+                <h3 style="margin-top: 1.5rem; margin-bottom: 1rem;">Sync Options</h3>
 
-                <h3 style="margin-top: 1.5rem; margin-bottom: 1rem; background: #fffacd; padding: 0.5rem; border-left: 4px solid #ffa500;">Sync Behavior</h3>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="issue-sync-comments" name="sync_comments" checked>
+                        Sync Comments
+                    </label>
+                </div>
 
-                <div class="form-group" style="background: #fffacd; padding: 1rem; border-radius: 0.25rem;">
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="issue-sync-labels" name="sync_labels" checked>
+                        Sync Labels
+                    </label>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.9em;">
+                        Syncs regular labels plus converts milestones, iterations, epics, and assignees to informational labels
+                    </p>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="issue-sync-attachments" name="sync_attachments" checked>
+                        Sync Attachments
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="issue-sync-weight" name="sync_weight" checked>
+                        Sync Weight
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="issue-sync-time-estimate" name="sync_time_estimate" checked>
+                        Sync Time Estimate
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="issue-sync-time-spent" name="sync_time_spent" checked>
+                        Sync Time Spent
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="issue-sync-closed" name="sync_closed_issues">
+                        Sync Closed Issues
+                    </label>
+                    <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.9em;">
+                        By default, only open issues are synced
+                    </p>
+                </div>
+
+                <h3 style="margin-top: 1.5rem; margin-bottom: 1rem;">Sync Behavior</h3>
+
+                <div class="form-group">
                     <label>
                         <input type="checkbox" id="issue-update-existing" name="update_existing" checked>
-                        <strong>Update Existing Issues</strong>
+                        Update Existing Issues
                     </label>
                     <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.9em;">
                         If disabled, only new issues will be created
                     </p>
                 </div>
 
-                <div class="form-group" style="background: #fffacd; padding: 1rem; border-radius: 0.25rem; border: 2px solid #ffa500;">
+                <div class="form-group">
                     <label>
                         <input type="checkbox" id="issue-sync-existing" name="sync_existing_issues">
-                        <strong>Sync Existing Issues</strong>
+                        Sync Existing Issues
                     </label>
                     <p class="text-muted" style="margin-top: 0.5rem; font-size: 0.9em;">
-                        ⭐ When first enabling sync, also sync issues that already exist. If disabled (default), only issues created after enabling sync will be synced.
+                        When first enabling sync, also sync issues that already exist. If disabled, only issues created after enabling sync will be synced.
                     </p>
                 </div>
 
@@ -525,11 +576,18 @@
                     </p>
                 </div>
 
+                <div id="issue-config-status" style="margin-top: 1rem;">
+                    <div class="alert alert-info" style="font-size: 0.9em;">
+                        <strong>Last Sync:</strong> 15 minutes ago · <strong>Status:</strong> <span class="badge badge-success">Success</span> · <strong>Next Sync:</strong> in 0 minutes
+                    </div>
+                </div>
+
+                <div id="issue-config-error" class="message message-error" style="display: none;"></div>
                 <div style="display: flex; gap: 0.5rem; margin-top: 1.5rem;">
-                    <button type="submit" id="issue-config-submit-btn" style="flex: 1; padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #3b82f6; background: white; color: #3b82f6; border-radius: 0.375rem; cursor: pointer; font-weight: 500;">
+                    <button type="submit" class="btn btn-primary" id="issue-config-submit-btn" style="flex: 1;">
                         Save Configuration
                     </button>
-                    <button type="button" style="flex: 1; padding: 0.5rem 1rem; font-size: 0.875rem; border: 1px solid #d1d5db; background: white; color: #374151; border-radius: 0.375rem; cursor: pointer; font-weight: 500;">
+                    <button type="button" class="btn btn-secondary" style="flex: 1;">
                         Cancel
                     </button>
                 </div>
