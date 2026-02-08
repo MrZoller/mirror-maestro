@@ -498,9 +498,11 @@ class GitLabClient:
                 "mirror_branch_regex": result.get("mirror_branch_regex"),
             }
         except Exception as e:
-            # 404 means no pull mirror configured - return None
+            # 404 or 400 "not mirrored" means no pull mirror configured - return None
             error_msg = str(e).lower()
             if "404" in error_msg or "not found" in error_msg:
+                return None
+            if "400" in error_msg and "not mirrored" in error_msg:
                 return None
             _handle_gitlab_error(e, f"Failed to fetch pull mirror for project {project_id}")
 
@@ -556,9 +558,11 @@ class GitLabClient:
             )
             return True
         except Exception as e:
-            # 404 is acceptable - means no pull mirror was configured
+            # 404 or 400 "not mirrored" is acceptable - means no pull mirror was configured
             error_msg = str(e).lower()
             if "404" in error_msg or "not found" in error_msg:
+                return True
+            if "400" in error_msg and "not mirrored" in error_msg:
                 return True
             _handle_gitlab_error(e, f"Failed to delete pull mirror from project {project_id}")
 
