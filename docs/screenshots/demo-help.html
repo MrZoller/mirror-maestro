@@ -47,13 +47,26 @@
 
         <!-- Help Tab -->
         <div id="help-tab" class="tab-content active">
-            <!-- Getting Started -->
+            <!-- 1. Getting Started -->
             <div class="card">
                 <h2>Getting Started</h2>
                 <p class="text-muted">Welcome to Mirror Maestro - your tool for orchestrating GitLab mirrors across multiple instances.</p>
 
                 <h3>What is Mirror Maestro?</h3>
                 <p>Mirror Maestro simplifies the management of GitLab repository mirrors. Whether you need to sync repositories between GitLab instances, create backups, or maintain read-only copies, Mirror Maestro provides a centralized interface to configure and monitor all your mirrors.</p>
+
+                <h3>Application Overview</h3>
+                <p>Mirror Maestro is organized into several tabs, each focused on a specific aspect of mirror management:</p>
+                <ul>
+                    <li><strong><a href="#" onclick="return false;">Dashboard</a></strong> - Quick overview with statistics, recent activity, and system health</li>
+                    <li><strong><a href="#" onclick="return false;">GitLab Instances</a></strong> - Manage connections to your GitLab servers</li>
+                    <li><strong><a href="#" onclick="return false;">Instance Pairs</a></strong> - Configure mirroring relationships between instances</li>
+                    <li><strong><a href="#" onclick="return false;">Mirrors</a></strong> - Create and manage individual repository mirrors</li>
+                    <li><strong><a href="#" onclick="return false;">Topology</a></strong> - Visualize your mirror network with an interactive graph</li>
+                    <li><strong><a href="#" onclick="return false;">Backup</a></strong> - Create and restore complete database backups</li>
+                    <li><strong><a href="#" onclick="return false;">About</a></strong> - Project information and version details</li>
+                    <li><strong><a href="#" onclick="return false;">Help</a></strong> - This comprehensive guide</li>
+                </ul>
 
                 <h3>Core Concepts</h3>
                 <ul>
@@ -64,13 +77,13 @@
 
                 <h3>Quick Start: Create Your First Mirror</h3>
                 <ol>
-                    <li><strong>Add a GitLab Instance</strong> - Go to GitLab Instances and add your GitLab server with an access token.</li>
-                    <li><strong>Create an Instance Pair</strong> - Go to Instance Pairs and create a pair (can be the same instance for internal mirroring).</li>
-                    <li><strong>Create a Mirror</strong> - Go to Mirrors, select your pair, choose source and target projects, and create the mirror. Authentication tokens are managed automatically.</li>
+                    <li><strong>Add a GitLab Instance</strong> - Go to <a href="#" onclick="return false;">GitLab Instances</a> and add your GitLab server with an access token.</li>
+                    <li><strong>Create an Instance Pair</strong> - Go to <a href="#" onclick="return false;">Instance Pairs</a> and create a pair (can be the same instance for internal mirroring).</li>
+                    <li><strong>Create a Mirror</strong> - Go to <a href="#" onclick="return false;">Mirrors</a>, select your pair, choose source and target projects, and create the mirror. Authentication tokens are managed automatically.</li>
                 </ol>
             </div>
 
-            <!-- GitLab Instances -->
+            <!-- 2. GitLab Instances -->
             <div class="card">
                 <h2>GitLab Instances</h2>
                 <p class="text-muted">Configure connections to your GitLab servers.</p>
@@ -86,7 +99,7 @@
 
                 <h3>Adding an Instance</h3>
                 <ol>
-                    <li>Navigate to the GitLab Instances tab</li>
+                    <li>Navigate to the <a href="#" onclick="return false;">GitLab Instances</a> tab</li>
                     <li>Fill in the instance name (e.g., "Production GitLab")</li>
                     <li>Enter the instance URL (e.g., <code>https://gitlab.example.com</code>)</li>
                     <li>Paste your access token</li>
@@ -95,9 +108,22 @@
 
                 <h3>Testing Connections</h3>
                 <p>After adding an instance, Mirror Maestro verifies the token by fetching the authenticated user's information. If successful, you'll see the API username displayed in the instances table.</p>
+
+                <h3>Deletion Behavior</h3>
+                <div class="alert alert-warning">
+                    <strong>&#9888;&#65039; Important:</strong> Deleting a GitLab instance performs a cascading delete with GitLab cleanup.
+                </div>
+                <p>When you delete an instance, the following happens:</p>
+                <ol>
+                    <li><strong>GitLab Cleanup</strong> - All mirrors and project access tokens are removed from GitLab using rate-limited API calls</li>
+                    <li><strong>Database Cleanup</strong> - Instance pairs referencing this instance and their associated mirrors are deleted from the database</li>
+                    <li><strong>Progress Tracking</strong> - The operation returns detailed metrics showing successful and failed cleanup operations</li>
+                </ol>
+                <p><strong>Rate Limiting:</strong> For instances with many mirrors, cleanup operations are throttled (default: 200ms between operations) to avoid overwhelming GitLab.</p>
+                <p><strong>Best-Effort:</strong> If GitLab cleanup fails for some mirrors (e.g., network errors, expired tokens), the database deletion still proceeds, and warnings are returned.</p>
             </div>
 
-            <!-- Instance Pairs -->
+            <!-- 3. Instance Pairs -->
             <div class="card">
                 <h2>Instance Pairs</h2>
                 <p class="text-muted">Define mirroring relationships between GitLab instances.</p>
@@ -114,12 +140,12 @@
                     <tbody>
                         <tr>
                             <td><strong>Push</strong></td>
-                            <td>Source → Target</td>
+                            <td>Source &rarr; Target</td>
                             <td>The source repository pushes changes to the target. Best for active development repos pushing to backups or read-only copies.</td>
                         </tr>
                         <tr>
                             <td><strong>Pull</strong></td>
-                            <td>Target ← Source</td>
+                            <td>Target &larr; Source</td>
                             <td>The target repository pulls changes from the source. Best when you want the target to control when it syncs.</td>
                         </tr>
                     </tbody>
@@ -127,7 +153,7 @@
 
                 <h3>Creating a Pair</h3>
                 <ol>
-                    <li>Navigate to the Instance Pairs tab</li>
+                    <li>Navigate to the <a href="#" onclick="return false;">Instance Pairs</a> tab</li>
                     <li>Enter a descriptive name (e.g., "Dev to Prod Sync")</li>
                     <li>Select the source and target instances</li>
                     <li>Choose the mirror direction (push or pull)</li>
@@ -142,148 +168,339 @@
                     <li><strong>Trigger builds</strong> - Run CI/CD pipelines on the target after sync</li>
                     <li><strong>Overwrite diverged branches</strong> - Force-update branches that have diverged</li>
                 </ul>
-            </div>
 
-            <!-- Mirror Management -->
-            <div class="card">
-                <h2>Mirror Management</h2>
-                <p class="text-muted">Create, view, and manage mirrors with powerful navigation and filtering tools.</p>
-
-                <h3>Viewing Mirrors</h3>
-                <p>Mirror Maestro provides flexible ways to view and navigate your mirrors, especially useful when managing large numbers of mirrors in nested group structures:</p>
-
-                <h4>Flat View (Default)</h4>
+                <h3>Bidirectional Mirroring</h3>
+                <p>To sync repositories in both directions between two instances, create two instance pairs:</p>
                 <ul>
-                    <li><strong>Smart Path Truncation</strong> - Long nested paths automatically show only the last few segments (e.g., <code>... / services / api-gateway</code>)</li>
-                    <li><strong>Full Path Tooltips</strong> - Hover over any path to see the complete path</li>
-                    <li><strong>Pagination</strong> - Navigate through pages of mirrors with configurable page size (25/50/100/200 per page)</li>
+                    <li><strong>Pair 1:</strong> Instance A &rarr; Instance B (e.g., "Production to Staging")</li>
+                    <li><strong>Pair 2:</strong> Instance B &rarr; Instance A (e.g., "Staging to Production")</li>
+                </ul>
+                <p>Each pair can have independent settings (direction, branch filters, overwrite policies, etc.). The <a href="#" onclick="return false;">Topology</a> view will display both directions as separate links between the instances, making bidirectional relationships easy to visualize.</p>
+
+                <h3>Batch Mirror Sync</h3>
+                <p>The "Sync All" button in the Instance Pairs table allows you to trigger sync for all enabled mirrors in a pair with a single click. This is particularly useful when:</p>
+                <ul>
+                    <li><strong>Resuming after outages</strong> - When a GitLab instance goes down temporarily, all mirrors may stop syncing and need manual resumption</li>
+                    <li><strong>Post-maintenance sync</strong> - After scheduled maintenance or upgrades</li>
+                    <li><strong>Large-scale updates</strong> - When you need to sync hundreds of mirrors at once</li>
                 </ul>
 
-                <h4>Tree View</h4>
-                <ul>
-                    <li>Click the "Tree View" button to switch to hierarchical display</li>
-                    <li>Mirrors are grouped by their path structure (groups and subgroups)</li>
-                    <li>Expand/collapse group nodes to navigate the hierarchy</li>
-                    <li>Group headers show mirror count for that branch</li>
-                    <li>Perfect for organizing mirrors in deeply nested group structures</li>
-                </ul>
-
-                <h3>Filtering Mirrors</h3>
-                <p>Use the filter controls above the mirror table:</p>
-                <ul>
-                    <li><strong>Group Path Filter</strong> - Enter a group path prefix (e.g., <code>platform/core</code>) to show only mirrors within that group tree</li>
-                    <li><strong>Sort By</strong> - Sort mirrors by created date, updated date, source path, target path, or status</li>
-                    <li><strong>Order</strong> - Choose ascending or descending sort order</li>
-                </ul>
-
-                <h3>Creating Mirrors</h3>
+                <h4>How Batch Sync Works</h4>
+                <p>When you click "Sync All", Mirror Maestro:</p>
                 <ol>
-                    <li>Select an instance pair from the dropdown</li>
-                    <li>Search for source and target projects (type at least 2 characters)</li>
-                    <li>Optionally configure per-mirror settings (or inherit from pair defaults)</li>
-                    <li>Click "Create Mirror"</li>
+                    <li>Fetches all enabled mirrors for the selected pair</li>
+                    <li>Sequentially triggers each mirror's sync operation</li>
+                    <li>Applies rate limiting between operations (default: 200ms delay)</li>
+                    <li>Continues processing even if some mirrors fail</li>
+                    <li>Returns a detailed summary with success/failure counts and timing metrics</li>
                 </ol>
-                <p><strong>Note:</strong> Project access tokens are automatically created and managed by Mirror Maestro - no manual token configuration needed!</p>
 
-                <h3>Mirror Actions</h3>
+                <h4>Rate Limiting Protection</h4>
+                <p>To prevent overwhelming GitLab instances with too many API requests, batch operations use intelligent rate limiting:</p>
                 <ul>
-                    <li><strong>Edit</strong> - Modify mirror settings inline (project paths cannot be changed after creation)</li>
-                    <li><strong>Sync</strong> - Force an immediate mirror synchronization</li>
-                    <li><strong>Rotate Token</strong> - Create a new project access token and revoke the old one</li>
-                    <li><strong>Delete</strong> - Remove the mirror configuration (and associated tokens)</li>
+                    <li><strong>Configurable delay</strong> - Default 200ms between operations (~300 requests/minute, well under GitLab's typical 600/min limit)</li>
+                    <li><strong>Automatic retry</strong> - If GitLab returns a 429 "Too Many Requests" error, operations are retried with exponential backoff</li>
+                    <li><strong>Progress tracking</strong> - Real-time progress with estimated completion time</li>
+                    <li><strong>Detailed reporting</strong> - Shows which mirrors succeeded, failed, or were skipped</li>
                 </ul>
 
-                <h3>Pagination Controls</h3>
-                <p>At the bottom of the mirror table:</p>
+                <h4>Example: Syncing 100 Mirrors</h4>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>With default settings (200ms delay):
+- Total time: ~20 seconds
+- Rate: ~300 operations/minute
+- Well under GitLab's API limits
+- Safe for large mirror sets</code></pre>
+
+                <h3>Deletion Behavior</h3>
+                <div class="alert alert-warning">
+                    <strong>&#9888;&#65039; Important:</strong> Deleting an instance pair performs a cascading delete with GitLab cleanup.
+                </div>
+                <p>When you delete a pair, the following happens:</p>
+                <ol>
+                    <li><strong>GitLab Cleanup</strong> - All mirrors in the pair and their project access tokens are removed from GitLab using rate-limited API calls</li>
+                    <li><strong>Database Cleanup</strong> - The pair and all associated mirrors are deleted from the database</li>
+                    <li><strong>Progress Tracking</strong> - Returns detailed metrics showing successful and failed cleanup operations</li>
+                </ol>
+                <p><strong>Rate Limiting:</strong> For pairs with many mirrors, cleanup operations are throttled to avoid overwhelming GitLab (same rate limiting as batch sync).</p>
+                <p><strong>Best-Effort:</strong> If GitLab cleanup fails for some mirrors, the database deletion still proceeds with warnings returned.</p>
+
+                <h4>Example: Deleting Pair with 50 Mirrors</h4>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>Each mirror deletion = 2 GitLab API calls:
+1. Delete mirror from project
+2. Delete project access token
+
+Total operations: 100 API calls
+With 200ms delay: ~20 seconds total
+Safe and controlled cleanup</code></pre>
+            </div>
+
+            <!-- 4. Authentication -->
+            <div class="card">
+                <h2>Authentication</h2>
+                <p class="text-muted">How Mirror Maestro handles mirror authentication.</p>
+
+                <h3>Automatic Token Management</h3>
+                <p>Mirror Maestro automatically creates and manages project access tokens for each mirror. When you create a mirror, a token is generated on the appropriate project with the required permissions.</p>
                 <ul>
-                    <li><strong>Page Navigation</strong> - Jump to specific pages or use Previous/Next buttons</li>
-                    <li><strong>Page Size</strong> - Select how many mirrors to show per page (25/50/100/200)</li>
-                    <li><strong>Current Range</strong> - See which mirrors you're viewing (e.g., "Showing 1-50 of 237 mirrors")</li>
+                    <li><strong>Push mirrors</strong> - Token is created on the <em>target</em> project (with <code>write_repository</code> scope)</li>
+                    <li><strong>Pull mirrors</strong> - Token is created on the <em>source</em> project (with <code>read_repository</code> scope)</li>
                 </ul>
 
-                <h3>Best Practices</h3>
+                <h3>Token Expiration</h3>
+                <p>Tokens are created with a 1-year expiration. The mirror list shows token status:</p>
                 <ul>
-                    <li>Use group path filters to focus on specific parts of your GitLab hierarchy</li>
-                    <li>Switch to tree view when working with deeply nested groups</li>
-                    <li>Sort by source path to group similar projects together</li>
-                    <li>Use larger page sizes (100-200) when doing bulk operations</li>
-                    <li>Monitor token status and rotate tokens before they expire</li>
+                    <li><span class="badge badge-success">Active</span> - Token is valid</li>
+                    <li><span class="badge badge-warning">Expiring Soon</span> - Token expires within 30 days</li>
+                    <li><span class="badge badge-danger">Expired</span> - Token has expired and needs rotation</li>
+                </ul>
+
+                <h3>Token Rotation</h3>
+                <p>To rotate a token before it expires (or after it has expired), click the "Rotate Token" button on the mirror. This will create a new token and update the mirror configuration automatically.</p>
+            </div>
+
+            <!-- 5. Settings Hierarchy -->
+            <div class="card">
+                <h2>Settings Hierarchy</h2>
+                <p class="text-muted">How mirror settings are resolved.</p>
+
+                <h3>Two-Tier Resolution</h3>
+                <p>Mirror settings are resolved in this order (first non-null value wins):</p>
+                <ol>
+                    <li><strong>Mirror-level</strong> - Settings on the individual mirror (highest priority)</li>
+                    <li><strong>Pair-level</strong> - Default settings on the instance pair (fallback)</li>
+                </ol>
+                <p>This allows you to set sensible defaults on the instance pair and override them per-mirror as needed.</p>
+            </div>
+
+            <!-- 6. Creating Mirrors -->
+            <div class="card">
+                <h2>Creating Mirrors</h2>
+                <p class="text-muted">Step-by-step guide to setting up repository mirrors.</p>
+
+                <h3>Prerequisites</h3>
+                <ul>
+                    <li>At least one GitLab instance configured</li>
+                    <li>An instance pair created</li>
+                    <li>A group token for the source and/or target groups</li>
+                    <li>Source and target projects must exist (Mirror Maestro doesn't create projects)</li>
+                </ul>
+
+                <h3>Creating a Mirror</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="return false;">Mirrors</a> tab</li>
+                    <li>Select an instance pair from the dropdown</li>
+                    <li>Search and select the source project</li>
+                    <li>Search and select the target project</li>
+                    <li>Click "Preflight Check" to validate the configuration</li>
+                    <li>Review the effective settings shown in the preflight results</li>
+                    <li>Click "Create Mirror" to set up the mirror on GitLab</li>
+                </ol>
+
+                <h3>Preflight Checks</h3>
+                <p>Before creating a mirror, the preflight check verifies:</p>
+                <ul>
+                    <li>Both projects are accessible</li>
+                    <li>Required tokens are available</li>
+                    <li>The effective mirror settings (combining mirror, group, and pair defaults)</li>
+                </ul>
+
+                <h3>Mirror Settings</h3>
+                <ul>
+                    <li><strong>Enabled</strong> - Toggle to enable/disable the mirror without deleting it</li>
+                    <li><strong>Only protected branches</strong> - Sync only branches marked as protected</li>
+                    <li><strong>Trigger builds</strong> - Run CI/CD on target after successful sync</li>
+                    <li><strong>Overwrite diverged</strong> - Force-push if target has diverged from source</li>
+                </ul>
+
+                <h3>Syncing Mirrors</h3>
+                <p>Mirrors sync automatically based on GitLab's schedule (typically every 5 minutes for push, on-demand for pull). You can manually trigger a sync using the "Update Now" button in the mirrors table.</p>
+            </div>
+
+            <!-- 7. Topology View -->
+            <div class="card">
+                <h2>Topology View</h2>
+                <p class="text-muted">Visualize your mirror network with an interactive graph.</p>
+
+                <h3>Understanding the Graph</h3>
+                <ul>
+                    <li><strong>Nodes</strong> - Each node represents a GitLab instance</li>
+                    <li><strong>Links</strong> - Lines between nodes represent instance pairs</li>
+                    <li><strong>Link colors</strong> - Blue for pull mirrors, orange for push mirrors</li>
+                    <li><strong>Link thickness</strong> - Thicker links have more mirrors</li>
+                </ul>
+
+                <h3>Interacting with the Graph</h3>
+                <ul>
+                    <li><strong>Drag nodes</strong> - Rearrange the layout by dragging instances</li>
+                    <li><strong>Click a node</strong> - See instance details and statistics</li>
+                    <li><strong>Click a link</strong> - View all mirrors for that pair</li>
+                    <li><strong>Zoom</strong> - Scroll to zoom in/out</li>
+                    <li><strong>Pan</strong> - Click and drag the background to pan</li>
+                </ul>
+
+                <h3>Status Indicators</h3>
+                <p>The graph shows mirror health at a glance:</p>
+                <ul>
+                    <li><strong>Green</strong> - All mirrors syncing successfully</li>
+                    <li><strong>Yellow</strong> - Some mirrors have warnings or are stale</li>
+                    <li><strong>Red</strong> - Mirrors have errors that need attention</li>
                 </ul>
             </div>
 
-            <!-- Mirror Verification -->
+            <!-- 8. Import/Export -->
+            <div class="card">
+                <h2>Import/Export</h2>
+                <p class="text-muted">Bulk manage mirror configurations with portable JSON files.</p>
+
+                <h3>How to Use</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="return false;">Mirrors</a> tab</li>
+                    <li>Select an instance pair from the dropdown</li>
+                    <li>Click <strong>Export</strong> to download all mirrors for that pair as JSON</li>
+                    <li>Click <strong>Import</strong> to upload a JSON file and create mirrors</li>
+                </ol>
+
+                <h3>Export Format</h3>
+                <p>Exports are <strong>portable across environments</strong> (dev/staging/prod):</p>
+                <ul>
+                    <li><strong>Project paths</strong> (not IDs) - e.g., <code>group/subgroup/project</code></li>
+                    <li><strong>Mirror settings</strong> - All configuration options (overwrite diverged, protected branches, etc.)</li>
+                    <li><strong>Metadata</strong> (informational only) - Source/target instances, direction, export timestamp</li>
+                </ul>
+
+                <h3>What Happens During Import</h3>
+                <p>When you import a JSON file, Mirror Maestro performs these steps for each mirror:</p>
+                <ol>
+                    <li><strong>Looks up project IDs</strong> from paths via GitLab API</li>
+                    <li><strong>Creates project access tokens</strong> in GitLab</li>
+                    <li><strong>Creates actual mirrors</strong> in GitLab (push or pull)</li>
+                    <li><strong>Stores mirror records</strong> in the database</li>
+                    <li><strong>Applies rate limiting</strong> - Waits 200ms before processing the next mirror</li>
+                </ol>
+                <p class="alert alert-info"><strong>Note:</strong> The result is <em>identical to creating mirrors via the UI</em>. This is not just a database import - it creates real, functional GitLab mirrors with authentication tokens.</p>
+
+                <h4>Import Rate Limiting</h4>
+                <p>Importing many mirrors can generate hundreds of GitLab API requests (each mirror requires ~4 API calls). To prevent overwhelming your GitLab instances:</p>
+                <ul>
+                    <li><strong>Sequential processing</strong> - Mirrors are created one at a time, not in parallel</li>
+                    <li><strong>Automatic delays</strong> - 200ms delay between each mirror (configurable)</li>
+                    <li><strong>Retry logic</strong> - Automatic retry with exponential backoff on rate limit errors</li>
+                    <li><strong>Progress metrics</strong> - Import results include duration and operations/second</li>
+                </ul>
+                <p><strong>Example:</strong> Importing 100 mirrors takes approximately 40-60 seconds with default settings, processing at a safe rate of ~200-300 API requests/minute.</p>
+
+                <h3>Import Results</h3>
+                <p>After import completes, you'll see a detailed summary:</p>
+                <ul>
+                    <li><strong>Imported count</strong> - Successfully created mirrors</li>
+                    <li><strong>Skipped count</strong> - Mirrors that already exist</li>
+                    <li><strong>Skipped details</strong> - Which mirrors were skipped and why (e.g., <code>[1/10] group/existing &rarr; mirror/existing: Already exists in database</code>)</li>
+                    <li><strong>Errors</strong> - Detailed list of failures with specific project paths (e.g., <code>[3/10] bad/project &rarr; mirror/bad: Project not found</code>)</li>
+                </ul>
+
+                <h3>Important Notes</h3>
+                <ul>
+                    <li><strong>Select the correct pair</strong> - Import creates mirrors for the currently selected pair, not the pair from the export file</li>
+                    <li><strong>Metadata is ignored</strong> - Only the <code>mirrors</code> array is used during import</li>
+                    <li><strong>Projects must exist</strong> - Both source and target projects must already exist in their respective GitLab instances</li>
+                    <li><strong>Duplicates are skipped</strong> - If a mirror already exists (same source/target paths), it won't be created again</li>
+                    <li><strong>Import continues on errors</strong> - If some mirrors fail, others will still be imported</li>
+                    <li><strong>Use full project paths</strong> - Paths must be in format <code>namespace/project</code> or <code>group/subgroup/project</code> (not just project names)</li>
+                </ul>
+
+                <h3>Example Export Structure</h3>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>{
+  "metadata": {
+    "exported_at": "2024-01-15T10:30:00Z",
+    "pair_name": "GitLab.com &rarr; Self-hosted",
+    "source_instance_name": "GitLab.com",
+    "target_instance_name": "Self-hosted",
+    "mirror_direction": "push",
+    "total_mirrors": 2
+  },
+  "mirrors": [
+    {
+      "source_project_path": "mygroup/project1",
+      "target_project_path": "mirrors/project1",
+      "mirror_overwrite_diverged": false,
+      "only_mirror_protected_branches": true,
+      "enabled": true
+    }
+  ]
+}</code></pre>
+            </div>
+
+            <!-- 9. Backup & Restore -->
+            <div class="card">
+                <h2>Backup & Restore</h2>
+                <p class="text-muted">Protect your Mirror Maestro configuration with backups.</p>
+
+                <h3>Creating Backups</h3>
+                <p>Regular backups protect against data loss from database corruption, accidental deletion, or server failures.</p>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="return false;">Backup</a> tab</li>
+                    <li>Review the current database statistics (instances, pairs, mirrors, size)</li>
+                    <li>Click "Create & Download Backup" to download a complete backup</li>
+                    <li>Save the backup file (.tar.gz) to a secure location</li>
+                </ol>
+
+                <h3>What's Included in Backups</h3>
+                <p>Each backup archive contains:</p>
+                <ul>
+                    <li><strong>Database</strong> - All instances, pairs, mirrors, and configurations</li>
+                    <li><strong>Encryption key</strong> - Required to decrypt stored GitLab tokens</li>
+                    <li><strong>Metadata</strong> - Timestamp and version information</li>
+                </ul>
+
+                <h3>Restoring from Backup</h3>
+                <p><strong>&#9888;&#65039; Warning:</strong> Restoring replaces ALL current data. Always create a backup first!</p>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="return false;">Backup</a> tab</li>
+                    <li>Ensure "Create backup before restore" is checked (recommended)</li>
+                    <li>Click "Select Backup File" and choose your backup (.tar.gz)</li>
+                    <li>Click "Restore Backup" and confirm the action</li>
+                    <li>The application will reload with the restored data</li>
+                </ol>
+
+                <h3>Backup Best Practices</h3>
+                <ul>
+                    <li>Create backups regularly (daily or weekly recommended)</li>
+                    <li>Store backups in a secure location separate from your server</li>
+                    <li>Keep multiple backup versions (e.g., last 7 days)</li>
+                    <li>Test restores periodically to verify backup integrity</li>
+                    <li>Protect backup files - they contain encryption keys for all tokens</li>
+                </ul>
+
+                <h3>Migration Between Servers</h3>
+                <p>Backups can be used to migrate Mirror Maestro to a new server:</p>
+                <ol>
+                    <li>Create a backup on the old server</li>
+                    <li>Install Mirror Maestro on the new server</li>
+                    <li>Upload and restore the backup on the new server</li>
+                    <li>All instances, pairs, and mirrors will be migrated</li>
+                </ol>
+            </div>
+
+            <!-- 10. Mirror Verification -->
             <div class="card">
                 <h2>Mirror Verification</h2>
-                <p class="text-muted">Detect orphaned mirrors and configuration drift between your database and GitLab.</p>
+                <p class="text-muted">Detect externally modified or deleted mirrors.</p>
 
-                <h3>Understanding Mirror Health</h3>
-                <p>Mirror Maestro can verify that mirrors configured in its database actually exist on GitLab and have matching settings. This helps detect:</p>
-
-                <h4>Orphaned Mirrors</h4>
-                <p>A mirror is <strong>orphaned</strong> when it exists in Mirror Maestro's database but the corresponding mirror no longer exists on GitLab (e.g., someone deleted it directly in GitLab).</p>
+                <h3>Why Verify Mirrors?</h3>
+                <p>Mirrors created through Mirror Maestro may be modified or deleted directly in GitLab by other users. Verification helps you detect:</p>
                 <ul>
-                    <li><span class="badge badge-danger">Orphan</span> - Mirror record exists but GitLab mirror was deleted</li>
-                    <li><strong>Resolution:</strong> Delete the orphaned record from Mirror Maestro, or recreate the mirror on GitLab</li>
+                    <li><strong>Orphan mirrors</strong> - Mirror was deleted from GitLab but still exists in Mirror Maestro's database</li>
+                    <li><strong>Drifted mirrors</strong> - Mirror settings on GitLab no longer match what Mirror Maestro expects</li>
                 </ul>
 
-                <h4>Configuration Drift</h4>
-                <p>A mirror has <strong>drift</strong> when its settings in Mirror Maestro's database don't match the actual settings on GitLab.</p>
-                <ul>
-                    <li><span class="badge badge-warning">Drift</span> - Settings mismatch detected</li>
-                    <li>Checked settings: enabled status, protected branches only, keep divergent refs, trigger builds, branch regex</li>
-                    <li><strong>Resolution:</strong> Edit the mirror to resync settings, or accept the GitLab-side changes</li>
-                </ul>
+                <h3>How to Verify</h3>
+                <ol>
+                    <li>Navigate to the <a href="#" onclick="return false;">Mirrors</a> tab</li>
+                    <li>Select an instance pair from the dropdown</li>
+                    <li>Click <strong>Verify All</strong> to check all visible mirrors, or click <strong>Verify</strong> on individual rows</li>
+                </ol>
 
-                <h3>Health Status Badges</h3>
-                <table class="help-table">
-                    <thead>
-                        <tr>
-                            <th>Badge</th>
-                            <th>Meaning</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><span class="badge badge-success">✓</span></td>
-                            <td>Mirror is healthy - exists on GitLab with matching settings</td>
-                        </tr>
-                        <tr>
-                            <td><span class="badge badge-warning">Drift</span></td>
-                            <td>Settings mismatch between database and GitLab</td>
-                        </tr>
-                        <tr>
-                            <td><span class="badge badge-danger">Orphan</span></td>
-                            <td>Mirror no longer exists on GitLab</td>
-                        </tr>
-                        <tr>
-                            <td><span class="badge badge-secondary">—</span></td>
-                            <td>Mirror not yet created on GitLab (no mirror_id)</td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <h3>Verification Actions</h3>
-                <ul>
-                    <li><strong>Verify (per-row)</strong> - Check a single mirror's health status</li>
-                    <li><strong>Verify All</strong> - Check all visible mirrors in batch</li>
-                </ul>
-                <p>Results are cached during the session to avoid repeated API calls.</p>
-
-                <h3>External Mirror Indicator</h3>
-                <p>When selecting projects for a new mirror, Mirror Maestro checks if the selected project already has existing mirrors configured directly on GitLab:</p>
-                <ul>
-                    <li><span class="badge badge-warning">⚠ 1 push</span> - Shows count and type of existing mirrors</li>
-                    <li>This helps avoid conflicts when creating new mirrors</li>
-                    <li>Existing mirrors may prevent new mirror creation (use preflight check)</li>
-                </ul>
-            </div>
-
-            <!-- System Health -->
-            <div class="card">
-                <h2>System Health</h2>
-                <p class="text-muted">Monitor the health of your Mirror Maestro installation.</p>
-
-                <h3>Health Status Levels</h3>
+                <h3>Verification Status</h3>
                 <table class="help-table">
                     <thead>
                         <tr>
@@ -293,29 +510,48 @@
                     </thead>
                     <tbody>
                         <tr>
-                            <td><span class="badge badge-success">Healthy</span></td>
-                            <td>All systems operational. Database connected, mirrors syncing, tokens valid.</td>
+                            <td><span class="badge badge-success">&#10003;</span></td>
+                            <td>Healthy - Mirror exists on GitLab with matching settings</td>
                         </tr>
                         <tr>
-                            <td><span class="badge badge-warning">Degraded</span></td>
-                            <td>Some issues detected. May have failed mirrors, expiring tokens, or unreachable instances.</td>
+                            <td><span class="badge badge-danger">Orphan</span></td>
+                            <td>Mirror was deleted from GitLab externally. Consider deleting from Mirror Maestro.</td>
                         </tr>
                         <tr>
-                            <td><span class="badge badge-danger">Unhealthy</span></td>
-                            <td>Critical issues. Database may be down, most mirrors failing, or other severe problems.</td>
+                            <td><span class="badge badge-warning">Drift</span></td>
+                            <td>Settings mismatch. Hover for details. You may want to re-sync the settings.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-secondary">N/C</span></td>
+                            <td>Not Created - Mirror record exists but was never created on GitLab</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-danger">Err</span></td>
+                            <td>Verification error - Could not contact GitLab. Check instance connectivity.</td>
                         </tr>
                     </tbody>
                 </table>
 
-                <h3>Health API Endpoints</h3>
-                <p>For monitoring tools and load balancers:</p>
+                <h3>Settings Checked for Drift</h3>
                 <ul>
-                    <li><code>GET /api/health/quick</code> - Fast health check (no auth required)</li>
-                    <li><code>GET /api/health</code> - Detailed health with component status</li>
+                    <li><code>enabled</code> - Whether the mirror is active</li>
+                    <li><code>only_protected_branches</code> - Branch filtering</li>
+                    <li><code>keep_divergent_refs</code> - How to handle diverged branches</li>
+                    <li><code>trigger_builds</code> - CI trigger setting (pull mirrors only)</li>
+                    <li><code>mirror_branch_regex</code> - Branch regex filter (pull mirrors only)</li>
                 </ul>
+
+                <h3>External Mirror Indicator</h3>
+                <p>When creating a new mirror, Mirror Maestro checks if the selected projects already have mirrors configured on GitLab:</p>
+                <ul>
+                    <li>Select a source or target project in the Create Mirror form</li>
+                    <li>If mirrors exist, a warning badge appears: <span class="badge badge-warning">&#9888; 2 push, 1 pull</span></li>
+                    <li>This helps you understand the current state before creating a new mirror</li>
+                </ul>
+                <p class="alert alert-info"><strong>Note:</strong> This checks GitLab directly, showing all mirrors on the project - including those created outside of Mirror Maestro.</p>
             </div>
 
-            <!-- Issue Mirroring -->
+            <!-- 11. Issue Mirroring -->
             <div class="card">
                 <h2>Issue Mirroring</h2>
                 <p class="text-muted">Automatically sync issues, comments, labels, and attachments between mirrored repositories.</p>
@@ -330,7 +566,7 @@
 
                 <h3>Configuring Issue Syncing</h3>
                 <ol>
-                    <li>Navigate to the Mirrors tab and click the "Issue Configs" button</li>
+                    <li>Navigate to the <a href="#" onclick="return false;">Mirrors</a> tab and click the "Issue Configs" button</li>
                     <li>Click "Create Issue Config" and select a mirror</li>
                     <li>Configure what to sync:
                         <ul>
@@ -483,7 +719,88 @@
                 </ul>
             </div>
 
-            <!-- Troubleshooting -->
+            <!-- 12. System Health -->
+            <div class="card">
+                <h2>System Health</h2>
+                <p class="text-muted">Monitor the health of your Mirror Maestro installation.</p>
+
+                <h3>Health Dashboard</h3>
+                <p>The <a href="#" onclick="return false;">Dashboard</a> includes a System Health card that shows the overall status of your Mirror Maestro installation at a glance. Health status is calculated based on:</p>
+                <ul>
+                    <li><strong>Database connectivity</strong> - Ensures the database is accessible</li>
+                    <li><strong>Mirror sync status</strong> - Checks for failed mirrors</li>
+                    <li><strong>Token expiration</strong> - Monitors for expiring or expired tokens</li>
+                </ul>
+
+                <h3>Health Status Levels</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Meaning</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="badge badge-success">Healthy</span></td>
+                            <td>All systems operational. Database connected, mirrors syncing, tokens valid.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-warning">Degraded</span></td>
+                            <td>Some issues detected. May have failed mirrors, expiring tokens, or unreachable instances.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge badge-danger">Unhealthy</span></td>
+                            <td>Critical issues. Database may be down, most mirrors failing, or other severe problems.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Health API Endpoints</h3>
+                <p>Mirror Maestro provides health check endpoints for monitoring tools and load balancers:</p>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Auth</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>GET /api/health/quick</code></td>
+                            <td>No</td>
+                            <td>Fast health check for load balancers. Returns immediately without checking dependencies.</td>
+                        </tr>
+                        <tr>
+                            <td><code>GET /api/health</code></td>
+                            <td>Yes</td>
+                            <td>Detailed health check with component status, mirror statistics, and token expiration info.</td>
+                        </tr>
+                        <tr>
+                            <td><code>GET /api/health?check_instances=true</code></td>
+                            <td>Yes</td>
+                            <td>Extended health check that also tests connectivity to all GitLab instances (slower).</td>
+                        </tr>
+                        <tr>
+                            <td><code>GET /health</code></td>
+                            <td>No</td>
+                            <td>Legacy endpoint for backward compatibility.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Monitoring Best Practices</h3>
+                <ul>
+                    <li>Use <code>/api/health/quick</code> for frequent polling (e.g., every 10 seconds)</li>
+                    <li>Use <code>/api/health</code> for less frequent detailed checks (e.g., every minute)</li>
+                    <li>Set up alerts for "degraded" or "unhealthy" status</li>
+                    <li>Monitor token expiration warnings and rotate tokens before they expire</li>
+                    <li>Check the Dashboard regularly to review mirror sync failures</li>
+                </ul>
+            </div>
+
+            <!-- 13. Troubleshooting -->
             <div class="card">
                 <h2>Troubleshooting</h2>
                 <p class="text-muted">Common issues and how to resolve them.</p>
@@ -515,6 +832,43 @@
                         </tr>
                     </tbody>
                 </table>
+
+                <h3>Mirror Sync Failures</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Error</th>
+                            <th>Cause</th>
+                            <th>Solution</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>Remote host key changed</code></td>
+                            <td>SSH host key mismatch</td>
+                            <td>Use HTTPS URLs instead of SSH, or update known hosts on GitLab server</td>
+                        </tr>
+                        <tr>
+                            <td><code>Diverged branches</code></td>
+                            <td>Target has commits not in source</td>
+                            <td>Enable "Overwrite diverged branches" if you want to force-sync</td>
+                        </tr>
+                        <tr>
+                            <td><code>Repository not found</code></td>
+                            <td>Project deleted or moved</td>
+                            <td>Update the mirror with the new project path or delete the mirror</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Checking Mirror Status</h3>
+                <ol>
+                    <li>Go to the <a href="#" onclick="return false;">Mirrors</a> tab</li>
+                    <li>Find your mirror in the table</li>
+                    <li>Check the "Status" column for the current state</li>
+                    <li>Click "Details" or "Refresh Status" for more information</li>
+                    <li>The "Last Sync" column shows when the mirror last synced successfully</li>
+                </ol>
 
                 <h3>Getting Help</h3>
                 <p>If you encounter issues not covered here:</p>
