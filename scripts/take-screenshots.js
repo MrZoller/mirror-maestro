@@ -29,10 +29,13 @@ const DEMO_FILES = [
 async function takeScreenshots() {
   console.log('🚀 Starting screenshot capture...\n');
 
-  // Launch browser
-  const browser = await chromium.launch({
-    headless: true
-  });
+  // Launch browser (supports PLAYWRIGHT_CHROMIUM_PATH env override)
+  const launchOpts = { headless: true };
+  if (process.env.PLAYWRIGHT_CHROMIUM_PATH) {
+    launchOpts.executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+    console.log(`   Using Chromium at ${launchOpts.executablePath}`);
+  }
+  const browser = await chromium.launch(launchOpts);
 
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
