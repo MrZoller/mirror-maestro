@@ -549,6 +549,10 @@ class GitLabClient:
             self.gl.http_delete(f"/projects/{project_id}/remote_mirrors/{mirror_id}")
             return True
         except Exception as e:
+            # 404 is acceptable - mirror was already deleted
+            error_msg = str(e).lower()
+            if "404" in error_msg or "not found" in error_msg:
+                return True
             _handle_gitlab_error(e, f"Failed to delete push mirror {mirror_id} from project {project_id}")
 
     def delete_pull_mirror(self, project_id: int) -> bool:
@@ -614,10 +618,19 @@ class GitLabClient:
             if not data:
                 return {"id": mirror_id}
 
-            return self.gl.http_put(
+            result = self.gl.http_put(
                 f"/projects/{project_id}/remote_mirrors/{mirror_id}",
                 post_data=data,
             )
+
+            if not isinstance(result, dict):
+                raise GitLabClientError(
+                    f"Failed to update push mirror {mirror_id} on project {project_id}: Unexpected response from GitLab API"
+                )
+
+            return result
+        except GitLabClientError:
+            raise
         except Exception as e:
             _handle_gitlab_error(e, f"Failed to update push mirror {mirror_id} on project {project_id}")
 
@@ -741,7 +754,14 @@ class GitLabClient:
         if mirror_branch_regex is not None:
             data["mirror_branch_regex"] = mirror_branch_regex
 
-        return self.gl.http_post(f"/projects/{project_id}/remote_mirrors", post_data=data)
+        result = self.gl.http_post(f"/projects/{project_id}/remote_mirrors", post_data=data)
+
+        if not isinstance(result, dict):
+            raise GitLabClientError(
+                f"Failed to create push mirror on project {project_id}: Unexpected response from GitLab API"
+            )
+
+        return result
 
     # -------------------------------------------------------------------------
     # File Operations (for E2E testing)

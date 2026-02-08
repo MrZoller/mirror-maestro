@@ -417,7 +417,7 @@ def test_gitlab_client_delete_mirror(monkeypatch):
 
 
 def test_gitlab_client_delete_mirror_error(monkeypatch):
-    """Test error handling when deleting mirror fails."""
+    """Test error handling when deleting mirror fails with a non-404 error."""
     from app.core import gitlab_client as mod
 
     class FakeGL:
@@ -425,7 +425,7 @@ def test_gitlab_client_delete_mirror_error(monkeypatch):
             pass
 
         def http_delete(self, path):
-            raise RuntimeError("Mirror not found")
+            raise RuntimeError("Permission denied")
 
     class FakeGitlabModule:
         Gitlab = FakeGL
@@ -436,6 +436,28 @@ def test_gitlab_client_delete_mirror_error(monkeypatch):
     client = mod.GitLabClient("https://example.com", "enc:any")
     with pytest.raises(Exception, match="Failed to delete push mirror"):
         client.delete_mirror(123, 789)
+
+
+def test_gitlab_client_delete_mirror_not_found(monkeypatch):
+    """Test that deleting an already-deleted mirror returns True (404 is acceptable)."""
+    from app.core import gitlab_client as mod
+
+    class FakeGL:
+        def __init__(self, url, private_token, timeout=60):
+            pass
+
+        def http_delete(self, path):
+            raise RuntimeError("404 Mirror not found")
+
+    class FakeGitlabModule:
+        Gitlab = FakeGL
+
+    monkeypatch.setattr(mod, "gitlab", FakeGitlabModule())
+    monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
+
+    client = mod.GitLabClient("https://example.com", "enc:any")
+    result = client.delete_mirror(123, 789)
+    assert result is True
 
 
 def test_gitlab_client_update_mirror(monkeypatch):
