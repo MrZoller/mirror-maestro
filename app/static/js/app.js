@@ -40,10 +40,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         await initAuth();
 
         // Now load data (token is ready)
-        loadDashboard();
         loadInstances();
         loadPairs();
-        startLivePolling();
+
+        // Only load dashboard and start polling if dashboard tab is (or will be) active.
+        // initUrlState() may switch tabs via a 50ms timeout, so check the URL param.
+        const urlTabParam = new URLSearchParams(window.location.search).get('tab');
+        if (!urlTabParam || urlTabParam === 'dashboard-tab') {
+            loadDashboard();
+            startLivePolling();
+        }
     }
 });
 
@@ -1048,6 +1054,10 @@ function renderHealthChart(healthData) {
     const canvas = document.getElementById('health-chart');
     if (!canvas) return;
 
+    // Don't create chart if canvas is not visible (e.g., dashboard tab is hidden).
+    // Chart.js internals crash when computing layout on a hidden canvas.
+    if (!canvas.offsetParent) return;
+
     const ctx = canvas.getContext('2d');
 
     // Destroy existing chart
@@ -1099,11 +1109,15 @@ function renderHealthChart(healthData) {
         }
     });
 
-    // Update legend counts
-    document.getElementById('health-success-count').textContent = healthData.success;
-    document.getElementById('health-failed-count').textContent = healthData.failed;
-    document.getElementById('health-pending-count').textContent = healthData.pending;
-    document.getElementById('health-unknown-count').textContent = healthData.unknown;
+    // Update legend counts (null-guard in case elements are missing)
+    const successEl = document.getElementById('health-success-count');
+    const failedEl = document.getElementById('health-failed-count');
+    const pendingEl = document.getElementById('health-pending-count');
+    const unknownEl = document.getElementById('health-unknown-count');
+    if (successEl) successEl.textContent = healthData.success;
+    if (failedEl) failedEl.textContent = healthData.failed;
+    if (pendingEl) pendingEl.textContent = healthData.pending;
+    if (unknownEl) unknownEl.textContent = healthData.unknown;
 }
 
 function renderRecentActivity(activities) {
@@ -2016,11 +2030,11 @@ function renderMirrors(mirrors) {
         const verifyBadge = getVerificationBadgeHtml(mirror.id);
 
         return `
-            <tr>
+            <tr data-mirror-id="${mirror.id}">
                 <td>${formatProjectPath(mirror.source_project_path)}</td>
                 <td>${formatProjectPath(mirror.target_project_path)}</td>
                 <td>${settingsCell}</td>
-                <td>${statusBadge}</td>
+                <td class="mirror-status">${statusBadge}</td>
                 <td>${updateStatus}</td>
                 <td data-sort="${escapeHtml(mirror.last_update_at || mirror.last_successful_update || '')}">
                     <div>
@@ -2402,8 +2416,9 @@ async function changeMirrorPageSize(newSize) {
 
 // Format project path with smart truncation and breadcrumbs
 function formatProjectPath(path, options = {}) {
+    if (!path) return '<span class="text-muted">n/a</span>';
     const { maxParts = 3, showTooltip = true } = options;
-    const parts = path.split('/');
+    const parts = String(path).split('/');
 
     if (parts.length <= maxParts) {
         // Short path, show it all
@@ -2508,11 +2523,11 @@ function renderTreeNode(node, level, parentPath = '') {
             // Render mirrors for this node
             item.mirrors.forEach(mirror => {
                 html += `
-                    <tr class="tree-mirror-row" data-level="${level}" style="padding-left: ${indent}px;">
+                    <tr class="tree-mirror-row" data-mirror-id="${mirror.id}" data-level="${level}" style="padding-left: ${indent}px;">
                         <td style="padding-left: ${indent + 20}px;">${escapeHtml(mirror.source_project_path)}</td>
                         <td>${formatProjectPath(mirror.target_project_path)}</td>
                         <td><!-- Settings --></td>
-                        <td>${mirror.enabled ? '<span class="badge badge-success">Enabled</span>' : '<span class="badge badge-warning">Disabled</span>'}</td>
+                        <td class="mirror-status">${mirror.enabled ? '<span class="badge badge-success">Enabled</span>' : '<span class="badge badge-warning">Disabled</span>'}</td>
                         <td>${formatMirrorStatus(mirror)}</td>
                         <td>${formatMirrorSyncTime(mirror)}</td>
                         <td><!-- Token --></td>
@@ -3276,10 +3291,14 @@ async function loadBackupStats() {
     try {
         const data = await apiRequest('/api/backup/stats');
 
-        document.getElementById('backup-stat-instances').textContent = data.instances || '0';
-        document.getElementById('backup-stat-pairs').textContent = data.pairs || '0';
-        document.getElementById('backup-stat-mirrors').textContent = data.mirrors || '0';
-        document.getElementById('backup-stat-size').textContent = `${data.database_size_mb || '0'} MB`;
+        const bkInstEl = document.getElementById('backup-stat-instances');
+        const bkPairsEl = document.getElementById('backup-stat-pairs');
+        const bkMirrorsEl = document.getElementById('backup-stat-mirrors');
+        const bkSizeEl = document.getElementById('backup-stat-size');
+        if (bkInstEl) bkInstEl.textContent = data.instances || '0';
+        if (bkPairsEl) bkPairsEl.textContent = data.pairs || '0';
+        if (bkMirrorsEl) bkMirrorsEl.textContent = data.mirrors || '0';
+        if (bkSizeEl) bkSizeEl.textContent = `${data.database_size_mb || '0'} MB`;
     } catch (error) {
         console.error('Failed to load backup statistics:', error);
         showMessage('Failed to load backup statistics', 'error');
@@ -4296,7 +4315,8 @@ async function showIssueMirrorConfig(mirrorId) {
     if (!modal) return;
 
     // Store mirror ID
-    document.getElementById('issue-config-mirror-id').value = mirrorId;
+    const mirrorIdEl = document.getElementById('issue-config-mirror-id');
+    if (mirrorIdEl) mirrorIdEl.value = mirrorId;
 
     // Try to load existing configuration
     try {
@@ -4330,8 +4350,10 @@ async function showIssueMirrorConfig(mirrorId) {
         }
     } catch (error) {
         // No existing config - use defaults (form already has default values)
-        document.getElementById('issue-config-id').value = '';
-        document.getElementById('issue-config-status').innerHTML = '<p class="text-muted">No issue sync configured for this mirror</p>';
+        const configIdEl = document.getElementById('issue-config-id');
+        if (configIdEl) configIdEl.value = '';
+        const statusEl = document.getElementById('issue-config-status');
+        if (statusEl) statusEl.innerHTML = '<p class="text-muted">No issue sync configured for this mirror</p>';
     }
 
     // Show modal
@@ -4344,9 +4366,12 @@ function closeIssueMirrorConfigModal() {
 
     // Clear form
     document.getElementById('issue-mirror-config-form')?.reset();
-    document.getElementById('issue-config-id').value = '';
-    document.getElementById('issue-config-mirror-id').value = '';
-    document.getElementById('issue-config-status').innerHTML = '';
+    const configId = document.getElementById('issue-config-id');
+    if (configId) configId.value = '';
+    const mirrorId = document.getElementById('issue-config-mirror-id');
+    if (mirrorId) mirrorId.value = '';
+    const statusEl = document.getElementById('issue-config-status');
+    if (statusEl) statusEl.innerHTML = '';
 
     const errorEl = document.getElementById('issue-config-error');
     if (errorEl) errorEl.style.display = 'none';
