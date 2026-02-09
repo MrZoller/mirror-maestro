@@ -2402,8 +2402,9 @@ async function changeMirrorPageSize(newSize) {
 
 // Format project path with smart truncation and breadcrumbs
 function formatProjectPath(path, options = {}) {
+    if (!path) return '<span class="text-muted">n/a</span>';
     const { maxParts = 3, showTooltip = true } = options;
-    const parts = path.split('/');
+    const parts = String(path).split('/');
 
     if (parts.length <= maxParts) {
         // Short path, show it all
@@ -4296,7 +4297,8 @@ async function showIssueMirrorConfig(mirrorId) {
     if (!modal) return;
 
     // Store mirror ID
-    document.getElementById('issue-config-mirror-id').value = mirrorId;
+    const mirrorIdEl = document.getElementById('issue-config-mirror-id');
+    if (mirrorIdEl) mirrorIdEl.value = mirrorId;
 
     // Try to load existing configuration
     try {
@@ -4330,8 +4332,10 @@ async function showIssueMirrorConfig(mirrorId) {
         }
     } catch (error) {
         // No existing config - use defaults (form already has default values)
-        document.getElementById('issue-config-id').value = '';
-        document.getElementById('issue-config-status').innerHTML = '<p class="text-muted">No issue sync configured for this mirror</p>';
+        const configIdEl = document.getElementById('issue-config-id');
+        if (configIdEl) configIdEl.value = '';
+        const statusEl = document.getElementById('issue-config-status');
+        if (statusEl) statusEl.innerHTML = '<p class="text-muted">No issue sync configured for this mirror</p>';
     }
 
     // Show modal
@@ -4344,9 +4348,12 @@ function closeIssueMirrorConfigModal() {
 
     // Clear form
     document.getElementById('issue-mirror-config-form')?.reset();
-    document.getElementById('issue-config-id').value = '';
-    document.getElementById('issue-config-mirror-id').value = '';
-    document.getElementById('issue-config-status').innerHTML = '';
+    const configId = document.getElementById('issue-config-id');
+    if (configId) configId.value = '';
+    const mirrorId = document.getElementById('issue-config-mirror-id');
+    if (mirrorId) mirrorId.value = '';
+    const statusEl = document.getElementById('issue-config-status');
+    if (statusEl) statusEl.innerHTML = '';
 
     const errorEl = document.getElementById('issue-config-error');
     if (errorEl) errorEl.style.display = 'none';
