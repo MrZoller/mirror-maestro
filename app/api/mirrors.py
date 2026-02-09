@@ -953,6 +953,11 @@ async def _create_mirror_internal(
                 operation_name=f"create_pull_mirror({mirror_data.target_project_id})",
             )
             gitlab_mirror_id = result.get("id")
+            if gitlab_mirror_id is None:
+                logger.warning(
+                    f"GitLab returned no 'id' for pull mirror on project {mirror_data.target_project_id}. "
+                    f"Response keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}"
+                )
     except HTTPException:
         # Cleanup the token we created before re-raising
         if gitlab_token_id is not None:
@@ -1118,7 +1123,12 @@ async def create_mirror(
     # Trigger initial sync after creation (best effort)
     # This starts the actual data synchronization on GitLab
     try:
-        if db_mirror.mirror_id:
+        # Push mirrors need mirror_id to trigger sync; pull mirrors only need project_id
+        can_trigger = (
+            (direction == "push" and db_mirror.mirror_id)
+            or direction == "pull"
+        )
+        if can_trigger:
             trigger_client = GitLabClient(
                 source_instance.url if direction == "push" else target_instance.url,
                 source_instance.encrypted_token if direction == "push" else target_instance.encrypted_token,
@@ -1144,9 +1154,11 @@ async def create_mirror(
             await db.commit()
             await db.refresh(db_mirror)
             logger.info(f"Triggered initial sync for mirror {db_mirror.id}")
+        else:
+            logger.warning(f"Cannot trigger initial sync for mirror {db_mirror.id}: no mirror_id for push mirror")
     except Exception as e:
         # Don't fail the creation if trigger fails
-        logger.debug(f"Could not trigger initial sync after creation: {e}")
+        logger.warning(f"Could not trigger initial sync after creation: {e}")
 
     return MirrorResponse(
         id=db_mirror.id,
