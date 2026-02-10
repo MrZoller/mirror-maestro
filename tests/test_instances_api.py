@@ -16,7 +16,9 @@ class FakeGitLabClient:
         self.timeout = timeout
 
     def test_connection(self) -> bool:
-        return self.test_ok
+        if not self.test_ok:
+            raise ConnectionError("Connection refused")
+        return True
 
     def get_projects(self, search=None, *, per_page=50, page=1, get_all=False):
         return self.projects
