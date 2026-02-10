@@ -39,7 +39,8 @@ def test_gitlab_client_test_connection_false(monkeypatch):
     monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
 
     client = mod.GitLabClient("https://example.com", "enc:any")
-    assert client.test_connection() is False
+    with pytest.raises(RuntimeError, match="nope"):
+        client.test_connection()
 
 
 def test_gitlab_client_get_projects_shapes(monkeypatch):

@@ -296,16 +296,14 @@ async def _create_instance_impl(instance: GitLabInstanceCreate, db: AsyncSession
     # Test connection first
     try:
         client = GitLabClient(instance.url, encrypted_token, timeout=settings.gitlab_api_timeout)
-        if not client.test_connection():
-            raise HTTPException(status_code=400, detail="Failed to connect to GitLab instance")
+        client.test_connection()
     except HTTPException:
         raise
     except Exception as e:
-        import logging
-        logging.error(f"Failed to connect to GitLab: {str(e)}")
+        logger.error(f"Failed to connect to GitLab: {str(e)}")
         raise HTTPException(
             status_code=400,
-            detail="Failed to connect to GitLab instance. Check server logs for details."
+            detail=f"Failed to connect to GitLab instance: {str(e)}"
         )
 
     # Best-effort: resolve token user for a friendly display / defaults

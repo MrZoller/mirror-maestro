@@ -173,13 +173,17 @@ class GitLabClient:
         return False
 
     def test_connection(self) -> bool:
-        """Test if the connection to GitLab is working."""
+        """Test if the connection to GitLab is working.
+
+        Returns True on success.
+        Raises an exception with details on failure.
+        """
         try:
             self.gl.auth()
             return True
         except Exception as e:
             logger.debug(f"GitLab connection test failed: {e}")
-            return False
+            raise
 
     def get_projects(
         self,
