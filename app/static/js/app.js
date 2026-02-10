@@ -655,11 +655,24 @@ async function apiRequest(url, options = {}) {
 
             try {
                 errorData = await response.json();
-                errorMessage = errorData.detail || errorMessage;
 
-                // Handle complex error details (like conflict with existing_mirror_id)
-                if (typeof errorData.detail === 'object' && errorData.detail.message) {
+                if (Array.isArray(errorData.detail)) {
+                    // Handle Pydantic validation error format (detail is an array of error objects)
+                    errorMessage = errorData.detail
+                        .map(err => {
+                            let msg = err.msg || '';
+                            // Strip "Value error, " prefix from Pydantic v2 messages
+                            msg = msg.replace(/^Value error,\s*/i, '');
+                            return msg;
+                        })
+                        .filter(Boolean)
+                        .join('; ') || errorMessage;
+                } else if (typeof errorData.detail === 'object' && errorData.detail !== null && errorData.detail.message) {
+                    // Handle complex error details (like conflict with existing_mirror_id)
                     errorMessage = errorData.detail.message;
+                } else if (errorData.detail) {
+                    // Handle simple string detail
+                    errorMessage = errorData.detail;
                 }
             } catch (e) {
                 errorMessage = `HTTP ${response.status}: ${response.statusText}`;
@@ -1351,6 +1364,7 @@ async function saveInstanceEdit(id) {
         await loadPairs(); // names are displayed on the pairs tab
     } catch (error) {
         console.error('Failed to update instance:', error);
+        showMessage(error.message || 'Failed to update instance', 'error');
     }
 }
 
@@ -1381,7 +1395,7 @@ async function createInstance(event) {
         await loadInstances();
     } catch (error) {
         console.error('Failed to create instance:', error);
-        // Error message is already shown by showErrorState/showMessage
+        showMessage(error.message || 'Failed to create instance', 'error');
         if (error instanceof APIError && error.type === 'validation') {
             // Validation errors should keep the form filled so user can correct
             return;
@@ -1637,6 +1651,7 @@ async function savePairEdit(id) {
         await loadPairs();
     } catch (error) {
         console.error('Failed to update pair:', error);
+        showMessage(error.message || 'Failed to update pair', 'error');
     }
 }
 
@@ -1690,6 +1705,7 @@ async function createPair() {
         await loadPairs();
     } catch (error) {
         console.error('Failed to create pair:', error);
+        showMessage(error.message || 'Failed to create pair', 'error');
     }
 }
 
