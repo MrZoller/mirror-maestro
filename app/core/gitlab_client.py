@@ -381,8 +381,8 @@ class GitLabClient:
             if mirror_branch_regex is not None:
                 data["mirror_branch_regex"] = mirror_branch_regex
 
-            # Use the dedicated pull mirror endpoint (PUT /projects/:id/mirror/pull)
-            result = self.gl.http_put(f"/projects/{project_id}/mirror/pull", post_data=data)
+            # Use the dedicated pull mirror endpoint (POST /projects/:id/mirror/pull)
+            result = self.gl.http_post(f"/projects/{project_id}/mirror/pull", post_data=data)
 
             if not isinstance(result, dict):
                 raise GitLabClientError(
