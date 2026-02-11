@@ -203,6 +203,17 @@ async def test_mirrors_trigger_update_updates_status(client, session_maker, monk
         await s.refresh(m)
         mirror_id = m.id
 
+    # Set up pull mirror data so refresh can find the mirror
+    FakeGitLabClient.pull_mirrors[2] = {
+        "id": 77,
+        "url": "https://src.example.com/platform/proj.git",
+        "enabled": True,
+        "update_status": "started",
+        "last_update_at": "2024-01-15T10:30:00Z",
+        "last_successful_update_at": None,
+        "last_error": None,
+    }
+
     resp = await client.post(f"/api/mirrors/{mirror_id}/update")
     assert resp.status_code == 200
     assert resp.json() == {"status": "update_triggered"}
@@ -211,7 +222,11 @@ async def test_mirrors_trigger_update_updates_status(client, session_maker, monk
 
     async with session_maker() as s:
         m2 = (await s.execute(select(Mirror).where(Mirror.id == mirror_id))).scalar_one()
-        assert m2.last_update_status == "updating"
+        # After trigger, the endpoint refreshes status from GitLab.
+        # GitLab 'started' maps to 'syncing' in our internal representation.
+        assert m2.last_update_status == "syncing"
+        # Timestamps should be populated from GitLab
+        assert m2.last_update_at is not None
 
 
 @pytest.mark.asyncio

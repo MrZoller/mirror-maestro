@@ -1156,10 +1156,14 @@ async def create_mirror(
                     operation_name=f"trigger_pull_mirror_update({trigger_project_id})",
                 )
 
-            # Update status to show sync is in progress
-            db_mirror.last_update_status = "pending"
-            await db.commit()
-            await db.refresh(db_mirror)
+            # Refresh status from GitLab to get actual timestamps
+            try:
+                await _refresh_mirror_status(db, db_mirror)
+            except Exception as refresh_err:
+                logger.warning(f"Status refresh after initial sync trigger failed: {refresh_err}")
+                db_mirror.last_update_status = "syncing"
+                await db.commit()
+                await db.refresh(db_mirror)
             logger.info(f"Triggered initial sync for mirror {db_mirror.id}")
         else:
             logger.warning(f"Cannot trigger initial sync for mirror {db_mirror.id}: no mirror_id for push mirror")
@@ -1778,9 +1782,18 @@ async def trigger_mirror_update(
                 operation_name=f"trigger_pull_mirror_update({project_id})",
             )
 
-        # Update status
-        mirror.last_update_status = "updating"
-        await db.commit()
+        # Refresh status from GitLab to get actual timestamps and status
+        try:
+            refresh_result = await _refresh_mirror_status(db, mirror)
+            if not refresh_result.success:
+                # Refresh failed but trigger succeeded - set status manually
+                mirror.last_update_status = "syncing"
+                await db.commit()
+        except Exception as refresh_err:
+            logger.warning(f"Status refresh after trigger failed (non-critical): {refresh_err}")
+            # Trigger succeeded but refresh failed - set status manually
+            mirror.last_update_status = "syncing"
+            await db.commit()
 
         return {"status": "update_triggered"}
     except HTTPException:
@@ -2374,12 +2387,12 @@ async def _refresh_mirror_status(
 
     # Normalize GitLab status to our internal status values
     # GitLab returns: 'finished', 'failed', 'started', 'none'
-    # Our internal values (used by health/dashboard): 'success', 'failed', 'pending'
+    # Our internal values: 'success', 'failed', 'syncing', 'pending'
     status_mapping = {
         'finished': 'success',
         'failed': 'failed',
-        'started': 'pending',
-        'none': None,
+        'started': 'syncing',
+        'none': 'pending',
     }
     update_status = status_mapping.get(raw_status, raw_status)
 

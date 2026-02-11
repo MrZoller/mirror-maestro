@@ -26,7 +26,7 @@ async def get_dashboard_metrics(
             func.count(case((Mirror.enabled == True, 1))).label('enabled_mirrors'),
             func.count(case(((Mirror.last_update_status == 'success') | (Mirror.last_update_status == 'finished'), 1))).label('success'),
             func.count(case((Mirror.last_update_status == 'failed', 1))).label('failed'),
-            func.count(case(((Mirror.last_update_status == 'pending') | (Mirror.last_update_status == 'started'), 1))).label('pending'),
+            func.count(case((Mirror.last_update_status.in_(['pending', 'started', 'syncing', 'updating']), 1))).label('pending'),
             func.count(case((Mirror.last_update_status.is_(None), 1))).label('unknown'),
         )
     )
@@ -142,11 +142,11 @@ async def get_quick_stats(
 ):
     """Get quick stats for real-time updates."""
 
-    # Count mirrors currently syncing (updated in last 5 minutes with pending status)
+    # Count mirrors currently syncing (updated in last 5 minutes with syncing/updating status)
     five_min_ago = datetime.utcnow() - timedelta(minutes=5)
     syncing_result = await db.execute(
         select(func.count(Mirror.id)).where(
-            Mirror.last_update_status == 'pending',
+            Mirror.last_update_status.in_(['syncing', 'updating', 'pending', 'started']),
             Mirror.updated_at >= five_min_ago
         )
     )
@@ -165,7 +165,7 @@ async def get_quick_stats(
     # Get list of syncing mirror IDs for status indicators
     syncing_mirrors_result = await db.execute(
         select(Mirror.id).where(
-            Mirror.last_update_status == 'pending',
+            Mirror.last_update_status.in_(['syncing', 'updating', 'pending', 'started']),
             Mirror.updated_at >= five_min_ago
         )
     )
