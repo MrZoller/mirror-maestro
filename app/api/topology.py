@@ -73,10 +73,11 @@ def _health_from_status_counts(counts: dict[str, int]) -> str:
         return "unknown"
     if counts.get("failed", 0) > 0:
         return "error"
-    # "updating" and "pending" are treated as warning: mirrors exist but are not healthy/settled.
-    if counts.get("updating", 0) > 0 or counts.get("pending", 0) > 0:
+    # In-progress or waiting statuses are treated as warning.
+    if (counts.get("updating", 0) > 0 or counts.get("pending", 0) > 0
+            or counts.get("syncing", 0) > 0 or counts.get("started", 0) > 0):
         return "warning"
-    if counts.get("finished", 0) > 0:
+    if counts.get("finished", 0) > 0 or counts.get("success", 0) > 0:
         return "ok"
     return "unknown"
 
@@ -148,9 +149,9 @@ def _mirror_base_health_from_status(status: str | None) -> str:
     s = _norm_status(status)
     if s == "failed":
         return "error"
-    if s in {"pending", "updating"}:
+    if s in {"pending", "updating", "syncing", "started"}:
         return "warning"
-    if s == "finished":
+    if s in {"finished", "success"}:
         return "ok"
     return "unknown"
 

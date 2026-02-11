@@ -1899,34 +1899,7 @@ function renderMirrors(mirrors) {
             `<span class="badge badge-warning">Disabled</span>`;
 
         // Format update status with appropriate badge color
-        const updateStatus = (() => {
-            const status = mirror.last_update_status;
-            if (!status) {
-                return '<span class="text-muted">N/A</span>';
-            }
-            // Map GitLab status values to appropriate badge styles
-            let badgeClass = 'badge-info';
-            let displayStatus = status;
-            if (status === 'finished' || status === 'success') {
-                badgeClass = 'badge-success';
-                displayStatus = 'Success';
-            } else if (status === 'failed') {
-                badgeClass = 'badge-danger';
-                displayStatus = 'Failed';
-            } else if (status === 'started' || status === 'updating') {
-                badgeClass = 'badge-warning';
-                displayStatus = 'Syncing';
-            } else if (status === 'pending') {
-                badgeClass = 'badge-secondary';
-                displayStatus = 'Pending';
-            }
-            let badge = `<span class="badge ${badgeClass}">${escapeHtml(displayStatus)}</span>`;
-            // Add error tooltip if there's an error
-            if (mirror.last_error && status === 'failed') {
-                badge += `<br><small class="text-danger" title="${escapeHtml(mirror.last_error)}">${escapeHtml(mirror.last_error.substring(0, 50))}${mirror.last_error.length > 50 ? '...' : ''}</small>`;
-            }
-            return badge;
-        })();
+        const updateStatus = formatMirrorStatus(mirror);
 
         const dir = (mirror.effective_mirror_direction || '').toString().toLowerCase();
         const settingsCell = (() => {
@@ -3189,6 +3162,24 @@ async function triggerMirrorUpdate(id) {
         await apiRequest(`/api/mirrors/${id}/update`, { method: 'POST' });
         showMessage('Mirror update triggered', 'success');
         await loadMirrors();
+
+        // Auto-refresh status from GitLab after delays to catch sync completion
+        // The trigger endpoint already does an initial refresh, but the sync
+        // may still be in progress. Poll again to catch the final status.
+        setTimeout(async () => {
+            try {
+                await refreshMirrorStatus(id);
+            } catch (e) {
+                // Ignore - best effort refresh
+            }
+        }, 5000);
+        setTimeout(async () => {
+            try {
+                await refreshMirrorStatus(id);
+            } catch (e) {
+                // Ignore - best effort refresh
+            }
+        }, 15000);
     } catch (error) {
         console.error('Failed to trigger mirror update:', error);
     }
@@ -3485,7 +3476,7 @@ function formatMirrorStatus(mirror) {
     if (!status) {
         return '<span class="text-muted">N/A</span>';
     }
-    // Map GitLab status values to appropriate badge styles
+    // Map status values to appropriate badge styles
     let badgeClass = 'badge-info';
     let displayStatus = status;
     if (status === 'finished' || status === 'success') {
@@ -3494,7 +3485,7 @@ function formatMirrorStatus(mirror) {
     } else if (status === 'failed') {
         badgeClass = 'badge-danger';
         displayStatus = 'Failed';
-    } else if (status === 'started' || status === 'updating') {
+    } else if (status === 'started' || status === 'updating' || status === 'syncing') {
         badgeClass = 'badge-warning';
         displayStatus = 'Syncing';
     } else if (status === 'pending') {
