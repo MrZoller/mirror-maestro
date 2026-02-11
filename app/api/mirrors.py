@@ -1022,16 +1022,23 @@ async def _create_mirror_internal(
         logger.warning(f"Database commit failed. Attempting cleanup...")
 
         # Cleanup: Delete the GitLab mirror that was just created
-        if gitlab_mirror_id:
+        if gitlab_mirror_id or direction == "pull":
             try:
                 cleanup_instance = source_instance if direction == "push" else target_instance
                 cleanup_project_id = mirror_data.source_project_id if direction == "push" else mirror_data.target_project_id
                 cleanup_client = GitLabClient(cleanup_instance.url, cleanup_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
-                await _execute_gitlab_op(
-                    client=cleanup_client,
-                    operation=lambda c: c.delete_mirror(cleanup_project_id, gitlab_mirror_id),
-                    operation_name=f"delete_mirror({cleanup_project_id}, {gitlab_mirror_id})",
-                )
+                if direction == "pull":
+                    await _execute_gitlab_op(
+                        client=cleanup_client,
+                        operation=lambda c: c.delete_pull_mirror(cleanup_project_id),
+                        operation_name=f"delete_pull_mirror({cleanup_project_id})",
+                    )
+                else:
+                    await _execute_gitlab_op(
+                        client=cleanup_client,
+                        operation=lambda c: c.delete_mirror(cleanup_project_id, gitlab_mirror_id),
+                        operation_name=f"delete_mirror({cleanup_project_id}, {gitlab_mirror_id})",
+                    )
                 logger.info(f"Successfully cleaned up orphaned GitLab mirror {gitlab_mirror_id}")
             except Exception as cleanup_error:
                 logger.error(f"Failed to cleanup GitLab mirror {gitlab_mirror_id}: {str(cleanup_error)}")
