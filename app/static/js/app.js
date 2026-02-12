@@ -1891,6 +1891,9 @@ async function loadMirrors(resetPage = false) {
         state.mirrorsPagination.pageSize = response.page_size;
         state.mirrorsPagination.totalPages = response.total_pages;
 
+        // Update table headers with instance names
+        updateMirrorTableHeaders();
+
         // Render based on view mode
         if (state.mirrorsPagination.viewMode === 'tree') {
             renderMirrorsTree(response.mirrors);
@@ -1905,6 +1908,49 @@ async function loadMirrors(resetPage = false) {
         showErrorState(container, error, loadMirrors);
         showMessage(error.message, 'error');
     }
+}
+
+/**
+ * Update the mirror table "Source Project" and "Target Project" headers
+ * to include the GitLab instance name for the currently selected pair.
+ */
+function updateMirrorTableHeaders() {
+    const thSource = document.getElementById('mirrors-th-source');
+    const thTarget = document.getElementById('mirrors-th-target');
+    if (!thSource || !thTarget) return;
+
+    const pair = state.pairs.find(p => p.id === state.selectedPair);
+    if (!pair) {
+        thSource.textContent = 'Source Project';
+        thTarget.textContent = 'Target Project';
+        return;
+    }
+
+    const sourceInstance = state.instances.find(i => i.id === pair.source_instance_id);
+    const targetInstance = state.instances.find(i => i.id === pair.target_instance_id);
+
+    thSource.textContent = sourceInstance
+        ? `Source Project (${sourceInstance.name})`
+        : 'Source Project';
+    thTarget.textContent = targetInstance
+        ? `Target Project (${targetInstance.name})`
+        : 'Target Project';
+}
+
+/**
+ * Get the base URL for a GitLab instance associated with the given role
+ * ('source' or 'target') of the currently selected pair.
+ * Returns the instance URL (without trailing slash) or null.
+ */
+function getInstanceUrl(role) {
+    const pair = state.pairs.find(p => p.id === state.selectedPair);
+    if (!pair) return null;
+
+    const instanceId = role === 'source' ? pair.source_instance_id : pair.target_instance_id;
+    const instance = state.instances.find(i => i.id === instanceId);
+    if (!instance || !instance.url) return null;
+
+    return instance.url.replace(/\/+$/, '');
 }
 
 function renderMirrors(mirrors) {
@@ -1927,6 +1973,8 @@ function renderMirrors(mirrors) {
         : `<code>${escapeHtml(String(v))}</code>`;
     const fmtUser = (v) => (v === null || v === undefined) ? '<span class="text-muted">n/a</span>' : escapeHtml(String(v));
 
+    const sourceBaseUrl = getInstanceUrl('source');
+    const targetBaseUrl = getInstanceUrl('target');
     const editingId = state.editing?.mirrorId;
     const overrideBoolSelectValue = (v) => (v === null || v === undefined) ? '__inherit__' : (v ? 'true' : 'false');
 
@@ -2057,8 +2105,8 @@ function renderMirrors(mirrors) {
 
         return `
             <tr data-mirror-id="${mirror.id}">
-                <td>${formatProjectPath(mirror.source_project_path)}</td>
-                <td>${formatProjectPath(mirror.target_project_path)}</td>
+                <td>${formatProjectPath(mirror.source_project_path, { baseUrl: sourceBaseUrl })}</td>
+                <td>${formatProjectPath(mirror.target_project_path, { baseUrl: targetBaseUrl })}</td>
                 <td>${settingsCell}</td>
                 <td class="mirror-status">${statusBadge}</td>
                 <td>${updateStatus}</td>
@@ -2522,25 +2570,29 @@ async function refreshInstanceVersion(instanceId) {
 
 function formatProjectPath(path, options = {}) {
     if (!path) return '<span class="text-muted">n/a</span>';
-    const { maxParts = 3, showTooltip = true } = options;
+    const { maxParts = 3, showTooltip = true, baseUrl = null } = options;
     const parts = String(path).split('/');
 
+    let inner;
     if (parts.length <= maxParts) {
-        // Short path, show it all
-        return showTooltip
-            ? `<span title="${escapeHtml(path)}">${escapeHtml(path)}</span>`
-            : escapeHtml(path);
+        inner = escapeHtml(path);
+    } else {
+        const displayParts = ['...', ...parts.slice(-maxParts)];
+        inner = escapeHtml(displayParts.join(' / '));
     }
 
-    // Long path, show breadcrumbs with truncation
-    const displayParts = [
-        '...', // Indicate truncation
-        ...parts.slice(-maxParts) // Show last N parts
-    ];
+    if (baseUrl) {
+        const href = `${escapeHtml(baseUrl)}/${encodeURI(path)}`;
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(path)}" class="project-path-link">${inner}</a>`;
+    }
 
-    const displayPath = displayParts.join(' / ');
+    if (showTooltip) {
+        return parts.length <= maxParts
+            ? `<span title="${escapeHtml(path)}">${inner}</span>`
+            : `<span class="project-path-breadcrumb" title="${escapeHtml(path)}">${inner}</span>`;
+    }
 
-    return `<span class="project-path-breadcrumb" title="${escapeHtml(path)}">${escapeHtml(displayPath)}</span>`;
+    return inner;
 }
 
 // Tree view rendering
@@ -2669,10 +2721,13 @@ function renderTreeNode(node, level, parentPath = '') {
 
                 const verifyBadge = getVerificationBadgeHtml(mirror.id);
 
+                const sourceBaseUrl = getInstanceUrl('source');
+                const targetBaseUrl = getInstanceUrl('target');
+
                 html += `
                     <tr class="tree-mirror-row" data-mirror-id="${mirror.id}" data-level="${level}" style="padding-left: ${indent}px;">
-                        <td style="padding-left: ${indent + 20}px;">${escapeHtml(mirror.source_project_path)}</td>
-                        <td>${formatProjectPath(mirror.target_project_path)}</td>
+                        <td style="padding-left: ${indent + 20}px;">${formatProjectPath(mirror.source_project_path, { baseUrl: sourceBaseUrl })}</td>
+                        <td>${formatProjectPath(mirror.target_project_path, { baseUrl: targetBaseUrl })}</td>
                         <td>${settingsCell}</td>
                         <td class="mirror-status">${statusBadge}</td>
                         <td>${formatMirrorStatus(mirror)}</td>

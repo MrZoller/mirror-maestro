@@ -3105,6 +3105,18 @@ table tbody tr:hover {
     color: var(--primary-color);
 }
 
+.project-path-link {
+    font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.875rem;
+    color: var(--secondary-color);
+    text-decoration: none;
+}
+
+.project-path-link:hover {
+    color: var(--primary-color);
+    text-decoration: underline;
+}
+
 /* ========================================
    Mirror Controls
    ======================================== */
