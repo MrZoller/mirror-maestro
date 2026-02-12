@@ -2605,6 +2605,261 @@ table tbody tr:hover {
     color: var(--text-primary);
 }
 
+/* ================================
+   Sync Config Modal
+   ================================ */
+
+.sync-config-modal {
+    max-width: 520px;
+}
+
+/* Master toggle row */
+.sync-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    background: var(--background);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    margin-bottom: 20px;
+}
+
+.sync-toggle-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sync-toggle-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.sync-toggle-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* Toggle switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--border-color);
+    border-radius: 24px;
+    transition: background-color 0.2s ease;
+}
+
+.toggle-slider::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background: var(--success-color);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(20px);
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+    box-shadow: var(--focus-ring);
+}
+
+/* Sync sections (fieldsets) */
+.sync-section {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    margin: 0 0 16px 0;
+}
+
+.sync-section-legend {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    padding: 0 6px;
+}
+
+/* Options grid (compact checkboxes) */
+.sync-options-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 16px;
+}
+
+.sync-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    margin: 0;
+    font-weight: normal;
+}
+
+.sync-option:hover {
+    background: var(--background);
+}
+
+.sync-option input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--primary-color);
+    flex-shrink: 0;
+}
+
+.sync-option-text {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.sync-section-hint {
+    margin: 10px 0 0 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+/* Behavior items (checkbox + description) */
+.sync-behavior-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    margin: 0;
+    font-weight: normal;
+}
+
+.sync-behavior-item:hover {
+    background: var(--background);
+}
+
+.sync-behavior-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    accent-color: var(--primary-color);
+    flex-shrink: 0;
+}
+
+.sync-behavior-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.sync-behavior-label {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.sync-behavior-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* Sync interval row */
+.sync-interval-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 8px;
+    margin-top: 2px;
+}
+
+.sync-interval-label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.sync-interval-input {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sync-interval-input input[type="number"] {
+    width: 72px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    text-align: center;
+    background: var(--card-background);
+    color: var(--text-primary);
+    transition: border-color 0.2s ease;
+}
+
+.sync-interval-input input[type="number"]:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: var(--focus-ring);
+}
+
+.sync-interval-unit {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* Status bar */
+.sync-status-bar:not(:empty) {
+    padding: 10px 14px;
+    background: var(--background);
+    border-radius: 6px;
+    margin-bottom: 16px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* Actions */
+.sync-config-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
 /* Login form specific styles */
 #login-form .form-group,
 #change-password-form .form-group,
