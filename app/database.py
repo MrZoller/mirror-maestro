@@ -34,6 +34,8 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
     # Run migrations for existing databases
     await _migrate_add_mirror_status_columns()
+    # Clean up orphaned issue sync data from previously deleted mirrors
+    await _cleanup_orphaned_issue_sync_data()
 
 
 async def _migrate_add_mirror_status_columns():
@@ -81,6 +83,103 @@ async def _migrate_add_mirror_status_columns():
             except Exception as e:
                 # Column might already exist or table doesn't exist yet
                 logging.debug(f"Could not add last_error column: {e}")
+
+
+async def _cleanup_orphaned_issue_sync_data():
+    """
+    Remove issue sync data whose parent mirror no longer exists.
+
+    This handles data left behind by mirror/pair/instance deletions that
+    occurred before cascade cleanup was added.
+    """
+    import logging
+    from sqlalchemy import text
+
+    async with engine.begin() as conn:
+        # Check if the tables exist before attempting cleanup
+        try:
+            result = await conn.execute(text(
+                "SELECT COUNT(*) FROM mirror_issue_configs mic "
+                "LEFT JOIN mirrors m ON mic.mirror_id = m.id "
+                "WHERE m.id IS NULL"
+            ))
+            orphan_count = result.scalar()
+        except Exception:
+            # Tables don't exist yet (fresh install), nothing to clean up
+            return
+
+        if not orphan_count:
+            return
+
+        logging.info(f"Cleaning up {orphan_count} orphaned issue sync config(s)")
+
+        # Delete in child → parent order using raw SQL for efficiency.
+        # Step 1: attachment_mappings via comment_mappings via issue_mappings
+        await conn.execute(text("""
+            DELETE FROM attachment_mappings WHERE comment_mapping_id IN (
+                SELECT cm.id FROM comment_mappings cm
+                JOIN issue_mappings im ON cm.issue_mapping_id = im.id
+                JOIN mirror_issue_configs mic ON im.mirror_issue_config_id = mic.id
+                LEFT JOIN mirrors m ON mic.mirror_id = m.id
+                WHERE m.id IS NULL
+            )
+        """))
+
+        # Step 2: attachment_mappings via issue_mappings directly
+        await conn.execute(text("""
+            DELETE FROM attachment_mappings WHERE issue_mapping_id IN (
+                SELECT im.id FROM issue_mappings im
+                JOIN mirror_issue_configs mic ON im.mirror_issue_config_id = mic.id
+                LEFT JOIN mirrors m ON mic.mirror_id = m.id
+                WHERE m.id IS NULL
+            )
+        """))
+
+        # Step 3: comment_mappings
+        await conn.execute(text("""
+            DELETE FROM comment_mappings WHERE issue_mapping_id IN (
+                SELECT im.id FROM issue_mappings im
+                JOIN mirror_issue_configs mic ON im.mirror_issue_config_id = mic.id
+                LEFT JOIN mirrors m ON mic.mirror_id = m.id
+                WHERE m.id IS NULL
+            )
+        """))
+
+        # Step 4: issue_mappings
+        await conn.execute(text("""
+            DELETE FROM issue_mappings WHERE mirror_issue_config_id IN (
+                SELECT mic.id FROM mirror_issue_configs mic
+                LEFT JOIN mirrors m ON mic.mirror_id = m.id
+                WHERE m.id IS NULL
+            )
+        """))
+
+        # Step 5: label_mappings
+        await conn.execute(text("""
+            DELETE FROM label_mappings WHERE mirror_issue_config_id IN (
+                SELECT mic.id FROM mirror_issue_configs mic
+                LEFT JOIN mirrors m ON mic.mirror_id = m.id
+                WHERE m.id IS NULL
+            )
+        """))
+
+        # Step 6: issue_sync_jobs
+        await conn.execute(text("""
+            DELETE FROM issue_sync_jobs WHERE mirror_issue_config_id IN (
+                SELECT mic.id FROM mirror_issue_configs mic
+                LEFT JOIN mirrors m ON mic.mirror_id = m.id
+                WHERE m.id IS NULL
+            )
+        """))
+
+        # Step 7: mirror_issue_configs
+        await conn.execute(text("""
+            DELETE FROM mirror_issue_configs WHERE mirror_id NOT IN (
+                SELECT id FROM mirrors
+            )
+        """))
+
+        logging.info("Orphaned issue sync data cleanup complete")
 
 
 async def get_db() -> AsyncSession:

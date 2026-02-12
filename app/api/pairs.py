@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from app.database import get_db
 from app.models import InstancePair, GitLabInstance, Mirror
 from app.core.auth import verify_credentials
+from app.api.mirrors import _delete_issue_sync_data_for_mirrors
 from app.core.gitlab_client import GitLabClient
 from app.core.rate_limiter import RateLimiter, BatchOperationTracker
 from app.config import settings
@@ -583,7 +584,15 @@ async def delete_pair(
     # Now delete from database
     # CRITICAL: All delete operations must succeed atomically or be rolled back together
     try:
-        # Delete mirrors first (they reference the pair)
+        # Delete issue sync data for all mirrors in this pair
+        mirror_ids_result = await db.execute(
+            select(Mirror.id).where(Mirror.instance_pair_id == pair_id)
+        )
+        pair_mirror_ids = [row[0] for row in mirror_ids_result.all()]
+        if pair_mirror_ids:
+            await _delete_issue_sync_data_for_mirrors(db, pair_mirror_ids)
+
+        # Delete mirrors (they reference the pair)
         await db.execute(delete(Mirror).where(Mirror.instance_pair_id == pair_id))
 
         # Finally delete the pair itself

@@ -2,13 +2,17 @@ from typing import List, TypeVar, Callable, Any
 import re
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from datetime import datetime, timedelta
 
 from app.database import get_db
-from app.models import Mirror, InstancePair, GitLabInstance
+from app.models import (
+    Mirror, InstancePair, GitLabInstance,
+    MirrorIssueConfig, IssueMapping, CommentMapping, LabelMapping,
+    AttachmentMapping, IssueSyncJob,
+)
 from app.core.auth import verify_credentials
 from app.config import settings
 from app.core.gitlab_client import (
@@ -1584,6 +1588,98 @@ async def update_mirror(
     )
 
 
+async def _delete_issue_sync_data_for_mirrors(
+    db: AsyncSession, mirror_ids: list[int]
+) -> None:
+    """
+    Delete all issue sync related data for the given mirror IDs.
+
+    Uses subquery-based deletes to avoid loading IDs into memory and
+    exceeding database bind-parameter limits on large mirrors.
+
+    Cascade order (child → parent):
+      AttachmentMapping → (CommentMapping | IssueMapping)
+      CommentMapping → IssueMapping
+      IssueMapping → MirrorIssueConfig
+      LabelMapping → MirrorIssueConfig
+      IssueSyncJob → MirrorIssueConfig
+      MirrorIssueConfig → Mirror
+    """
+    if not mirror_ids:
+        return
+
+    # Subquery: config IDs for these mirrors
+    config_ids_sq = (
+        select(MirrorIssueConfig.id)
+        .where(MirrorIssueConfig.mirror_id.in_(mirror_ids))
+        .scalar_subquery()
+    )
+
+    # Subquery: issue mapping IDs for these configs
+    mapping_ids_sq = (
+        select(IssueMapping.id)
+        .where(IssueMapping.mirror_issue_config_id.in_(config_ids_sq))
+        .scalar_subquery()
+    )
+
+    # Subquery: comment mapping IDs for these issue mappings
+    comment_ids_sq = (
+        select(CommentMapping.id)
+        .where(CommentMapping.issue_mapping_id.in_(mapping_ids_sq))
+        .scalar_subquery()
+    )
+
+    # Delete in child → parent order using subqueries
+    # Step 1: AttachmentMappings via comment mappings
+    await db.execute(
+        delete(AttachmentMapping).where(
+            AttachmentMapping.comment_mapping_id.in_(comment_ids_sq)
+        )
+    )
+
+    # Step 2: AttachmentMappings via issue mappings directly
+    await db.execute(
+        delete(AttachmentMapping).where(
+            AttachmentMapping.issue_mapping_id.in_(mapping_ids_sq)
+        )
+    )
+
+    # Step 3: CommentMappings
+    await db.execute(
+        delete(CommentMapping).where(
+            CommentMapping.issue_mapping_id.in_(mapping_ids_sq)
+        )
+    )
+
+    # Step 4: IssueMappings
+    await db.execute(
+        delete(IssueMapping).where(
+            IssueMapping.mirror_issue_config_id.in_(config_ids_sq)
+        )
+    )
+
+    # Step 5: LabelMappings
+    await db.execute(
+        delete(LabelMapping).where(
+            LabelMapping.mirror_issue_config_id.in_(config_ids_sq)
+        )
+    )
+
+    # Step 6: IssueSyncJobs
+    await db.execute(
+        delete(IssueSyncJob).where(
+            IssueSyncJob.mirror_issue_config_id.in_(config_ids_sq)
+        )
+    )
+
+    # Step 7: MirrorIssueConfigs
+    await db.execute(
+        delete(MirrorIssueConfig).where(
+            MirrorIssueConfig.mirror_id.in_(mirror_ids)
+        )
+    )
+
+
 async def _cleanup_mirror_from_gitlab(
     mirror: Mirror,
     db: AsyncSession
@@ -1712,6 +1808,9 @@ async def delete_mirror(
 
     # Clean up from GitLab (best effort)
     gitlab_cleanup_failed, gitlab_error_msg, token_cleanup_failed, token_error_msg = await _cleanup_mirror_from_gitlab(mirror, db)
+
+    # Delete issue sync data (configs, mappings, jobs) before deleting mirror
+    await _delete_issue_sync_data_for_mirrors(db, [mirror_id])
 
     # Always delete from database
     await db.delete(mirror)
