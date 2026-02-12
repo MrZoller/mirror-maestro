@@ -2528,7 +2528,7 @@ function renderTreeNode(node, level, parentPath = '') {
             // Group node (collapsible)
             html += `
                 <tr class="tree-group-row" data-level="${level}">
-                    <td colspan="8" style="padding-left: ${indent}px;">
+                    <td colspan="9" style="padding-left: ${indent}px;">
                         <div class="tree-group-header" onclick="toggleTreeGroup(this)">
                             <span class="tree-toggle">▼</span>
                             <span class="tree-group-name">${escapeHtml(item.name)}/</span>
@@ -2544,20 +2544,67 @@ function renderTreeNode(node, level, parentPath = '') {
 
         if (hasMirrors) {
             // Render mirrors for this node
+            const fmtBool = (v) => (v === null || v === undefined) ? '<span class="text-muted">n/a</span>' : (v ? 'true' : 'false');
+            const fmtStr = (v) => (v === null || v === undefined || String(v).trim() === '')
+                ? '<span class="text-muted">n/a</span>'
+                : `<code>${escapeHtml(String(v))}</code>`;
+
             item.mirrors.forEach(mirror => {
+                const dir = (mirror.effective_mirror_direction || '').toString().toLowerCase();
+                const settingsPieces = [];
+                if (dir) settingsPieces.push(`<span class="badge badge-info">${escapeHtml(dir)}</span>`);
+                settingsPieces.push(`<span class="text-muted">overwrite:</span> ${fmtBool(mirror.effective_mirror_overwrite_diverged)}`);
+                settingsPieces.push(`<span class="text-muted">only_protected:</span> ${fmtBool(mirror.effective_only_mirror_protected_branches)}`);
+                if (dir === 'pull') {
+                    settingsPieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(mirror.effective_mirror_trigger_builds)}`);
+                    settingsPieces.push(`<span class="text-muted">regex:</span> ${fmtStr(mirror.effective_mirror_branch_regex)}`);
+                } else if (dir === 'push') {
+                    settingsPieces.push(`<span class="text-muted">trigger:</span> <span class="text-muted">n/a</span>`);
+                    settingsPieces.push(`<span class="text-muted">regex:</span> <span class="text-muted">n/a</span>`);
+                }
+                const settingsCell = `<div style="line-height:1.35">${settingsPieces.join('<br>')}</div>`;
+
+                const statusBadge = mirror.enabled
+                    ? '<span class="badge badge-success">Enabled</span>'
+                    : '<span class="badge badge-warning">Disabled</span>';
+
+                const tokenStatus = mirror.token_status;
+                let tokenStatusBadge;
+                if (!tokenStatus || tokenStatus === 'none') {
+                    tokenStatusBadge = '<span class="badge badge-secondary">No token</span>';
+                } else if (tokenStatus === 'active') {
+                    tokenStatusBadge = '<span class="badge badge-success">Active</span>';
+                } else if (tokenStatus === 'expiring_soon') {
+                    const expiresAt = mirror.mirror_token_expires_at
+                        ? formatZuluDate(mirror.mirror_token_expires_at)
+                        : 'soon';
+                    tokenStatusBadge = `<span class="badge badge-warning" title="Expires ${expiresAt}">Expiring</span>`;
+                } else if (tokenStatus === 'expired') {
+                    tokenStatusBadge = '<span class="badge badge-danger">Expired</span>';
+                } else {
+                    tokenStatusBadge = '<span class="badge badge-secondary">Unknown</span>';
+                }
+
+                const verifyBadge = getVerificationBadgeHtml(mirror.id);
+
                 html += `
                     <tr class="tree-mirror-row" data-mirror-id="${mirror.id}" data-level="${level}" style="padding-left: ${indent}px;">
                         <td style="padding-left: ${indent + 20}px;">${escapeHtml(mirror.source_project_path)}</td>
                         <td>${formatProjectPath(mirror.target_project_path)}</td>
-                        <td><!-- Settings --></td>
-                        <td class="mirror-status">${mirror.enabled ? '<span class="badge badge-success">Enabled</span>' : '<span class="badge badge-warning">Disabled</span>'}</td>
+                        <td>${settingsCell}</td>
+                        <td class="mirror-status">${statusBadge}</td>
                         <td>${formatMirrorStatus(mirror)}</td>
                         <td>${formatMirrorSyncTime(mirror)}</td>
-                        <td><!-- Token --></td>
+                        <td>${tokenStatusBadge}</td>
+                        <td>${verifyBadge}</td>
                         <td>
                             <div class="table-actions">
                                 <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
-                                <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})">Sync</button>
+                                <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
+                                <button class="btn btn-secondary btn-small" data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id})" title="Refresh status from GitLab">Status</button>
+                                <button class="btn btn-primary btn-small" onclick="showIssueMirrorConfig(${mirror.id})" title="Configure issue mirroring">Issue Sync</button>
+                                <button class="btn btn-info btn-small" data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id})" title="Check if mirror exists and settings match GitLab">Verify</button>
+                                <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate Token</button>
                                 <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
                             </div>
                         </td>
