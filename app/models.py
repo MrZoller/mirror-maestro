@@ -35,6 +35,9 @@ class GitLabInstance(Base):
     api_user_id: Mapped[Optional[int]] = mapped_column(Integer)
     api_username: Mapped[Optional[str]] = mapped_column(String(255))
     description: Mapped[Optional[str]] = mapped_column(String(500))
+    # GitLab instance version/edition (best-effort, fetched on creation and refresh)
+    gitlab_version: Mapped[Optional[str]] = mapped_column(String(50))
+    gitlab_edition: Mapped[Optional[str]] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

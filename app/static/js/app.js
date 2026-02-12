@@ -1325,6 +1325,7 @@ function renderInstances(instances) {
                     <td class="cell-locked" title="Instance URL is locked once it is used by a pair">
                         ${escapeHtml(instance.url)}
                     </td>
+                    <td>${formatGitLabVersion(instance)}</td>
                     <td>
                         <input class="table-input" id="edit-instance-description-${instance.id}" value="${escapeHtml(instance.description || '')}" placeholder="Description (optional)">
                     </td>
@@ -1345,6 +1346,7 @@ function renderInstances(instances) {
             <tr>
                 <td><strong>${escapeHtml(instance.name)}</strong></td>
                 <td>${escapeHtml(instance.url)}</td>
+                <td>${formatGitLabVersion(instance)}</td>
                 <td><span class="text-muted">${escapeHtml(instance.description || 'N/A')}</span></td>
                 <td>
                     <span class="text-muted" title="Token value is never displayed">••••••••</span>
@@ -1352,6 +1354,7 @@ function renderInstances(instances) {
                 <td>
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginInstanceEdit(${instance.id})">Edit</button>
+                        <button class="btn btn-secondary btn-small" onclick="refreshInstanceVersion(${instance.id})" title="Refresh version info from GitLab">↻ Version</button>
                         <button class="btn btn-danger btn-small" onclick="deleteInstance(${instance.id})">Delete</button>
                     </div>
                 </td>
@@ -2075,11 +2078,17 @@ function renderMirrors(mirrors) {
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
                         <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
-                        <button class="btn btn-secondary btn-small" data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id})" title="Refresh status from GitLab">Status</button>
-                        <button class="btn btn-primary btn-small" onclick="showIssueMirrorConfig(${mirror.id})" title="Configure issue mirroring">Issue Sync</button>
-                        <button class="btn btn-info btn-small" data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id})" title="Check if mirror exists and settings match GitLab">Verify</button>
-                        <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate Token</button>
-                        <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
+                        <div class="action-dropdown" data-dropdown="${mirror.id}">
+                            <button class="action-dropdown-toggle" onclick="toggleActionDropdown(event, ${mirror.id})" title="More actions">&hellip;</button>
+                            <div class="action-dropdown-menu">
+                                <button data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id}); closeAllDropdowns();">Refresh Status</button>
+                                <button data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id}); closeAllDropdowns();">Verify Mirror</button>
+                                <button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>
+                                <button onclick="rotateMirrorToken(${mirror.id}); closeAllDropdowns();">Rotate Token</button>
+                                <div class="dropdown-divider"></div>
+                                <button class="text-danger" onclick="deleteMirror(${mirror.id}); closeAllDropdowns();">Delete</button>
+                            </div>
+                        </div>
                     </div>
                 </td>
             </tr>
@@ -2088,6 +2097,24 @@ function renderMirrors(mirrors) {
 }
 
 // Rotate mirror token
+// Action dropdown menu helpers
+function toggleActionDropdown(event, mirrorId) {
+    event.stopPropagation();
+    const dropdown = event.target.closest('.action-dropdown');
+    const wasOpen = dropdown.classList.contains('open');
+    closeAllDropdowns();
+    if (!wasOpen) {
+        dropdown.classList.add('open');
+    }
+}
+
+function closeAllDropdowns() {
+    document.querySelectorAll('.action-dropdown.open').forEach(d => d.classList.remove('open'));
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', () => closeAllDropdowns());
+
 async function rotateMirrorToken(mirrorId) {
     if (!confirm('This will create a new access token for this mirror and revoke the old one. Continue?')) {
         return;
@@ -2438,6 +2465,37 @@ async function changeMirrorPageSize(newSize) {
 }
 
 // Format project path with smart truncation and breadcrumbs
+function formatGitLabVersion(instance) {
+    if (!instance.gitlab_version && !instance.gitlab_edition) {
+        return '<span class="text-muted">Unknown</span>';
+    }
+    const version = escapeHtml(instance.gitlab_version || '?');
+    const edition = instance.gitlab_edition || '';
+    const editionBadge = edition === 'Enterprise'
+        ? '<span class="badge badge-info" style="margin-left: 4px;">EE</span>'
+        : edition === 'Community'
+            ? '<span class="badge badge-secondary" style="margin-left: 4px;">CE</span>'
+            : '';
+    return `<span title="${escapeHtml(edition)} Edition ${version}">${version}</span>${editionBadge}`;
+}
+
+async function refreshInstanceVersion(instanceId) {
+    try {
+        const result = await apiRequest(`/api/instances/${instanceId}/refresh-version`, { method: 'POST' });
+        // Update the instance in state
+        const idx = state.instances.findIndex(i => i.id === instanceId);
+        if (idx !== -1) {
+            state.instances[idx] = result;
+        }
+        renderInstances(state.instances);
+        const ver = result.gitlab_version || 'unknown';
+        const ed = result.gitlab_edition || '';
+        showMessage(`Version refreshed: ${ver} ${ed}`, 'success');
+    } catch (error) {
+        showMessage(`Failed to refresh version: ${error.message || 'Unknown error'}`, 'error');
+    }
+}
+
 function formatProjectPath(path, options = {}) {
     if (!path) return '<span class="text-muted">n/a</span>';
     const { maxParts = 3, showTooltip = true } = options;
@@ -2601,11 +2659,17 @@ function renderTreeNode(node, level, parentPath = '') {
                             <div class="table-actions">
                                 <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
                                 <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
-                                <button class="btn btn-secondary btn-small" data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id})" title="Refresh status from GitLab">Status</button>
-                                <button class="btn btn-primary btn-small" onclick="showIssueMirrorConfig(${mirror.id})" title="Configure issue mirroring">Issue Sync</button>
-                                <button class="btn btn-info btn-small" data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id})" title="Check if mirror exists and settings match GitLab">Verify</button>
-                                <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate Token</button>
-                                <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
+                                <div class="action-dropdown" data-dropdown="${mirror.id}">
+                                    <button class="action-dropdown-toggle" onclick="toggleActionDropdown(event, ${mirror.id})" title="More actions">&hellip;</button>
+                                    <div class="action-dropdown-menu">
+                                        <button data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id}); closeAllDropdowns();">Refresh Status</button>
+                                        <button data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id}); closeAllDropdowns();">Verify Mirror</button>
+                                        <button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>
+                                        <button onclick="rotateMirrorToken(${mirror.id}); closeAllDropdowns();">Rotate Token</button>
+                                        <div class="dropdown-divider"></div>
+                                        <button class="text-danger" onclick="deleteMirror(${mirror.id}); closeAllDropdowns();">Delete</button>
+                                    </div>
+                                </div>
                             </div>
                         </td>
                     </tr>
