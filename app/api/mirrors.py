@@ -1594,6 +1594,9 @@ async def _delete_issue_sync_data_for_mirrors(
     """
     Delete all issue sync related data for the given mirror IDs.
 
+    Uses subquery-based deletes to avoid loading IDs into memory and
+    exceeding database bind-parameter limits on large mirrors.
+
     Cascade order (child → parent):
       AttachmentMapping → (CommentMapping | IssueMapping)
       CommentMapping → IssueMapping
@@ -1605,75 +1608,71 @@ async def _delete_issue_sync_data_for_mirrors(
     if not mirror_ids:
         return
 
-    # Find all MirrorIssueConfigs for these mirrors
-    result = await db.execute(
-        select(MirrorIssueConfig.id).where(
-            MirrorIssueConfig.mirror_id.in_(mirror_ids)
+    # Subquery: config IDs for these mirrors
+    config_ids_sq = (
+        select(MirrorIssueConfig.id)
+        .where(MirrorIssueConfig.mirror_id.in_(mirror_ids))
+        .scalar_subquery()
+    )
+
+    # Subquery: issue mapping IDs for these configs
+    mapping_ids_sq = (
+        select(IssueMapping.id)
+        .where(IssueMapping.mirror_issue_config_id.in_(config_ids_sq))
+        .scalar_subquery()
+    )
+
+    # Subquery: comment mapping IDs for these issue mappings
+    comment_ids_sq = (
+        select(CommentMapping.id)
+        .where(CommentMapping.issue_mapping_id.in_(mapping_ids_sq))
+        .scalar_subquery()
+    )
+
+    # Delete in child → parent order using subqueries
+    # Step 1: AttachmentMappings via comment mappings
+    await db.execute(
+        delete(AttachmentMapping).where(
+            AttachmentMapping.comment_mapping_id.in_(comment_ids_sq)
         )
     )
-    config_ids = [row[0] for row in result.all()]
-    if not config_ids:
-        return
 
-    # Find all IssueMappings for these configs
-    result = await db.execute(
-        select(IssueMapping.id).where(
-            IssueMapping.mirror_issue_config_id.in_(config_ids)
+    # Step 2: AttachmentMappings via issue mappings directly
+    await db.execute(
+        delete(AttachmentMapping).where(
+            AttachmentMapping.issue_mapping_id.in_(mapping_ids_sq)
         )
     )
-    mapping_ids = [row[0] for row in result.all()]
 
-    if mapping_ids:
-        # Delete AttachmentMappings linked to issue mappings or their comments
-        result = await db.execute(
-            select(CommentMapping.id).where(
-                CommentMapping.issue_mapping_id.in_(mapping_ids)
-            )
+    # Step 3: CommentMappings
+    await db.execute(
+        delete(CommentMapping).where(
+            CommentMapping.issue_mapping_id.in_(mapping_ids_sq)
         )
-        comment_ids = [row[0] for row in result.all()]
+    )
 
-        if comment_ids:
-            await db.execute(
-                delete(AttachmentMapping).where(
-                    AttachmentMapping.comment_mapping_id.in_(comment_ids)
-                )
-            )
-
-        await db.execute(
-            delete(AttachmentMapping).where(
-                AttachmentMapping.issue_mapping_id.in_(mapping_ids)
-            )
-        )
-
-        # Delete CommentMappings
-        await db.execute(
-            delete(CommentMapping).where(
-                CommentMapping.issue_mapping_id.in_(mapping_ids)
-            )
-        )
-
-    # Delete IssueMappings
+    # Step 4: IssueMappings
     await db.execute(
         delete(IssueMapping).where(
-            IssueMapping.mirror_issue_config_id.in_(config_ids)
+            IssueMapping.mirror_issue_config_id.in_(config_ids_sq)
         )
     )
 
-    # Delete LabelMappings
+    # Step 5: LabelMappings
     await db.execute(
         delete(LabelMapping).where(
-            LabelMapping.mirror_issue_config_id.in_(config_ids)
+            LabelMapping.mirror_issue_config_id.in_(config_ids_sq)
         )
     )
 
-    # Delete IssueSyncJobs
+    # Step 6: IssueSyncJobs
     await db.execute(
         delete(IssueSyncJob).where(
-            IssueSyncJob.mirror_issue_config_id.in_(config_ids)
+            IssueSyncJob.mirror_issue_config_id.in_(config_ids_sq)
         )
     )
 
-    # Delete MirrorIssueConfigs
+    # Step 7: MirrorIssueConfigs
     await db.execute(
         delete(MirrorIssueConfig).where(
             MirrorIssueConfig.mirror_id.in_(mirror_ids)
