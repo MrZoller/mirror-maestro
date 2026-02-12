@@ -2435,18 +2435,23 @@ async def _refresh_mirror_status(
     update_status = status_mapping.get(raw_status, raw_status)
 
     # Parse timestamps
+    # GitLab returns ISO 8601 timestamps with timezone (e.g. "2024-01-01T00:00:00Z").
+    # Our DB columns are TIMESTAMP WITHOUT TIME ZONE (naive UTC), so we must
+    # strip tzinfo after parsing to avoid asyncpg "can't subtract offset-naive
+    # and offset-aware datetimes" errors.
     last_update_at = None
     if last_update_at_str:
         try:
-            # GitLab returns ISO 8601 timestamps
-            last_update_at = datetime.fromisoformat(last_update_at_str.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(last_update_at_str.replace("Z", "+00:00"))
+            last_update_at = dt.replace(tzinfo=None)
         except (ValueError, AttributeError):
             pass
 
     last_successful_update = None
     if last_successful_update_str:
         try:
-            last_successful_update = datetime.fromisoformat(last_successful_update_str.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(last_successful_update_str.replace("Z", "+00:00"))
+            last_successful_update = dt.replace(tzinfo=None)
         except (ValueError, AttributeError):
             pass
 

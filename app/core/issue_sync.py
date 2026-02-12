@@ -1539,10 +1539,15 @@ class IssueSyncEngine:
 
     @staticmethod
     def _parse_datetime(dt_str: Optional[str]) -> Optional[datetime]:
-        """Parse ISO 8601 datetime string."""
+        """Parse ISO 8601 datetime string.
+
+        Returns a naive UTC datetime to match our DB columns
+        (TIMESTAMP WITHOUT TIME ZONE).
+        """
         if not dt_str:
             return None
         try:
-            return datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+            dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+            return dt.replace(tzinfo=None)
         except (ValueError, TypeError):
             return None
