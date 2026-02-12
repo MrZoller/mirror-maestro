@@ -438,6 +438,23 @@ class IssueSyncEngine:
         self.target_instance = target_instance
         self.instance_pair = instance_pair
 
+        # Determine effective project IDs and paths based on mirror direction.
+        # For push mirrors, the API layer swaps source/target instances so that
+        # issues flow in the reverse direction of code mirroring. We must also
+        # swap the project IDs to match, because mirror.source_project_id lives
+        # on pair.source_instance and mirror.target_project_id lives on
+        # pair.target_instance.
+        if instance_pair.mirror_direction == "push":
+            self.source_project_id = mirror.target_project_id
+            self.target_project_id = mirror.source_project_id
+            self.source_project_path = mirror.target_project_path
+            self.target_project_path = mirror.source_project_path
+        else:
+            self.source_project_id = mirror.source_project_id
+            self.target_project_id = mirror.target_project_id
+            self.source_project_path = mirror.source_project_path
+            self.target_project_path = mirror.target_project_path
+
         # Initialize GitLab clients with timeout
         self.source_client = GitLabClient(
             source_instance.url,
@@ -555,7 +572,7 @@ class IssueSyncEngine:
         """
         logger.info(
             f"Starting issue sync for mirror {self.mirror.id} "
-            f"({self.mirror.source_project_path} → {self.mirror.target_project_path})"
+            f"({self.source_project_path} → {self.target_project_path})"
         )
 
         stats = {
@@ -598,7 +615,7 @@ class IssueSyncEngine:
             source_issues = await self._execute_gitlab_api_call(
                 self.source_client.get_issues,
                 "fetch_source_issues",
-                self.mirror.source_project_id,
+                self.source_project_id,
                 updated_after=updated_after,
                 state=state_filter,
                 per_page=100,
@@ -791,7 +808,7 @@ class IssueSyncEngine:
             target_issue = await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
                 f"update_orphaned_issue_{target_issue_iid}",
-                self.mirror.target_project_id,
+                self.target_project_id,
                 target_issue_iid,
                 title=source_issue_title,
                 description=description,
@@ -821,7 +838,7 @@ class IssueSyncEngine:
             target_issue = await self._execute_gitlab_api_call(
                 self.target_client.create_issue,
                 f"create_issue_{source_issue_iid}",
-                self.mirror.target_project_id,
+                self.target_project_id,
                 title=source_issue_title,
                 description=description,
                 labels=labels,
@@ -846,7 +863,7 @@ class IssueSyncEngine:
             await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
                 f"close_issue_{target_issue_iid}",
-                self.mirror.target_project_id,
+                self.target_project_id,
                 target_issue_iid,
                 state_event="close"
             )
@@ -857,10 +874,10 @@ class IssueSyncEngine:
             mirror_issue_config_id=self.config.id,
             source_issue_id=source_issue_id,
             source_issue_iid=source_issue_iid,
-            source_project_id=self.mirror.source_project_id,
+            source_project_id=self.source_project_id,
             target_issue_id=target_issue_id,
             target_issue_iid=target_issue_iid,
-            target_project_id=self.mirror.target_project_id,
+            target_project_id=self.target_project_id,
             last_synced_at=datetime.utcnow(),
             source_updated_at=self._parse_datetime(source_issue.get("updated_at")),
             target_updated_at=datetime.utcnow(),
@@ -932,7 +949,7 @@ class IssueSyncEngine:
         await self._execute_gitlab_api_call(
             self.target_client.update_issue,
             f"update_issue_{target_issue_iid}",
-            self.mirror.target_project_id,
+            self.target_project_id,
             target_issue_iid,
             title=source_issue_title,
             description=description,
@@ -953,7 +970,7 @@ class IssueSyncEngine:
             await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
                 f"close_issue_{target_issue_iid}",
-                self.mirror.target_project_id,
+                self.target_project_id,
                 target_issue_iid,
                 state_event="close"
             )
@@ -961,7 +978,7 @@ class IssueSyncEngine:
             await self._execute_gitlab_api_call(
                 self.target_client.update_issue,
                 f"reopen_issue_{target_issue_iid}",
-                self.mirror.target_project_id,
+                self.target_project_id,
                 target_issue_iid,
                 state_event="reopen"
             )
@@ -1035,7 +1052,7 @@ class IssueSyncEngine:
 
         footer = build_footer(
             source_instance_url=self.source_instance.url,
-            source_project_path=self.mirror.source_project_path,
+            source_project_path=self.source_project_path,
             source_issue_iid=source_issue_iid,
             source_web_url=source_web_url,
             milestone=source_issue.get("milestone"),
@@ -1066,7 +1083,7 @@ class IssueSyncEngine:
                 await self._execute_gitlab_api_call(
                     self.target_client.set_time_estimate,
                     f"set_time_estimate_{target_issue_iid}",
-                    self.mirror.target_project_id,
+                    self.target_project_id,
                     target_issue_iid,
                     duration
                 )
@@ -1079,14 +1096,14 @@ class IssueSyncEngine:
                 await self._execute_gitlab_api_call(
                     self.target_client.reset_time_spent,
                     f"reset_time_spent_{target_issue_iid}",
-                    self.mirror.target_project_id,
+                    self.target_project_id,
                     target_issue_iid
                 )
                 duration = self._seconds_to_duration(total_time_spent)
                 await self._execute_gitlab_api_call(
                     self.target_client.add_time_spent,
                     f"add_time_spent_{target_issue_iid}",
-                    self.mirror.target_project_id,
+                    self.target_project_id,
                     target_issue_iid,
                     duration
                 )
@@ -1106,7 +1123,7 @@ class IssueSyncEngine:
         source_notes = await self._execute_gitlab_api_call(
             self.source_client.get_issue_notes,
             f"get_issue_notes_{source_issue_iid}",
-            self.mirror.source_project_id,
+            self.source_project_id,
             source_issue_iid
         )
 
@@ -1147,7 +1164,7 @@ class IssueSyncEngine:
                 await self._execute_gitlab_api_call(
                     self.target_client.update_issue_note,
                     f"update_note_{mapping.target_note_id}",
-                    self.mirror.target_project_id,
+                    self.target_project_id,
                     target_issue_iid,
                     mapping.target_note_id,
                     source_note_body
@@ -1161,7 +1178,7 @@ class IssueSyncEngine:
                 target_note = await self._execute_gitlab_api_call(
                     self.target_client.create_issue_note,
                     f"create_note_{source_note_id}",
-                    self.mirror.target_project_id,
+                    self.target_project_id,
                     target_issue_iid,
                     source_note_body
                 )
@@ -1260,7 +1277,7 @@ class IssueSyncEngine:
                 upload_result = await self._execute_gitlab_api_call(
                     self.target_client.upload_file,
                     f"upload_file_{filename}",
-                    self.mirror.target_project_id,
+                    self.target_project_id,
                     file_content,
                     filename
                 )
@@ -1338,7 +1355,7 @@ class IssueSyncEngine:
             target_issues = await self._execute_gitlab_api_call(
                 self.target_client.get_issues,
                 "cleanup_fetch_target_issues",
-                self.mirror.target_project_id,
+                self.target_project_id,
                 labels=self.mirror_from_label,
                 state="all",
                 per_page=100,
@@ -1453,7 +1470,7 @@ class IssueSyncEngine:
             target_issues = await self._execute_gitlab_api_call(
                 self.target_client.get_issues,
                 f"search_existing_issue_{source_issue_iid}",
-                self.mirror.target_project_id,
+                self.target_project_id,
                 labels=self.mirror_from_label,
                 state="all",
                 per_page=100,
@@ -1466,7 +1483,7 @@ class IssueSyncEngine:
             issues_checked = 0
 
             # Look for issue with matching source reference in description
-            source_ref = f"{self.mirror.source_project_path}#{source_issue_iid}"
+            source_ref = f"{self.source_project_path}#{source_issue_iid}"
             for issue in target_issues:
                 if issues_checked >= max_issues_to_check:
                     logger.warning(
@@ -1493,7 +1510,7 @@ class IssueSyncEngine:
         labels = await self._execute_gitlab_api_call(
             self.target_client.get_project_labels,
             "load_target_labels",
-            self.mirror.target_project_id
+            self.target_project_id
         )
         # Safely build cache, skipping any malformed labels
         self.target_labels_cache = {}
@@ -1513,7 +1530,7 @@ class IssueSyncEngine:
                 label = await self._execute_gitlab_api_call(
                     self.target_client.create_label,
                     f"create_label_{self.mirror_from_label}",
-                    self.mirror.target_project_id,
+                    self.target_project_id,
                     name=self.mirror_from_label,
                     color=MIRROR_FROM_LABEL_COLOR,
                     description=f"Issue mirrored from {self.source_instance.url}"
