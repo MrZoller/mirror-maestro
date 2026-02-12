@@ -133,6 +133,7 @@ class FakeGitLabClient:
         mirror_overwrites_diverged_branches=None,
         mirror_trigger_builds=None,
         mirror_branch_regex=None,
+        import_url=None,
     ):
         """Update pull mirror settings."""
         self.__class__.update_pull_calls.append(
@@ -362,7 +363,12 @@ async def test_mirrors_create_pull_uses_auth_credentials(client, session_maker, 
 
 
 @pytest.mark.asyncio
-async def test_mirrors_update_can_clear_overrides_with_null(client, session_maker):
+async def test_mirrors_update_can_clear_overrides_with_null(client, session_maker, monkeypatch):
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.update_pull_calls.clear()
+
     src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
     tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
     pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
@@ -374,7 +380,7 @@ async def test_mirrors_update_can_clear_overrides_with_null(client, session_make
             source_project_path="platform/proj",
             target_project_id=2,
             target_project_path="platform/proj",
-            mirror_id=None,  # avoid any GitLab client calls
+            mirror_id=None,
             enabled=True,
             last_update_status="pending",
             # Direction comes from pair, not stored on mirror

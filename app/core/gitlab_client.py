@@ -417,7 +417,7 @@ class GitLabClient:
         # Credentials must be embedded in the import_url for this approach.
         try:
             project_data: Dict[str, Any] = {
-                "mirror": True,
+                "mirror": enabled,
                 "import_url": mirror_url,
             }
 
@@ -625,11 +625,11 @@ class GitLabClient:
             return True
         except Exception as e:
             error_msg = str(e).lower()
-            if "404" in error_msg or "not found" in error_msg:
-                return True
+            # "not mirrored" means no pull mirror exists — that's fine, nothing to delete
             if "400" in error_msg and "not mirrored" in error_msg:
                 return True
-            # Dedicated endpoint failed, try Projects API
+            # 404 means the dedicated endpoint doesn't exist on this GitLab version,
+            # so we must fall through to the Projects API to actually disable mirroring.
             logger.info(
                 f"Dedicated pull mirror endpoint not available for project {project_id}, "
                 f"falling back to Projects API for disable."

@@ -1443,17 +1443,21 @@ async def update_mirror(
 
     # Best-effort: if this mirror is configured in GitLab, apply settings there too.
     # CRITICAL: Only commit DB changes if GitLab update succeeds to maintain consistency
+    # For push mirrors, we need mirror_id. For pull mirrors, we can update via Projects API
+    # even without a mirror_id (mirrors created via the fallback path).
     try:
-        if mirror.mirror_id:
-            pair_result = await db.execute(
-                select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
-            )
-            pair = pair_result.scalar_one_or_none()
-            if not pair:
-                raise HTTPException(status_code=404, detail="Instance pair not found")
+        pair_result = await db.execute(
+            select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+        )
+        pair = pair_result.scalar_one_or_none()
+        if not pair:
+            raise HTTPException(status_code=404, detail="Instance pair not found")
 
+        direction = pair.mirror_direction
+        should_update_gitlab = mirror.mirror_id or direction == "pull"
+
+        if should_update_gitlab:
             # Direction comes from pair only
-            direction = pair.mirror_direction
 
             # Resolve which GitLab project holds the remote mirror entry.
             instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
@@ -1505,7 +1509,7 @@ async def update_mirror(
                     operation_name=f"update_mirror({project_id}, {mirror.mirror_id})",
                 )
             else:
-                # Pull mirrors use the dedicated pull mirror endpoint
+                # Pull mirrors use the dedicated pull mirror endpoint or Projects API fallback
                 await _execute_gitlab_op(
                     client=client,
                     operation=lambda c: c.update_pull_mirror(
