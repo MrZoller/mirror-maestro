@@ -944,16 +944,76 @@ table tbody tr:hover {
 }
 
 /* Messages */
+#message-container {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 480px;
+    width: calc(100% - 32px);
+    pointer-events: none;
+}
+
 .message {
-    padding: 12px 16px;
+    padding: 12px 36px 12px 16px;
     border-radius: var(--radius-sm);
-    margin-bottom: 20px;
     border-left: 4px solid;
     white-space: pre-wrap;
     font-family: var(--font-mono, 'Monaco', 'Courier New', monospace);
     font-size: 0.9em;
     max-height: 400px;
     overflow-y: auto;
+    pointer-events: auto;
+    position: relative;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    animation: message-slide-in 0.3s ease-out;
+}
+
+.message.message-fade-out {
+    animation: message-fade-out 0.3s ease-in forwards;
+}
+
+.message-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    color: inherit;
+    opacity: 0.6;
+    padding: 0 4px;
+}
+
+.message-close:hover {
+    opacity: 1;
+}
+
+@keyframes message-slide-in {
+    from {
+        opacity: 0;
+        transform: translateX(40px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes message-fade-out {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(40px);
+    }
 }
 
 .message-success {
