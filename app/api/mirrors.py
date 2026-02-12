@@ -799,7 +799,10 @@ async def _create_mirror_internal(
         token_instance = source_instance
         token_project_id = mirror_data.source_project_id
         token_project_path = mirror_data.source_project_path
-        token_scopes = ["read_repository"]
+        # GitLab docs require 'api' scope for pull mirror authentication via import_url.
+        # Using 'read_api' as a less-privileged alternative that still covers
+        # any API-level operations GitLab may perform during mirroring.
+        token_scopes = ["read_api", "read_repository"]
 
     # Calculate token expiration (1 year from now)
     token_expires_at = datetime.utcnow() + timedelta(days=TOKEN_EXPIRY_DAYS)
@@ -854,25 +857,23 @@ async def _create_mirror_internal(
         logger.warning(f"Failed to create project access token: {str(e)}. Mirror will be created without token.")
         # Continue without token - mirror may still work if project is public or using SSH
 
-    # Build remote URL
-    # For push mirrors: embed credentials in URL
-    # For pull mirrors: use plain URL + separate auth_user/auth_password
+    # Build remote URL with embedded credentials
+    # Both push and pull mirrors embed credentials in the URL.
+    # Push mirrors always use embedded credentials in the URL.
+    # Pull mirrors also use embedded credentials because the Projects API
+    # (PUT /projects/:id with mirror=true) requires import_url with auth.
+    # The 17.6+ dedicated endpoint can also accept embedded-auth URLs.
     token_value = encryption.decrypt(encrypted_token) if encrypted_token else None
 
-    if direction == "push":
-        # Push mirrors use credentials embedded in the URL
-        if token_value:
-            remote_url = build_authenticated_url(
-                token_instance,
-                token_project_path,
-                token_name=token_name,
-                token_value=token_value,
-            )
-        else:
-            # No token - build unauthenticated URL
-            remote_url = build_authenticated_url(token_instance, token_project_path)
+    if token_value:
+        remote_url = build_authenticated_url(
+            token_instance,
+            token_project_path,
+            token_name=token_name,
+            token_value=token_value,
+        )
     else:
-        # Pull mirrors use plain URL with separate authentication
+        # No token - build unauthenticated URL
         remote_url = build_authenticated_url(token_instance, token_project_path)
 
     # Create the mirror in GitLab
@@ -935,8 +936,10 @@ async def _create_mirror_internal(
                     },
                 )
 
-            # Create pull mirror using the dedicated API
-            # Auth is passed separately, not embedded in URL
+            # Create pull mirror using authenticated URL (credentials embedded).
+            # The create_pull_mirror method tries the 17.6+ dedicated endpoint
+            # first, then falls back to the Projects API (PUT /projects/:id).
+            # Auth params are also passed for the 17.6+ endpoint which supports them.
             result = await _execute_gitlab_op(
                 client=client,
                 operation=lambda c: c.create_pull_mirror(
@@ -1586,15 +1589,18 @@ async def _cleanup_mirror_from_gitlab(
     gitlab_error_msg = None
 
     try:
-        if mirror.mirror_id:
-            pair_result = await db.execute(
-                select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
-            )
-            pair = pair_result.scalar_one_or_none()
+        pair_result = await db.execute(
+            select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
+        )
+        pair = pair_result.scalar_one_or_none()
 
-            if pair:
-                # Direction comes from pair only
-                direction = pair.mirror_direction
+        if pair:
+            # Direction comes from pair only
+            direction = pair.mirror_direction
+            # Pull mirrors can be deleted even without mirror_id (they use project-level API)
+            should_cleanup = mirror.mirror_id or direction == "pull"
+
+            if should_cleanup:
                 instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
                 project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
 
@@ -1614,7 +1620,7 @@ async def _cleanup_mirror_from_gitlab(
                             operation_name=f"delete_mirror({project_id}, {mirror.mirror_id})",
                         )
                     else:
-                        # Pull mirrors use the dedicated pull mirror endpoint
+                        # Pull mirrors use the pull mirror endpoint (with fallback to Projects API)
                         await _execute_gitlab_op(
                             client=client,
                             operation=lambda c: c.delete_pull_mirror(project_id),
@@ -1625,10 +1631,10 @@ async def _cleanup_mirror_from_gitlab(
                     logger.warning(f"GitLab instance not found for mirror {mirror.id}, skipping GitLab cleanup")
                     gitlab_cleanup_failed = True
                     gitlab_error_msg = "GitLab instance not found"
-            else:
-                logger.warning(f"Instance pair not found for mirror {mirror.id}, skipping GitLab cleanup")
-                gitlab_cleanup_failed = True
-                gitlab_error_msg = "Instance pair not found"
+        else:
+            logger.warning(f"Instance pair not found for mirror {mirror.id}, skipping GitLab cleanup")
+            gitlab_cleanup_failed = True
+            gitlab_error_msg = "Instance pair not found"
     except Exception as e:
         # Log the error but continue
         project_id_str = str(mirror.source_project_id if hasattr(mirror, 'source_project_id') else 'unknown')
@@ -1731,18 +1737,6 @@ async def trigger_mirror_update(
     if not mirror:
         raise HTTPException(status_code=404, detail="Mirror not found")
 
-    if not mirror.mirror_id:
-        raise HTTPException(status_code=400, detail="Mirror not configured in GitLab")
-
-    # Check if mirror token has expired before attempting update
-    if mirror.mirror_token_expires_at:
-        token_status = _compute_token_status(mirror.mirror_token_expires_at)
-        if token_status == "expired":
-            raise HTTPException(
-                status_code=400,
-                detail="Mirror token has expired. Please rotate the token before triggering an update."
-            )
-
     # Get instance and trigger update
     pair_result = await db.execute(
         select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
@@ -1754,6 +1748,20 @@ async def trigger_mirror_update(
 
     # Direction comes from pair only
     direction = pair.mirror_direction
+
+    # Push mirrors require a mirror_id; pull mirrors can work without one
+    # (pull mirrors created via the Projects API may not have a separate mirror_id)
+    if not mirror.mirror_id and direction != "pull":
+        raise HTTPException(status_code=400, detail="Mirror not configured in GitLab")
+
+    # Check if mirror token has expired before attempting update
+    if mirror.mirror_token_expires_at:
+        token_status = _compute_token_status(mirror.mirror_token_expires_at)
+        if token_status == "expired":
+            raise HTTPException(
+                status_code=400,
+                detail="Mirror token has expired. Please rotate the token before triggering an update."
+            )
     instance_id = pair.source_instance_id if direction == "push" else pair.target_instance_id
     project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
 
@@ -1868,7 +1876,7 @@ async def rotate_mirror_token(
         token_project_path = mirror.source_project_path
         mirror_instance = target_instance
         mirror_project_id = mirror.target_project_id
-        scopes = ["read_repository"]
+        scopes = ["read_api", "read_repository"]
 
     token_client = GitLabClient(token_instance.url, token_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
     mirror_client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
@@ -1930,19 +1938,20 @@ async def rotate_mirror_token(
         )
 
     # Update mirror in GitLab with new token
-    if mirror.mirror_id:
+    if mirror.mirror_id or direction == "pull":
         try:
             # Get current effective settings
             effective_settings = await _resolve_effective_settings(db, mirror=mirror, pair=pair)
 
+            # Build authenticated URL with new token (used for both push and pull)
+            authenticated_url = build_authenticated_url(
+                token_instance,
+                token_project_path,
+                token_name=token_name,
+                token_value=new_token_value,
+            )
+
             if direction == "push":
-                # Push mirrors: embed credentials in URL
-                authenticated_url = build_authenticated_url(
-                    token_instance,
-                    token_project_path,
-                    token_name=token_name,
-                    token_value=new_token_value,
-                )
                 await _execute_gitlab_op(
                     client=mirror_client,
                     operation=lambda c: c.update_mirror(
@@ -1956,13 +1965,14 @@ async def rotate_mirror_token(
                     operation_name=f"update_mirror({mirror_project_id}, {mirror.mirror_id})",
                 )
             else:
-                # Pull mirrors: use separate auth_user/auth_password
+                # Pull mirrors: pass both separate auth (for 17.6+) and import_url (for fallback)
                 await _execute_gitlab_op(
                     client=mirror_client,
                     operation=lambda c: c.update_pull_mirror(
                         project_id=mirror_project_id,
                         auth_user=token_name,
                         auth_password=new_token_value,
+                        import_url=authenticated_url,
                         enabled=True,
                         only_mirror_protected_branches=effective_settings.get("only_mirror_protected_branches", False),
                         mirror_overwrites_diverged_branches=effective_settings.get("mirror_overwrite_diverged", False),
@@ -2004,18 +2014,7 @@ async def _verify_single_mirror(
     Orphan: mirror_id exists in DB but the GitLab remote mirror doesn't exist.
     Drift: Settings in DB don't match settings on GitLab.
     """
-    # If mirror was never created on GitLab, return early
-    if mirror.mirror_id is None:
-        return MirrorVerifyResponse(
-            mirror_id=mirror.id,
-            status="not_created",
-            orphan=False,
-            drift=[],
-            gitlab_mirror=None,
-            error=None,
-        )
-
-    # Get pair and instances
+    # Get pair first to determine direction
     pair_result = await db.execute(
         select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
     )
@@ -2028,6 +2027,22 @@ async def _verify_single_mirror(
             drift=[],
             gitlab_mirror=None,
             error="Instance pair not found",
+        )
+
+    # Direction comes from pair
+    direction = (pair.mirror_direction or "pull").lower()
+
+    # If mirror was never created on GitLab, return early.
+    # Pull mirrors created via the Projects API may not have a mirror_id,
+    # so we still allow verification for pull mirrors.
+    if mirror.mirror_id is None and direction != "pull":
+        return MirrorVerifyResponse(
+            mirror_id=mirror.id,
+            status="not_created",
+            orphan=False,
+            drift=[],
+            gitlab_mirror=None,
+            error=None,
         )
 
     src_result = await db.execute(
@@ -2048,9 +2063,6 @@ async def _verify_single_mirror(
             gitlab_mirror=None,
             error="Source or target instance not found",
         )
-
-    # Direction comes from pair
-    direction = (pair.mirror_direction or "pull").lower()
 
     # Determine owner project (where the mirror config lives on GitLab)
     # Push: mirror config on source, Pull: mirror config on target
@@ -2103,8 +2115,20 @@ async def _verify_single_mirror(
             error=f"Failed to fetch GitLab mirrors: {str(e)}",
         )
 
-    # Check for orphan
+    # Check for orphan / not_created
     if gitlab_mirror is None:
+        # If mirror_id is None, the mirror was never successfully created on GitLab
+        # (e.g. creation failed, or it was created via Projects API and then deleted).
+        # Return "not_created" instead of "orphan" in this case.
+        if mirror.mirror_id is None:
+            return MirrorVerifyResponse(
+                mirror_id=mirror.id,
+                status="not_created",
+                orphan=False,
+                drift=[],
+                gitlab_mirror=None,
+                error=None,
+            )
         return MirrorVerifyResponse(
             mirror_id=mirror.id,
             status="orphan",
@@ -2287,15 +2311,7 @@ async def _refresh_mirror_status(
 
     Returns the updated status information.
     """
-    # If mirror was never created on GitLab, nothing to refresh
-    if mirror.mirror_id is None:
-        return RefreshStatusResult(
-            mirror_id=mirror.id,
-            success=False,
-            error="Mirror has not been created on GitLab yet",
-        )
-
-    # Get pair and instances
+    # Get pair first to determine direction
     pair_result = await db.execute(
         select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
     )
@@ -2305,6 +2321,19 @@ async def _refresh_mirror_status(
             mirror_id=mirror.id,
             success=False,
             error="Instance pair not found",
+        )
+
+    # Direction comes from pair
+    direction = (pair.mirror_direction or "pull").lower()
+
+    # If mirror was never created on GitLab, nothing to refresh.
+    # Pull mirrors created via the Projects API may not have a mirror_id,
+    # so we still allow refresh for pull mirrors.
+    if mirror.mirror_id is None and direction != "pull":
+        return RefreshStatusResult(
+            mirror_id=mirror.id,
+            success=False,
+            error="Mirror has not been created on GitLab yet",
         )
 
     src_result = await db.execute(
@@ -2322,9 +2351,6 @@ async def _refresh_mirror_status(
             success=False,
             error="Source or target instance not found",
         )
-
-    # Direction comes from pair
-    direction = (pair.mirror_direction or "pull").lower()
 
     # Determine owner project (where the mirror config lives on GitLab)
     # Push: mirror config on source, Pull: mirror config on target
