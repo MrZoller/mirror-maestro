@@ -301,13 +301,12 @@ class IssueScheduler:
             logger.error(f"Instance pair {mirror.instance_pair_id} not found for config {config.id}")
             return
 
-        # Determine source and target instance IDs based on mirror direction
-        if pair.mirror_direction == "pull":
-            source_instance_id = pair.source_instance_id
-            target_instance_id = pair.target_instance_id
-        else:  # push
-            source_instance_id = pair.target_instance_id
-            target_instance_id = pair.source_instance_id
+        # Issue sync always flows source → target, same as mirror direction.
+        # mirror.source_project lives on pair.source_instance and
+        # mirror.target_project lives on pair.target_instance for both push
+        # and pull mirrors.
+        source_instance_id = pair.source_instance_id
+        target_instance_id = pair.target_instance_id
 
         # Check if there's already a running or pending sync for this config
         existing_job_result = await db.execute(
@@ -400,10 +399,11 @@ class IssueScheduler:
             if stats["errors"]:
                 job.error_details = {"errors": stats["errors"]}
 
-            # Update config status
+            # Update config scheduling fields
+            # Note: last_sync_status and last_sync_error are already set by
+            # the sync engine (which determined success/partial/failed based
+            # on actual results). Do NOT overwrite them here.
             config.last_sync_at = datetime.utcnow()
-            config.last_sync_status = "success"
-            config.last_sync_error = None
             config.next_sync_at = datetime.utcnow() + timedelta(
                 minutes=config.sync_interval_minutes
             )

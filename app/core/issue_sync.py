@@ -438,22 +438,14 @@ class IssueSyncEngine:
         self.target_instance = target_instance
         self.instance_pair = instance_pair
 
-        # Determine effective project IDs and paths based on mirror direction.
-        # For push mirrors, the API layer swaps source/target instances so that
-        # issues flow in the reverse direction of code mirroring. We must also
-        # swap the project IDs to match, because mirror.source_project_id lives
-        # on pair.source_instance and mirror.target_project_id lives on
-        # pair.target_instance.
-        if instance_pair.mirror_direction == "push":
-            self.source_project_id = mirror.target_project_id
-            self.target_project_id = mirror.source_project_id
-            self.source_project_path = mirror.target_project_path
-            self.target_project_path = mirror.source_project_path
-        else:
-            self.source_project_id = mirror.source_project_id
-            self.target_project_id = mirror.target_project_id
-            self.source_project_path = mirror.source_project_path
-            self.target_project_path = mirror.target_project_path
+        # Issue sync always flows source → target, matching the mirror direction.
+        # mirror.source_project lives on pair.source_instance and
+        # mirror.target_project lives on pair.target_instance regardless of
+        # whether the mirror is push or pull.
+        self.source_project_id = mirror.source_project_id
+        self.target_project_id = mirror.target_project_id
+        self.source_project_path = mirror.source_project_path
+        self.target_project_path = mirror.target_project_path
 
         # Initialize GitLab clients with timeout
         self.source_client = GitLabClient(
