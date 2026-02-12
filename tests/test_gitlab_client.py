@@ -5,7 +5,7 @@ def test_gitlab_client_test_connection_true(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.url = url
             self.private_token = private_token
 
@@ -26,7 +26,7 @@ def test_gitlab_client_test_connection_false(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             pass
 
         def auth(self):
@@ -63,7 +63,7 @@ def test_gitlab_client_get_projects_shapes(monkeypatch):
             return [P(1, "n", "p", "g/p")]
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.projects = Projects()
 
     class FakeGitlabModule:
@@ -91,7 +91,7 @@ def test_gitlab_client_get_current_user_shapes(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.url = url
             self.private_token = private_token
 
@@ -129,7 +129,7 @@ def test_gitlab_client_get_project(monkeypatch):
             return P()
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.projects = Projects()
 
     class FakeGitlabModule:
@@ -154,7 +154,7 @@ def test_gitlab_client_get_project_error(monkeypatch):
             raise Exception("Project not found")
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.projects = Projects()
 
     class FakeGitlabModule:
@@ -189,7 +189,7 @@ def test_gitlab_client_get_groups(monkeypatch):
             return [G(1, "group1", "group1", "group1"), G(2, "group2", "group2", "org/group2")]
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.groups = Groups()
 
     class FakeGitlabModule:
@@ -224,7 +224,7 @@ def test_gitlab_client_get_groups_with_get_all(monkeypatch):
             return [G(i, f"group{i}") for i in range(5)]
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.groups = Groups()
 
     class FakeGitlabModule:
@@ -247,7 +247,7 @@ def test_gitlab_client_get_groups_error(monkeypatch):
             raise RuntimeError("API error")
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.groups = Groups()
 
     class FakeGitlabModule:
@@ -266,7 +266,7 @@ def test_gitlab_client_get_project_mirrors(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             pass
 
         def http_get(self, path):
@@ -309,7 +309,7 @@ def test_gitlab_client_get_project_mirrors_empty(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             pass
 
         def http_get(self, path):
@@ -331,7 +331,7 @@ def test_gitlab_client_get_project_mirrors_error(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             pass
 
         def http_get(self, path):
@@ -353,7 +353,7 @@ def test_gitlab_client_trigger_mirror_update(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.posted = []
 
         def http_post(self, path):
@@ -377,7 +377,7 @@ def test_gitlab_client_trigger_mirror_update_error(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             pass
 
         def http_post(self, path):
@@ -399,7 +399,7 @@ def test_gitlab_client_delete_mirror(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.deleted = []
 
         def http_delete(self, path):
@@ -422,7 +422,7 @@ def test_gitlab_client_delete_mirror_error(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             pass
 
         def http_delete(self, path):
@@ -444,7 +444,7 @@ def test_gitlab_client_delete_mirror_not_found(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             pass
 
         def http_delete(self, path):
@@ -466,7 +466,7 @@ def test_gitlab_client_update_mirror(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.updates = []
 
         def http_put(self, path, post_data):
@@ -501,7 +501,7 @@ def test_gitlab_client_update_mirror_no_changes(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             self.updates = []
 
         def http_put(self, path, post_data):
@@ -525,7 +525,7 @@ def test_gitlab_client_update_mirror_error(monkeypatch):
     from app.core import gitlab_client as mod
 
     class FakeGL:
-        def __init__(self, url, private_token, timeout=60):
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
             pass
 
         def http_put(self, path, post_data):

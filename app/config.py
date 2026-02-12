@@ -80,6 +80,16 @@ class Settings(BaseSettings):
     ssl_cert_path: str = "/etc/nginx/ssl/cert.pem"
     ssl_key_path: str = "/etc/nginx/ssl/key.pem"
 
+    # Custom CA Certificate for GitLab API connections
+    # Path to a CA bundle file (PEM format) to use when connecting to GitLab instances
+    # that use certificates signed by a custom/internal Certificate Authority.
+    # When set, this CA bundle is passed to python-gitlab's ssl_verify parameter.
+    # Examples:
+    #   /app/certs/ca-bundle.crt          (single CA or full chain)
+    #   /etc/ssl/certs/ca-certificates.crt (system CA bundle with custom CAs appended)
+    # Leave empty to use the system default CA bundle.
+    custom_ca_cert: str = ""
+
     # Frontend Asset Configuration
     # For enterprise environments, set to empty string to use local copies from /static/vendor
     # Local copies should be placed in app/static/vendor/ directory

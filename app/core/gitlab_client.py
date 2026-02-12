@@ -140,7 +140,7 @@ def _handle_gitlab_error(e: Exception, operation: str) -> None:
 class GitLabClient:
     """Wrapper for GitLab API interactions."""
 
-    def __init__(self, url: str, encrypted_token: str, timeout: int = 60):
+    def __init__(self, url: str, encrypted_token: str, timeout: int = 60, ssl_verify: Optional[Any] = None):
         """
         Initialize GitLab client with URL and encrypted token.
 
@@ -148,11 +148,25 @@ class GitLabClient:
             url: GitLab instance URL
             encrypted_token: Encrypted API token
             timeout: Request timeout in seconds (default: 60)
+            ssl_verify: SSL certificate verification setting. Can be:
+                - None: Use the CUSTOM_CA_CERT setting from app config (default)
+                - True: Verify using system CA bundle
+                - False: Disable SSL verification (not recommended)
+                - str: Path to a CA bundle file (PEM format)
         """
         self.url = url
         self.token = encryption.decrypt(encrypted_token)
+
+        # Resolve ssl_verify: if not explicitly provided, use the app config
+        if ssl_verify is None:
+            from app.config import settings
+            if settings.custom_ca_cert:
+                ssl_verify = settings.custom_ca_cert
+            else:
+                ssl_verify = True
+
         # Set timeout for all HTTP requests to prevent hanging operations
-        self.gl = gitlab.Gitlab(url, private_token=self.token, timeout=timeout)
+        self.gl = gitlab.Gitlab(url, private_token=self.token, timeout=timeout, ssl_verify=ssl_verify)
 
     def close(self) -> None:
         """
