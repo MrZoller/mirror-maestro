@@ -3144,13 +3144,20 @@ async function createMirror() {
 
         showMessage('Mirror created successfully', 'success');
         form.reset();
-        await loadMirrors();
+        await loadMirrors(true);
     } catch (error) {
         console.error('Failed to create mirror:', error);
         // Error message already shown via apiRequest
         if (error instanceof APIError && error.type === 'validation') {
             // Keep form filled for validation errors
             return;
+        }
+        // For non-validation errors (server error, network error), the mirror
+        // may have been created on the backend. Refresh the list to show current state.
+        try {
+            await loadMirrors(true);
+        } catch (e) {
+            // Best-effort refresh
         }
     } finally {
         showButtonLoading(submitButton, false);
