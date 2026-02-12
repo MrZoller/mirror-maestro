@@ -972,9 +972,27 @@ table tbody tr:hover {
    ---------------------------- */
 .topology-controls {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.topology-controls-filters {
+    display: flex;
+    align-items: flex-end;
     gap: 14px;
     flex-wrap: wrap;
+}
+
+.topology-controls-toggles {
+    display: flex;
+    align-items: center;
+    gap: 6px 18px;
+    flex-wrap: wrap;
+}
+
+.topology-controls-toggles .checkbox-group {
+    margin-bottom: 0;
+    white-space: nowrap;
 }
 
 .topology-layout {
