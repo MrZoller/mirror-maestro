@@ -725,8 +725,79 @@ table tbody tr:hover {
 .table-actions {
     display: flex;
     gap: 6px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
+}
+
+/* Action dropdown menu */
+.action-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.action-dropdown-toggle {
+    background: var(--card-background);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.2s ease;
+}
+
+.action-dropdown-toggle:hover {
+    background: var(--background);
+    border-color: var(--text-secondary);
+}
+
+.action-dropdown-menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 100%;
+    margin-top: 4px;
+    min-width: 160px;
+    background: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+    overflow: hidden;
+}
+
+.action-dropdown.open .action-dropdown-menu {
+    display: block;
+}
+
+.action-dropdown-menu button {
+    display: block;
+    width: 100%;
+    padding: 8px 14px;
+    background: none;
+    border: none;
+    text-align: left;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s ease;
+    white-space: nowrap;
+}
+
+.action-dropdown-menu button:hover {
+    background: var(--background);
+}
+
+.action-dropdown-menu button.text-danger {
+    color: var(--danger-color);
+}
+
+.action-dropdown-menu .dropdown-divider {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--border-color);
 }
 
 /* Status badges */

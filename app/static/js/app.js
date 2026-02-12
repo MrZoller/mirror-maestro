@@ -2078,11 +2078,17 @@ function renderMirrors(mirrors) {
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
                         <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
-                        <button class="btn btn-secondary btn-small" data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id})" title="Refresh status from GitLab">Status</button>
-                        <button class="btn btn-primary btn-small" onclick="showIssueMirrorConfig(${mirror.id})" title="Configure issue mirroring">Issue Sync</button>
-                        <button class="btn btn-info btn-small" data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id})" title="Check if mirror exists and settings match GitLab">Verify</button>
-                        <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate Token</button>
-                        <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
+                        <div class="action-dropdown" data-dropdown="${mirror.id}">
+                            <button class="action-dropdown-toggle" onclick="toggleActionDropdown(event, ${mirror.id})" title="More actions">&hellip;</button>
+                            <div class="action-dropdown-menu">
+                                <button data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id}); closeAllDropdowns();">Refresh Status</button>
+                                <button data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id}); closeAllDropdowns();">Verify Mirror</button>
+                                <button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>
+                                <button onclick="rotateMirrorToken(${mirror.id}); closeAllDropdowns();">Rotate Token</button>
+                                <div class="dropdown-divider"></div>
+                                <button class="text-danger" onclick="deleteMirror(${mirror.id}); closeAllDropdowns();">Delete</button>
+                            </div>
+                        </div>
                     </div>
                 </td>
             </tr>
@@ -2091,6 +2097,24 @@ function renderMirrors(mirrors) {
 }
 
 // Rotate mirror token
+// Action dropdown menu helpers
+function toggleActionDropdown(event, mirrorId) {
+    event.stopPropagation();
+    const dropdown = event.target.closest('.action-dropdown');
+    const wasOpen = dropdown.classList.contains('open');
+    closeAllDropdowns();
+    if (!wasOpen) {
+        dropdown.classList.add('open');
+    }
+}
+
+function closeAllDropdowns() {
+    document.querySelectorAll('.action-dropdown.open').forEach(d => d.classList.remove('open'));
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', () => closeAllDropdowns());
+
 async function rotateMirrorToken(mirrorId) {
     if (!confirm('This will create a new access token for this mirror and revoke the old one. Continue?')) {
         return;
@@ -2635,11 +2659,17 @@ function renderTreeNode(node, level, parentPath = '') {
                             <div class="table-actions">
                                 <button class="btn btn-secondary btn-small" onclick="beginMirrorEdit(${mirror.id})">Edit</button>
                                 <button class="btn btn-success btn-small" onclick="triggerMirrorUpdate(${mirror.id})" title="Trigger an immediate mirror sync">Sync</button>
-                                <button class="btn btn-secondary btn-small" data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id})" title="Refresh status from GitLab">Status</button>
-                                <button class="btn btn-primary btn-small" onclick="showIssueMirrorConfig(${mirror.id})" title="Configure issue mirroring">Issue Sync</button>
-                                <button class="btn btn-info btn-small" data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id})" title="Check if mirror exists and settings match GitLab">Verify</button>
-                                <button class="btn btn-warning btn-small" onclick="rotateMirrorToken(${mirror.id})" title="Rotate access token">Rotate Token</button>
-                                <button class="btn btn-danger btn-small" onclick="deleteMirror(${mirror.id})">Delete</button>
+                                <div class="action-dropdown" data-dropdown="${mirror.id}">
+                                    <button class="action-dropdown-toggle" onclick="toggleActionDropdown(event, ${mirror.id})" title="More actions">&hellip;</button>
+                                    <div class="action-dropdown-menu">
+                                        <button data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id}); closeAllDropdowns();">Refresh Status</button>
+                                        <button data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id}); closeAllDropdowns();">Verify Mirror</button>
+                                        <button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>
+                                        <button onclick="rotateMirrorToken(${mirror.id}); closeAllDropdowns();">Rotate Token</button>
+                                        <div class="dropdown-divider"></div>
+                                        <button class="text-danger" onclick="deleteMirror(${mirror.id}); closeAllDropdowns();">Delete</button>
+                                    </div>
+                                </div>
                             </div>
                         </td>
                     </tr>
