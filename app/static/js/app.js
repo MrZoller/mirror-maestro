@@ -4333,15 +4333,15 @@ async function showIssueMirrorConfig(mirrorId) {
     const modal = document.getElementById('issue-mirror-config-modal');
     if (!modal) return;
 
-    // Store mirror ID
-    const mirrorIdEl = document.getElementById('issue-config-mirror-id');
-    if (mirrorIdEl) mirrorIdEl.value = mirrorId;
-
     // Reset form to defaults before loading
     const form = document.getElementById('issue-mirror-config-form');
     if (form) form.reset();
     const configIdEl = document.getElementById('issue-config-id');
     if (configIdEl) configIdEl.value = '';
+
+    // Store mirror ID (after reset so it isn't cleared)
+    const mirrorIdEl = document.getElementById('issue-config-mirror-id');
+    if (mirrorIdEl) mirrorIdEl.value = mirrorId;
     const statusEl = document.getElementById('issue-config-status');
     const errorEl = document.getElementById('issue-config-error');
     if (errorEl) errorEl.style.display = 'none';
