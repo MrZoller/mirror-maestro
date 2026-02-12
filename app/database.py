@@ -34,6 +34,7 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
     # Run migrations for existing databases
     await _migrate_add_mirror_status_columns()
+    await _migrate_add_instance_version_columns()
     # Clean up orphaned issue sync data from previously deleted mirrors
     await _cleanup_orphaned_issue_sync_data()
 
@@ -83,6 +84,36 @@ async def _migrate_add_mirror_status_columns():
             except Exception as e:
                 # Column might already exist or table doesn't exist yet
                 logging.debug(f"Could not add last_error column: {e}")
+
+
+async def _migrate_add_instance_version_columns():
+    """
+    Add gitlab_version and gitlab_edition columns to gitlab_instances table
+    if they don't exist (for existing databases predating this feature).
+    """
+    import logging
+    from sqlalchemy import text, inspect
+
+    async with engine.begin() as conn:
+        def get_columns(sync_conn):
+            inspector = inspect(sync_conn)
+            try:
+                columns = inspector.get_columns('gitlab_instances')
+                return {col['name'] for col in columns}
+            except Exception:
+                return set()
+
+        existing_columns = await conn.run_sync(get_columns)
+
+        for col_name, col_type in [('gitlab_version', 'VARCHAR(50)'), ('gitlab_edition', 'VARCHAR(50)')]:
+            if col_name not in existing_columns:
+                logging.info(f"Adding {col_name} column to gitlab_instances table")
+                try:
+                    await conn.execute(text(
+                        f"ALTER TABLE gitlab_instances ADD COLUMN {col_name} {col_type}"
+                    ))
+                except Exception as e:
+                    logging.debug(f"Could not add {col_name} column: {e}")
 
 
 async def _cleanup_orphaned_issue_sync_data():

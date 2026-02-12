@@ -213,6 +213,8 @@ class GitLabInstanceResponse(BaseModel):
     token_user_id: int | None = None
     token_username: str | None = None
     description: str | None
+    gitlab_version: str | None = None
+    gitlab_edition: str | None = None
     created_at: str
     updated_at: str
 
@@ -251,6 +253,8 @@ async def list_instances(
             token_user_id=inst.api_user_id,
             token_username=inst.api_username,
             description=inst.description,
+            gitlab_version=inst.gitlab_version,
+            gitlab_edition=inst.gitlab_edition,
             created_at=inst.created_at.isoformat() + "Z",
             updated_at=inst.updated_at.isoformat() + "Z"
         )
@@ -317,6 +321,16 @@ async def _create_instance_impl(instance: GitLabInstanceCreate, db: AsyncSession
     except Exception as e:
         logger.debug(f"Failed to fetch token user info (non-critical): {e}")
 
+    # Best-effort: fetch GitLab version/edition info
+    gitlab_version = None
+    gitlab_edition = None
+    try:
+        version_info = client.get_version_info()
+        gitlab_version = version_info.get("version")
+        gitlab_edition = version_info.get("edition")
+    except Exception as e:
+        logger.debug(f"Failed to fetch GitLab version info (non-critical): {e}")
+
     # Create the instance
     db_instance = GitLabInstance(
         name=instance.name,
@@ -324,7 +338,9 @@ async def _create_instance_impl(instance: GitLabInstanceCreate, db: AsyncSession
         encrypted_token=encrypted_token,
         api_user_id=token_user_id,
         api_username=token_username,
-        description=instance.description
+        description=instance.description,
+        gitlab_version=gitlab_version,
+        gitlab_edition=gitlab_edition,
     )
     db.add(db_instance)
     await db.commit()
@@ -337,6 +353,8 @@ async def _create_instance_impl(instance: GitLabInstanceCreate, db: AsyncSession
         token_user_id=db_instance.api_user_id,
         token_username=db_instance.api_username,
         description=db_instance.description,
+        gitlab_version=db_instance.gitlab_version,
+        gitlab_edition=db_instance.gitlab_edition,
         created_at=db_instance.created_at.isoformat() + "Z",
         updated_at=db_instance.updated_at.isoformat() + "Z"
     )
@@ -364,6 +382,8 @@ async def get_instance(
         token_user_id=instance.api_user_id,
         token_username=instance.api_username,
         description=instance.description,
+        gitlab_version=instance.gitlab_version,
+        gitlab_edition=instance.gitlab_edition,
         created_at=instance.created_at.isoformat() + "Z",
         updated_at=instance.updated_at.isoformat() + "Z"
     )
@@ -416,7 +436,7 @@ async def update_instance(
     if "token" in fields:
         if instance_update.token is not None:
             instance.encrypted_token = encryption.encrypt(instance_update.token)
-            # Best-effort: refresh token user identity
+            # Best-effort: refresh token user identity and version info
             try:
                 client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
                 u = client.get_current_user()
@@ -425,6 +445,12 @@ async def update_instance(
             except Exception:
                 instance.api_user_id = None
                 instance.api_username = None
+            try:
+                version_info = client.get_version_info()
+                instance.gitlab_version = version_info.get("version")
+                instance.gitlab_edition = version_info.get("edition")
+            except Exception:
+                pass
 
     if "description" in fields:
         instance.description = instance_update.description
@@ -439,6 +465,8 @@ async def update_instance(
         token_user_id=instance.api_user_id,
         token_username=instance.api_username,
         description=instance.description,
+        gitlab_version=instance.gitlab_version,
+        gitlab_edition=instance.gitlab_edition,
         created_at=instance.created_at.isoformat() + "Z",
         updated_at=instance.updated_at.isoformat() + "Z"
     )
@@ -574,6 +602,48 @@ async def delete_instance(
         logger.warning(f"Instance {instance_id} deleted with {len(cleanup_warnings)} cleanup warnings")
 
     return response
+
+
+@router.post("/{instance_id}/refresh-version", response_model=GitLabInstanceResponse)
+async def refresh_instance_version(
+    instance_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_credentials)
+):
+    """Refresh GitLab version/edition info for an instance."""
+    result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.id == instance_id)
+    )
+    instance = result.scalar_one_or_none()
+
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    try:
+        client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
+        version_info = client.get_version_info()
+        instance.gitlab_version = version_info.get("version")
+        instance.gitlab_edition = version_info.get("edition")
+        await db.commit()
+        await db.refresh(instance)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to fetch version info from GitLab: {str(e)}"
+        )
+
+    return GitLabInstanceResponse(
+        id=instance.id,
+        name=instance.name,
+        url=instance.url,
+        token_user_id=instance.api_user_id,
+        token_username=instance.api_username,
+        description=instance.description,
+        gitlab_version=instance.gitlab_version,
+        gitlab_edition=instance.gitlab_edition,
+        created_at=instance.created_at.isoformat() + "Z",
+        updated_at=instance.updated_at.isoformat() + "Z"
+    )
 
 
 @router.get("/{instance_id}/projects")

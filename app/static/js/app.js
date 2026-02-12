@@ -1325,6 +1325,7 @@ function renderInstances(instances) {
                     <td class="cell-locked" title="Instance URL is locked once it is used by a pair">
                         ${escapeHtml(instance.url)}
                     </td>
+                    <td>${formatGitLabVersion(instance)}</td>
                     <td>
                         <input class="table-input" id="edit-instance-description-${instance.id}" value="${escapeHtml(instance.description || '')}" placeholder="Description (optional)">
                     </td>
@@ -1345,6 +1346,7 @@ function renderInstances(instances) {
             <tr>
                 <td><strong>${escapeHtml(instance.name)}</strong></td>
                 <td>${escapeHtml(instance.url)}</td>
+                <td>${formatGitLabVersion(instance)}</td>
                 <td><span class="text-muted">${escapeHtml(instance.description || 'N/A')}</span></td>
                 <td>
                     <span class="text-muted" title="Token value is never displayed">••••••••</span>
@@ -1352,6 +1354,7 @@ function renderInstances(instances) {
                 <td>
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="beginInstanceEdit(${instance.id})">Edit</button>
+                        <button class="btn btn-secondary btn-small" onclick="refreshInstanceVersion(${instance.id})" title="Refresh version info from GitLab">↻ Version</button>
                         <button class="btn btn-danger btn-small" onclick="deleteInstance(${instance.id})">Delete</button>
                     </div>
                 </td>
@@ -2438,6 +2441,37 @@ async function changeMirrorPageSize(newSize) {
 }
 
 // Format project path with smart truncation and breadcrumbs
+function formatGitLabVersion(instance) {
+    if (!instance.gitlab_version && !instance.gitlab_edition) {
+        return '<span class="text-muted">Unknown</span>';
+    }
+    const version = escapeHtml(instance.gitlab_version || '?');
+    const edition = instance.gitlab_edition || '';
+    const editionBadge = edition === 'Enterprise'
+        ? '<span class="badge badge-info" style="margin-left: 4px;">EE</span>'
+        : edition === 'Community'
+            ? '<span class="badge badge-secondary" style="margin-left: 4px;">CE</span>'
+            : '';
+    return `<span title="${escapeHtml(edition)} Edition ${version}">${version}</span>${editionBadge}`;
+}
+
+async function refreshInstanceVersion(instanceId) {
+    try {
+        const result = await apiRequest(`/api/instances/${instanceId}/refresh-version`, { method: 'POST' });
+        // Update the instance in state
+        const idx = state.instances.findIndex(i => i.id === instanceId);
+        if (idx !== -1) {
+            state.instances[idx] = result;
+        }
+        renderInstances(state.instances);
+        const ver = result.gitlab_version || 'unknown';
+        const ed = result.gitlab_edition || '';
+        showMessage(`Version refreshed: ${ver} ${ed}`, 'success');
+    } catch (error) {
+        showMessage(`Failed to refresh version: ${error.message || 'Unknown error'}`, 'error');
+    }
+}
+
 function formatProjectPath(path, options = {}) {
     if (!path) return '<span class="text-muted">n/a</span>';
     const { maxParts = 3, showTooltip = true } = options;

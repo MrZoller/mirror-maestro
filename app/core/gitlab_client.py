@@ -341,6 +341,57 @@ class GitLabClient:
         except Exception as e:
             _handle_gitlab_error(e, "Failed to fetch current user")
 
+    def get_version_info(self) -> Dict[str, Any]:
+        """
+        Fetch GitLab instance version and edition information.
+
+        Uses GET /metadata (GitLab 15.2+) with fallback to GET /version.
+
+        Returns:
+            Dict with 'version', 'revision', 'edition', and 'enterprise' keys.
+        """
+        result = None
+
+        # Try /metadata first (GitLab 15.2+, returns 'enterprise' boolean)
+        try:
+            result = self.gl.http_get("/metadata")
+        except Exception:
+            pass
+
+        # Fallback to /version (older GitLab versions)
+        if not isinstance(result, dict):
+            try:
+                result = self.gl.http_get("/version")
+            except Exception as e:
+                _handle_gitlab_error(e, "Failed to fetch GitLab version info")
+
+        if not isinstance(result, dict):
+            raise GitLabClientError("Failed to fetch GitLab version info: Unexpected response")
+
+        version_str = result.get("version", "")
+        revision = result.get("revision")
+        is_enterprise = result.get("enterprise", False)
+
+        # Determine edition from version string suffix
+        # GitLab appends "-ee" for Enterprise Edition
+        if "-ee" in version_str.lower():
+            is_enterprise = True
+
+        if is_enterprise:
+            edition = "Enterprise"
+        else:
+            edition = "Community"
+
+        # Clean version string (remove -ee suffix for display)
+        clean_version = version_str.replace("-ee", "").replace("-pre", "")
+
+        return {
+            "version": clean_version,
+            "revision": revision,
+            "edition": edition,
+            "enterprise": is_enterprise,
+        }
+
     def create_pull_mirror(
         self,
         project_id: int,
