@@ -755,16 +755,13 @@ table tbody tr:hover {
 
 .action-dropdown-menu {
     display: none;
-    position: absolute;
-    right: 0;
-    top: 100%;
-    margin-top: 4px;
+    position: fixed;
     min-width: 160px;
     background: var(--card-background);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
-    z-index: 100;
+    z-index: 1000;
     overflow: hidden;
 }
 
