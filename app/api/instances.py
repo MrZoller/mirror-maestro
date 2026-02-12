@@ -13,6 +13,7 @@ from app.models import GitLabInstance, InstancePair, Mirror
 from app.core.auth import verify_credentials
 from app.core.encryption import encryption
 from app.core.gitlab_client import GitLabClient
+from app.api.mirrors import _delete_issue_sync_data_for_mirrors
 from app.core.rate_limiter import RateLimiter, BatchOperationTracker
 from app.config import settings
 
@@ -538,7 +539,15 @@ async def delete_instance(
     # CRITICAL: All delete operations must succeed atomically or be rolled back together
     try:
         if pair_ids:
-            # Delete mirrors first (they reference pairs)
+            # Delete issue sync data for all mirrors in these pairs
+            mirror_ids_result = await db.execute(
+                select(Mirror.id).where(Mirror.instance_pair_id.in_(pair_ids))
+            )
+            inst_mirror_ids = [row[0] for row in mirror_ids_result.all()]
+            if inst_mirror_ids:
+                await _delete_issue_sync_data_for_mirrors(db, inst_mirror_ids)
+
+            # Delete mirrors (they reference pairs)
             await db.execute(delete(Mirror).where(Mirror.instance_pair_id.in_(pair_ids)))
             # Delete pairs (they reference the instance)
             await db.execute(delete(InstancePair).where(InstancePair.id.in_(pair_ids)))
