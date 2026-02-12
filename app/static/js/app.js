@@ -2105,15 +2105,39 @@ function toggleActionDropdown(event, mirrorId) {
     closeAllDropdowns();
     if (!wasOpen) {
         dropdown.classList.add('open');
+        positionDropdownMenu(dropdown);
     }
+}
+
+function positionDropdownMenu(dropdown) {
+    const toggle = dropdown.querySelector('.action-dropdown-toggle');
+    const menu = dropdown.querySelector('.action-dropdown-menu');
+    if (!toggle || !menu) return;
+
+    const rect = toggle.getBoundingClientRect();
+    const menuHeight = menu.scrollHeight || 200;
+    const viewportHeight = window.innerHeight;
+    const spaceBelow = viewportHeight - rect.bottom;
+
+    // Open upward if not enough space below
+    if (spaceBelow < menuHeight + 8 && rect.top > menuHeight) {
+        menu.style.top = '';
+        menu.style.bottom = (viewportHeight - rect.top + 4) + 'px';
+    } else {
+        menu.style.bottom = '';
+        menu.style.top = (rect.bottom + 4) + 'px';
+    }
+    menu.style.right = (document.documentElement.clientWidth - rect.right) + 'px';
+    menu.style.left = '';
 }
 
 function closeAllDropdowns() {
     document.querySelectorAll('.action-dropdown.open').forEach(d => d.classList.remove('open'));
 }
 
-// Close dropdowns when clicking outside
+// Close dropdowns when clicking outside or scrolling
 document.addEventListener('click', () => closeAllDropdowns());
+document.addEventListener('scroll', () => closeAllDropdowns(), true);
 
 async function rotateMirrorToken(mirrorId) {
     if (!confirm('This will create a new access token for this mirror and revoke the old one. Continue?')) {
