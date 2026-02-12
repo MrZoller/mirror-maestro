@@ -1161,10 +1161,16 @@ async def create_mirror(
 
             # Refresh status from GitLab to get actual timestamps
             try:
-                await _refresh_mirror_status(db, db_mirror)
+                refresh_result = await _refresh_mirror_status(db, db_mirror)
+                if not refresh_result.success:
+                    db_mirror.last_update_status = "syncing"
+                    db_mirror.last_update_at = datetime.utcnow()
+                    await db.commit()
+                    await db.refresh(db_mirror)
             except Exception as refresh_err:
                 logger.warning(f"Status refresh after initial sync trigger failed: {refresh_err}")
                 db_mirror.last_update_status = "syncing"
+                db_mirror.last_update_at = datetime.utcnow()
                 await db.commit()
                 await db.refresh(db_mirror)
             logger.info(f"Triggered initial sync for mirror {db_mirror.id}")
@@ -1800,11 +1806,13 @@ async def trigger_mirror_update(
             if not refresh_result.success:
                 # Refresh failed but trigger succeeded - set status manually
                 mirror.last_update_status = "syncing"
+                mirror.last_update_at = datetime.utcnow()
                 await db.commit()
         except Exception as refresh_err:
             logger.warning(f"Status refresh after trigger failed (non-critical): {refresh_err}")
             # Trigger succeeded but refresh failed - set status manually
             mirror.last_update_status = "syncing"
+            mirror.last_update_at = datetime.utcnow()
             await db.commit()
 
         return {"status": "update_triggered"}

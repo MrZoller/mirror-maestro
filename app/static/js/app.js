@@ -3170,26 +3170,31 @@ async function triggerMirrorUpdate(id) {
         showMessage('Mirror update triggered', 'success');
         await loadMirrors();
 
-        // Auto-refresh status from GitLab after delays to catch sync completion
-        // The trigger endpoint already does an initial refresh, but the sync
-        // may still be in progress. Poll again to catch the final status.
-        setTimeout(async () => {
-            try {
-                await refreshMirrorStatus(id);
-            } catch (e) {
-                // Ignore - best effort refresh
-            }
-        }, 5000);
-        setTimeout(async () => {
-            try {
-                await refreshMirrorStatus(id);
-            } catch (e) {
-                // Ignore - best effort refresh
-            }
-        }, 15000);
+        // Poll status with increasing delays until sync completes or max attempts reached.
+        // Delays: 5s, 10s, 15s, 30s, 30s (total ~90s coverage)
+        pollMirrorSyncStatus(id);
     } catch (error) {
         console.error('Failed to trigger mirror update:', error);
     }
+}
+
+function pollMirrorSyncStatus(mirrorId, attempt = 0) {
+    const delays = [5000, 10000, 15000, 30000, 30000];
+    if (attempt >= delays.length) return;
+
+    setTimeout(async () => {
+        try {
+            const result = await apiRequest(`/api/mirrors/${mirrorId}/refresh-status`, { method: 'POST' });
+            await loadMirrors();
+            // If still syncing, keep polling
+            if (result.last_update_status === 'syncing' || result.last_update_status === 'started') {
+                pollMirrorSyncStatus(mirrorId, attempt + 1);
+            }
+        } catch (e) {
+            // Retry on error - the sync may still be running
+            pollMirrorSyncStatus(mirrorId, attempt + 1);
+        }
+    }, delays[attempt]);
 }
 
 async function deleteMirror(id) {
