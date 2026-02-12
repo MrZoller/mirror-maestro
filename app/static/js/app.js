@@ -3516,13 +3516,29 @@ function showMessage(message, type = 'info') {
 
     const div = document.createElement('div');
     div.className = `message message-${type}`;
-    div.textContent = message;
+
+    const text = document.createElement('span');
+    text.textContent = message;
+    div.appendChild(text);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'message-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.setAttribute('aria-label', 'Dismiss');
+    closeBtn.addEventListener('click', () => dismissMessage(div));
+    div.appendChild(closeBtn);
 
     container.appendChild(div);
 
     setTimeout(() => {
-        div.remove();
+        dismissMessage(div);
     }, 5000);
+}
+
+function dismissMessage(el) {
+    if (!el || !el.parentNode) return;
+    el.classList.add('message-fade-out');
+    el.addEventListener('animationend', () => el.remove(), { once: true });
 }
 
 // Load About page information
