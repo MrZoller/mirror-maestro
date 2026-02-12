@@ -4337,42 +4337,59 @@ async function showIssueMirrorConfig(mirrorId) {
     const mirrorIdEl = document.getElementById('issue-config-mirror-id');
     if (mirrorIdEl) mirrorIdEl.value = mirrorId;
 
+    // Reset form to defaults before loading
+    const form = document.getElementById('issue-mirror-config-form');
+    if (form) form.reset();
+    const configIdEl = document.getElementById('issue-config-id');
+    if (configIdEl) configIdEl.value = '';
+    const statusEl = document.getElementById('issue-config-status');
+    const errorEl = document.getElementById('issue-config-error');
+    if (errorEl) errorEl.style.display = 'none';
+
     // Try to load existing configuration
     try {
-        const config = await apiRequest(`/api/issue-mirrors/by-mirror/${mirrorId}`);
+        const headers = { 'Content-Type': 'application/json' };
+        if (typeof authState !== 'undefined' && authState.token) {
+            headers['Authorization'] = `Bearer ${authState.token}`;
+        }
+        const response = await fetch(`/api/issue-mirrors/by-mirror/${mirrorId}`, { headers });
 
-        // Populate form with existing config
-        document.getElementById('issue-config-id').value = config.id;
-        document.getElementById('issue-sync-enabled').checked = config.enabled;
-        document.getElementById('issue-sync-comments').checked = config.sync_comments;
-        document.getElementById('issue-sync-labels').checked = config.sync_labels;
-        document.getElementById('issue-sync-attachments').checked = config.sync_attachments;
-        document.getElementById('issue-sync-weight').checked = config.sync_weight;
-        document.getElementById('issue-sync-time-estimate').checked = config.sync_time_estimate;
-        document.getElementById('issue-sync-time-spent').checked = config.sync_time_spent;
-        document.getElementById('issue-sync-closed').checked = config.sync_closed_issues;
-        document.getElementById('issue-update-existing').checked = config.update_existing;
-        document.getElementById('issue-sync-existing').checked = config.sync_existing_issues;
-        document.getElementById('issue-sync-interval').value = config.sync_interval_minutes;
+        if (response.ok) {
+            const config = await response.json();
 
-        // Show status
-        const statusEl = document.getElementById('issue-config-status');
-        if (statusEl && config.last_sync_at) {
-            const lastSync = new Date(config.last_sync_at).toLocaleString();
-            const status = config.last_sync_status || 'unknown';
-            statusEl.innerHTML = `
-                <p class="text-muted">
-                    <strong>Last Sync:</strong> ${lastSync}<br>
-                    <strong>Status:</strong> <span class="badge badge-${status === 'success' ? 'success' : 'warning'}">${status}</span>
-                </p>
-            `;
+            // Populate form with existing config
+            document.getElementById('issue-config-id').value = config.id;
+            document.getElementById('issue-sync-enabled').checked = config.enabled;
+            document.getElementById('issue-sync-comments').checked = config.sync_comments;
+            document.getElementById('issue-sync-labels').checked = config.sync_labels;
+            document.getElementById('issue-sync-attachments').checked = config.sync_attachments;
+            document.getElementById('issue-sync-weight').checked = config.sync_weight;
+            document.getElementById('issue-sync-time-estimate').checked = config.sync_time_estimate;
+            document.getElementById('issue-sync-time-spent').checked = config.sync_time_spent;
+            document.getElementById('issue-sync-closed').checked = config.sync_closed_issues;
+            document.getElementById('issue-update-existing').checked = config.update_existing;
+            document.getElementById('issue-sync-existing').checked = config.sync_existing_issues;
+            document.getElementById('issue-sync-interval').value = config.sync_interval_minutes;
+
+            // Show status
+            if (statusEl && config.last_sync_at) {
+                const lastSync = new Date(config.last_sync_at).toLocaleString();
+                const status = config.last_sync_status || 'unknown';
+                statusEl.innerHTML = `<strong>Last Sync:</strong> ${lastSync} &mdash; <span class="badge badge-${status === 'success' ? 'success' : 'warning'}">${status}</span>`;
+            } else if (statusEl) {
+                statusEl.innerHTML = '';
+            }
+        } else if (response.status === 404) {
+            // No existing config - use defaults (form already reset above)
+            if (statusEl) statusEl.innerHTML = '';
+        } else {
+            // Unexpected error
+            const err = await response.json().catch(() => ({}));
+            console.warn('Failed to load issue sync config:', err);
         }
     } catch (error) {
-        // No existing config - use defaults (form already has default values)
-        const configIdEl = document.getElementById('issue-config-id');
-        if (configIdEl) configIdEl.value = '';
-        const statusEl = document.getElementById('issue-config-status');
-        if (statusEl) statusEl.innerHTML = '<p class="text-muted">No issue sync configured for this mirror</p>';
+        // Network error - still show modal with defaults
+        console.warn('Failed to load issue sync config:', error);
     }
 
     // Show modal
