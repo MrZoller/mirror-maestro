@@ -72,6 +72,7 @@ yarn-error.log*
 
 # SSL/TLS certificates (keep templates only)
 ssl/
+certs/
 *.pem
 *.key
 *.crt
