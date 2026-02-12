@@ -263,6 +263,41 @@ async def test_sync_engine_initialization(mock_config, mock_mirror, mock_instanc
 
 
 @pytest.mark.asyncio
+async def test_sync_engine_push_mirror_uses_same_direction(mock_config, mock_mirror, mock_instances):
+    """Test that push mirrors sync issues source→target (same direction as code).
+
+    Previously, push mirrors incorrectly reversed the direction, reading issues
+    from the push target and writing to the push source. This caused issue sync
+    to silently produce 0 results for push mirrors since the push destination
+    typically has no issues.
+    """
+    source, target = mock_instances
+    db = AsyncMock()
+
+    push_pair = MagicMock(spec=InstancePair)
+    push_pair.id = 5
+    push_pair.source_instance_id = 1
+    push_pair.target_instance_id = 2
+    push_pair.mirror_direction = "push"
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine = IssueSyncEngine(
+            db=db,
+            config=mock_config,
+            mirror=mock_mirror,
+            source_instance=source,
+            target_instance=target,
+            instance_pair=push_pair
+        )
+
+        # Push mirrors should NOT swap project IDs - issues flow source→target
+        assert engine.source_project_id == mock_mirror.source_project_id
+        assert engine.target_project_id == mock_mirror.target_project_id
+        assert engine.source_project_path == mock_mirror.source_project_path
+        assert engine.target_project_path == mock_mirror.target_project_path
+
+
+@pytest.mark.asyncio
 async def test_prepare_labels(mock_config, mock_mirror, mock_instances, mock_pair):
     """Test label preparation with PM field conversion."""
     source, target = mock_instances
@@ -497,3 +532,126 @@ async def test_sync_engine_loop_prevention_with_different_label(mock_config, moc
             assert stats["issues_skipped"] == 0
             # Should proceed to create since no mapping exists
             assert mock_create.called
+
+
+# -------------------------------------------------------------------------
+# Sync Status Propagation Tests
+# -------------------------------------------------------------------------
+
+
+@pytest.fixture
+def make_engine(mock_config, mock_mirror, mock_instances, mock_pair):
+    """Create a sync engine with mocked GitLab clients and pre-sync setup bypassed."""
+    def _make(source_issues):
+        source, target = mock_instances
+        db = AsyncMock()
+        db.commit = AsyncMock()
+
+        with patch('app.core.issue_sync.GitLabClient'):
+            engine = IssueSyncEngine(
+                db=db, config=mock_config, mirror=mock_mirror,
+                source_instance=source, target_instance=target,
+                instance_pair=mock_pair,
+            )
+
+        # Bypass pre-sync setup (label loading, label creation) to avoid
+        # __self__ attribute errors on mock objects in _execute_gitlab_api_call
+        engine._load_target_labels_cache = AsyncMock()
+        engine._ensure_mirror_from_label = AsyncMock()
+
+        # Mock _execute_gitlab_api_call for the get_issues call to return our test data
+        async def fake_execute(func, name, *args, **kwargs):
+            if "fetch_source_issues" in name:
+                return source_issues
+            return MagicMock()
+
+        engine._execute_gitlab_api_call = AsyncMock(side_effect=fake_execute)
+
+        return engine
+
+    return _make
+
+
+@pytest.mark.asyncio
+async def test_sync_sets_status_success_when_no_failures(mock_config, make_engine):
+    """Test that sync sets last_sync_status to 'success' when all issues sync without errors."""
+    mock_config.last_sync_at = None
+    mock_config.sync_existing_issues = True
+
+    source_issues = [
+        {"id": 1, "iid": 1, "title": "Issue 1", "description": "Desc",
+         "state": "opened", "labels": [], "web_url": "https://example.com/issues/1"},
+    ]
+    engine = make_engine(source_issues)
+
+    with patch.object(engine, '_sync_issue', new_callable=AsyncMock) as mock_sync_issue:
+        async def fake_sync_issue(issue, stats):
+            stats["issues_processed"] += 1
+            stats["issues_created"] += 1
+
+        mock_sync_issue.side_effect = fake_sync_issue
+        stats = await engine.sync()
+
+    assert stats["issues_created"] == 1
+    assert stats["issues_failed"] == 0
+    assert mock_config.last_sync_status == "success"
+    assert mock_config.last_sync_error is None
+
+
+@pytest.mark.asyncio
+async def test_sync_sets_status_partial_when_some_failures(mock_config, make_engine):
+    """Test that sync sets last_sync_status to 'partial' when some issues fail."""
+    mock_config.last_sync_at = None
+    mock_config.sync_existing_issues = True
+
+    source_issues = [
+        {"id": 1, "iid": 1, "title": "Issue 1", "description": "Desc",
+         "state": "opened", "labels": [], "web_url": "https://example.com/issues/1"},
+        {"id": 2, "iid": 2, "title": "Issue 2", "description": "Desc",
+         "state": "opened", "labels": [], "web_url": "https://example.com/issues/2"},
+    ]
+    engine = make_engine(source_issues)
+
+    call_count = 0
+
+    with patch.object(engine, '_sync_issue', new_callable=AsyncMock) as mock_sync_issue:
+        async def fake_sync_issue(issue, stats):
+            nonlocal call_count
+            call_count += 1
+            stats["issues_processed"] += 1
+            if call_count == 1:
+                stats["issues_created"] += 1
+            else:
+                raise Exception("GitLab API error")
+
+        mock_sync_issue.side_effect = fake_sync_issue
+        stats = await engine.sync()
+
+    assert stats["issues_created"] == 1
+    assert stats["issues_failed"] == 1
+    assert mock_config.last_sync_status == "partial"
+
+
+@pytest.mark.asyncio
+async def test_sync_sets_status_failed_when_all_fail(mock_config, make_engine):
+    """Test that sync sets last_sync_status to 'failed' when all issues fail."""
+    mock_config.last_sync_at = None
+    mock_config.sync_existing_issues = True
+
+    source_issues = [
+        {"id": 1, "iid": 1, "title": "Issue 1", "description": "Desc",
+         "state": "opened", "labels": [], "web_url": "https://example.com/issues/1"},
+    ]
+    engine = make_engine(source_issues)
+
+    with patch.object(engine, '_sync_issue', new_callable=AsyncMock) as mock_sync_issue:
+        async def fake_sync_issue(issue, stats):
+            stats["issues_processed"] += 1
+            raise Exception("GitLab API error")
+
+        mock_sync_issue.side_effect = fake_sync_issue
+        stats = await engine.sync()
+
+    assert stats["issues_created"] == 0
+    assert stats["issues_failed"] == 1
+    assert mock_config.last_sync_status == "failed"

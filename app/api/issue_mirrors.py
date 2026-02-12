@@ -336,13 +336,12 @@ async def trigger_sync(
             detail=f"Instance pair {mirror.instance_pair_id} not found"
         )
 
-    # Determine source and target based on mirror direction
-    if pair.mirror_direction == "pull":
-        source_instance_id = pair.source_instance_id
-        target_instance_id = pair.target_instance_id
-    else:  # push
-        source_instance_id = pair.target_instance_id
-        target_instance_id = pair.source_instance_id
+    # Issue sync always flows source → target, same as mirror direction.
+    # mirror.source_project lives on pair.source_instance and
+    # mirror.target_project lives on pair.target_instance for both push
+    # and pull mirrors.
+    source_instance_id = pair.source_instance_id
+    target_instance_id = pair.target_instance_id
 
     source_instance_result = await db.execute(
         select(GitLabInstance).where(GitLabInstance.id == source_instance_id)
@@ -489,10 +488,11 @@ async def trigger_sync(
                 if stats["errors"]:
                     sync_job.error_details = {"errors": stats["errors"]}
 
-                # Update config status
+                # Update config scheduling fields
+                # Note: last_sync_status and last_sync_error are already set by
+                # the sync engine (which determined success/partial/failed based
+                # on actual results). Do NOT overwrite them here.
                 sync_config.last_sync_at = datetime.utcnow()
-                sync_config.last_sync_status = "success"
-                sync_config.last_sync_error = None
                 sync_config.next_sync_at = datetime.utcnow() + timedelta(
                     minutes=sync_config.sync_interval_minutes
                 )
