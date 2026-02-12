@@ -90,7 +90,7 @@ async def quick_health():
     """
     return QuickHealthResponse(
         status="healthy",
-        timestamp=datetime.utcnow().isoformat()
+        timestamp=datetime.utcnow().isoformat() + "Z"
     )
 
 
@@ -203,7 +203,7 @@ async def detailed_health(
 
     return HealthResponse(
         status=overall_status,
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.utcnow().isoformat() + "Z",
         version=__version__,
         components=components,
         mirrors=mirrors_summary,

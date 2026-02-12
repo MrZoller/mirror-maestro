@@ -104,7 +104,7 @@ def _model_to_dict(obj: Any) -> Dict:
         value = getattr(obj, column.name)
         # Handle datetime serialization
         if hasattr(value, 'isoformat'):
-            value = value.isoformat()
+            value = value.isoformat() + "Z"
         result[column.name] = value
     return result
 
@@ -350,7 +350,7 @@ async def create_backup(
 
         # Create metadata file
         metadata = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
             "version": "2.1",  # Updated version for issue mirroring support
             "format": "json",
             "database_type": "postgresql",

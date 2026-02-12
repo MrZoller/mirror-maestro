@@ -251,8 +251,8 @@ async def list_instances(
             token_user_id=inst.api_user_id,
             token_username=inst.api_username,
             description=inst.description,
-            created_at=inst.created_at.isoformat(),
-            updated_at=inst.updated_at.isoformat()
+            created_at=inst.created_at.isoformat() + "Z",
+            updated_at=inst.updated_at.isoformat() + "Z"
         )
         for inst in instances
     ]
@@ -337,8 +337,8 @@ async def _create_instance_impl(instance: GitLabInstanceCreate, db: AsyncSession
         token_user_id=db_instance.api_user_id,
         token_username=db_instance.api_username,
         description=db_instance.description,
-        created_at=db_instance.created_at.isoformat(),
-        updated_at=db_instance.updated_at.isoformat()
+        created_at=db_instance.created_at.isoformat() + "Z",
+        updated_at=db_instance.updated_at.isoformat() + "Z"
     )
 
 
@@ -364,8 +364,8 @@ async def get_instance(
         token_user_id=instance.api_user_id,
         token_username=instance.api_username,
         description=instance.description,
-        created_at=instance.created_at.isoformat(),
-        updated_at=instance.updated_at.isoformat()
+        created_at=instance.created_at.isoformat() + "Z",
+        updated_at=instance.updated_at.isoformat() + "Z"
     )
 
 
@@ -439,8 +439,8 @@ async def update_instance(
         token_user_id=instance.api_user_id,
         token_username=instance.api_username,
         description=instance.description,
-        created_at=instance.created_at.isoformat(),
-        updated_at=instance.updated_at.isoformat()
+        created_at=instance.created_at.isoformat() + "Z",
+        updated_at=instance.updated_at.isoformat() + "Z"
     )
 
 

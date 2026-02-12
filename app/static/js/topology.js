@@ -421,7 +421,7 @@
         const src = nodes.find((n) => n.id === srcId);
         const tgt = nodes.find((n) => n.id === tgtId);
         const counts = d.status_counts || {};
-        const last = d.last_successful_update ? new Date(d.last_successful_update).toLocaleString() : "Never";
+        const last = d.last_successful_update ? formatZulu(d.last_successful_update) : "Never";
         const stale = (d.staleness || "").toString().toLowerCase();
         const staleAge = Number.isFinite(d.staleness_age_seconds) ? `${Math.round(d.staleness_age_seconds / 3600)}h` : "n/a";
         const neverCount = Number.isFinite(d.never_succeeded_count) ? d.never_succeeded_count : 0;
@@ -527,7 +527,7 @@
         const h = (nodeHealth.get(d.id)?.health || d.health || "unknown").toString().toLowerCase();
         const dot = healthDotClass(h);
         const lastIso = nodeHealth.get(d.id)?.last || d.last_successful_update || null;
-        const last = lastIso ? new Date(lastIso).toLocaleString() : "Never";
+        const last = lastIso ? formatZulu(lastIso) : "Never";
         const stale = (d.staleness || "").toString().toLowerCase();
         const staleAge = Number.isFinite(d.staleness_age_seconds) ? `${Math.round(d.staleness_age_seconds / 3600)}h` : "n/a";
         const neverCount = Number.isFinite(d.never_succeeded_count) ? d.never_succeeded_count : 0;
@@ -755,7 +755,7 @@
 
     const health = (n.health || "unknown").toString().toLowerCase();
     const dot = healthDotClass(health);
-    const last = n.last_successful_update ? new Date(n.last_successful_update).toLocaleString() : "Never";
+    const last = n.last_successful_update ? formatZulu(n.last_successful_update) : "Never";
     const stale = (n.staleness || "unknown").toString().toLowerCase();
     const staleAge = Number.isFinite(n.staleness_age_seconds) ? `${Math.round(n.staleness_age_seconds / 3600)}h` : "n/a";
     const neverCount = Number.isFinite(n.never_succeeded_count) ? n.never_succeeded_count : 0;
@@ -814,7 +814,7 @@
     const countShown = link.shown_count ?? link.mirror_count;
     const health = (link.health || "unknown").toString().toLowerCase();
     const dot = healthDotClass(health);
-    const last = link.last_successful_update ? new Date(link.last_successful_update).toLocaleString() : "Never";
+    const last = link.last_successful_update ? formatZulu(link.last_successful_update) : "Never";
     const stale = (link.staleness || "unknown").toString().toLowerCase();
     const staleAge = Number.isFinite(link.staleness_age_seconds) ? `${Math.round(link.staleness_age_seconds / 3600)}h` : "n/a";
     const neverCount = Number.isFinite(link.never_succeeded_count) ? link.never_succeeded_count : 0;
@@ -880,7 +880,7 @@
         const rows = mirrors
           .slice(0, 200)
           .map((m) => {
-            const last = m.last_successful_update ? new Date(m.last_successful_update).toLocaleString() : "Never";
+            const last = m.last_successful_update ? formatZulu(m.last_successful_update) : "Never";
             const enabled = m.enabled ? `<span class="badge badge-success">Enabled</span>` : `<span class="badge badge-warning">Disabled</span>`;
             const health = healthPillHtml(m.health, m.staleness, m.never_succeeded);
             const status = statusBadgeHtml(m.last_update_status);
@@ -941,7 +941,7 @@
         const rows = mirrors
           .slice(0, 200)
           .map((m) => {
-            const last = m.last_successful_update ? new Date(m.last_successful_update).toLocaleString() : "Never";
+            const last = m.last_successful_update ? formatZulu(m.last_successful_update) : "Never";
             const enabled = m.enabled ? `<span class="badge badge-success">Enabled</span>` : `<span class="badge badge-warning">Disabled</span>`;
             const health = healthPillHtml(m.health, m.staleness, m.never_succeeded);
             const status = statusBadgeHtml(m.last_update_status);
