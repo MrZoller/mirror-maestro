@@ -269,7 +269,7 @@ async def get_link_mirrors(
                 mirror_direction=eff_dir,
                 enabled=bool(m.enabled),
                 last_update_status=m.last_update_status,
-                last_successful_update=m.last_successful_update.isoformat() if m.last_successful_update else None,
+                last_successful_update=m.last_successful_update.isoformat() + "Z" if m.last_successful_update else None,
                 never_succeeded=never,
                 staleness=stale_level,
                 staleness_age_seconds=stale_age_s,
@@ -439,7 +439,7 @@ async def get_topology(
                 disabled_count=int(v["disabled"]),
                 pair_count=len(v["pair_ids"]),
                 status_counts=status_counts,
-                last_successful_update=last.isoformat() if last is not None else None,
+                last_successful_update=last.isoformat() + "Z" if last is not None else None,
                 health=health,
                 staleness=stale_level,
                 staleness_age_seconds=stale_age_s,
@@ -456,7 +456,7 @@ async def get_topology(
         last = a["last_successful_update"]
         never_count = int(a.get("never_succeeded_count") or 0)
         n.status_counts = counts
-        n.last_successful_update = last.isoformat() if last is not None else None
+        n.last_successful_update = last.isoformat() + "Z" if last is not None else None
         base_health = _health_from_status_counts(counts)
         mirror_count = int(n.mirrors_in) + int(n.mirrors_out)
         if mirror_count > 0 and never_count == mirror_count:

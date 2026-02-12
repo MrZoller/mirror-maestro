@@ -331,7 +331,7 @@ async def health_legacy():
     For quick checks suitable for load balancers, use /api/health/quick.
     """
     from datetime import datetime
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat() + "Z"}
 
 
 @app.get("/api/about")

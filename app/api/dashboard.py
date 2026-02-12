@@ -97,7 +97,7 @@ async def get_dashboard_metrics(
             "icon": icon,
             "time_ago": time_ago,
             "status": mirror.last_update_status or "unknown",
-            "timestamp": mirror.updated_at.isoformat()
+            "timestamp": mirror.updated_at.isoformat() + "Z"
         })
 
     # Mirrors by pair - single query with GROUP BY
@@ -175,5 +175,5 @@ async def get_quick_stats(
         "syncing_count": syncing_count,
         "recent_failures": recent_failures,
         "syncing_mirror_ids": syncing_mirror_ids,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat() + "Z"
     }

@@ -22,6 +22,40 @@ const state = {
     },
 };
 
+/**
+ * Ensure an ISO 8601 string is interpreted as UTC.
+ * Appends 'Z' to offset-less strings so new Date() parses them as UTC
+ * rather than local time.
+ */
+function _ensureUtc(isoString) {
+    if (!isoString) return isoString;
+    // Already has timezone info (Z, +HH:MM, -HH:MM)
+    if (/[Zz]$/.test(isoString) || /[+-]\d{2}:\d{2}$/.test(isoString)) return isoString;
+    return isoString + 'Z';
+}
+
+/**
+ * Format an ISO 8601 timestamp as Zulu time: "YYYY-MM-DD HH:MM:SSZ".
+ * Returns an empty string for falsy input.
+ */
+function formatZulu(isoString) {
+    if (!isoString) return '';
+    const d = new Date(_ensureUtc(isoString));
+    if (isNaN(d.getTime())) return isoString;
+    return d.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, 'Z');
+}
+
+/**
+ * Format an ISO 8601 timestamp as a Zulu date only: "YYYY-MM-DD".
+ * Returns an empty string for falsy input.
+ */
+function formatZuluDate(isoString) {
+    if (!isoString) return '';
+    const d = new Date(_ensureUtc(isoString));
+    if (isNaN(d.getTime())) return isoString;
+    return d.toISOString().split('T')[0];
+}
+
 // Initialize the application
 document.addEventListener('DOMContentLoaded', async () => {
     initDarkMode();
@@ -980,7 +1014,7 @@ function renderSystemHealth(health, container) {
     };
 
     const timestamp = health.timestamp
-        ? new Date(health.timestamp).toLocaleString()
+        ? formatZulu(health.timestamp)
         : 'Just now';
 
     let html = `
@@ -1980,10 +2014,10 @@ function renderMirrors(mirrors) {
                     <td class="cell-locked" data-sort="${escapeHtml(mirror.last_update_at || mirror.last_successful_update || '')}">
                         <div>
                             ${mirror.last_successful_update
-                                ? `<span title="Last successful sync">${new Date(mirror.last_successful_update).toLocaleString()}</span>`
+                                ? `<span title="Last successful sync">${formatZulu(mirror.last_successful_update)}</span>`
                                 : '<span class="text-muted">Never synced</span>'}
                             ${mirror.last_update_at && mirror.last_update_at !== mirror.last_successful_update
-                                ? `<br><small class="text-muted" title="Last attempt">(attempt: ${new Date(mirror.last_update_at).toLocaleString()})</small>`
+                                ? `<br><small class="text-muted" title="Last attempt">(attempt: ${formatZulu(mirror.last_update_at)})</small>`
                                 : ''}
                         </div>
                     </td>
@@ -2007,7 +2041,7 @@ function renderMirrors(mirrors) {
                 return '<span class="badge badge-success">Active</span>';
             } else if (status === 'expiring_soon') {
                 const expiresAt = mirror.mirror_token_expires_at
-                    ? new Date(mirror.mirror_token_expires_at).toLocaleDateString()
+                    ? formatZuluDate(mirror.mirror_token_expires_at)
                     : 'soon';
                 return `<span class="badge badge-warning" title="Expires ${expiresAt}">Expiring</span>`;
             } else if (status === 'expired') {
@@ -2028,10 +2062,10 @@ function renderMirrors(mirrors) {
                 <td data-sort="${escapeHtml(mirror.last_update_at || mirror.last_successful_update || '')}">
                     <div>
                         ${mirror.last_successful_update
-                            ? `<span title="Last successful sync">${new Date(mirror.last_successful_update).toLocaleString()}</span>`
+                            ? `<span title="Last successful sync">${formatZulu(mirror.last_successful_update)}</span>`
                             : '<span class="text-muted">Never synced</span>'}
                         ${mirror.last_update_at && mirror.last_update_at !== mirror.last_successful_update
-                            ? `<br><small class="text-muted" title="Last attempt">(attempt: ${new Date(mirror.last_update_at).toLocaleString()})</small>`
+                            ? `<br><small class="text-muted" title="Last attempt">(attempt: ${formatZulu(mirror.last_update_at)})</small>`
                             : ''}
                     </div>
                 </td>
@@ -3517,12 +3551,12 @@ function formatMirrorStatus(mirror) {
 function formatMirrorSyncTime(mirror) {
     let html = '';
     if (mirror.last_successful_update) {
-        html += `<span title="Last successful sync">${new Date(mirror.last_successful_update).toLocaleString()}</span>`;
+        html += `<span title="Last successful sync">${formatZulu(mirror.last_successful_update)}</span>`;
     } else {
         html += '<span class="text-muted">Never synced</span>';
     }
     if (mirror.last_update_at && mirror.last_update_at !== mirror.last_successful_update) {
-        html += `<br><small class="text-muted" title="Last attempt">(attempt: ${new Date(mirror.last_update_at).toLocaleString()})</small>`;
+        html += `<br><small class="text-muted" title="Last attempt">(attempt: ${formatZulu(mirror.last_update_at)})</small>`;
     }
     return html;
 }
@@ -4165,7 +4199,7 @@ function renderUsers(users) {
                 <td>${user.email ? escapeHtml(user.email) : '<span class="text-muted">-</span>'}</td>
                 <td>${roleBadge}</td>
                 <td><span class="${statusClass}">${statusText}</span></td>
-                <td>${new Date(user.created_at).toLocaleDateString()}</td>
+                <td>${formatZuluDate(user.created_at)}</td>
                 <td>
                     <div class="table-actions">
                         <button class="btn btn-secondary btn-small" onclick="openEditUserModal(${user.id})">Edit</button>
@@ -4373,7 +4407,7 @@ async function showIssueMirrorConfig(mirrorId) {
 
             // Show status
             if (statusEl && config.last_sync_at) {
-                const lastSync = new Date(config.last_sync_at).toLocaleString();
+                const lastSync = formatZulu(config.last_sync_at);
                 const status = config.last_sync_status || 'unknown';
                 statusEl.innerHTML = `<strong>Last Sync:</strong> ${lastSync} &mdash; <span class="badge badge-${status === 'success' ? 'success' : 'warning'}">${status}</span>`;
             } else if (statusEl) {

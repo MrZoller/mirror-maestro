@@ -264,8 +264,8 @@ async def list_pairs(
             only_mirror_protected_branches=pair.only_mirror_protected_branches,
             mirror_branch_regex=pair.mirror_branch_regex,
             description=pair.description,
-            created_at=pair.created_at.isoformat(),
-            updated_at=pair.updated_at.isoformat()
+            created_at=pair.created_at.isoformat() + "Z",
+            updated_at=pair.updated_at.isoformat() + "Z"
         )
         for pair in pairs
     ]
@@ -358,8 +358,8 @@ async def create_pair(
         only_mirror_protected_branches=db_pair.only_mirror_protected_branches,
         mirror_branch_regex=db_pair.mirror_branch_regex,
         description=db_pair.description,
-        created_at=db_pair.created_at.isoformat(),
-        updated_at=db_pair.updated_at.isoformat(),
+        created_at=db_pair.created_at.isoformat() + "Z",
+        updated_at=db_pair.updated_at.isoformat() + "Z",
         warnings=warnings if warnings else None,
         reverse_pair_id=reverse_pair_id
     )
@@ -391,8 +391,8 @@ async def get_pair(
         only_mirror_protected_branches=pair.only_mirror_protected_branches,
         mirror_branch_regex=pair.mirror_branch_regex,
         description=pair.description,
-        created_at=pair.created_at.isoformat(),
-        updated_at=pair.updated_at.isoformat()
+        created_at=pair.created_at.isoformat() + "Z",
+        updated_at=pair.updated_at.isoformat() + "Z"
     )
 
 
@@ -496,8 +496,8 @@ async def update_pair(
         only_mirror_protected_branches=pair.only_mirror_protected_branches,
         mirror_branch_regex=pair.mirror_branch_regex,
         description=pair.description,
-        created_at=pair.created_at.isoformat(),
-        updated_at=pair.updated_at.isoformat(),
+        created_at=pair.created_at.isoformat() + "Z",
+        updated_at=pair.updated_at.isoformat() + "Z",
         warnings=warnings if warnings else None,
         reverse_pair_id=reverse_pair_id
     )

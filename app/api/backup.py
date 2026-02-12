@@ -104,7 +104,7 @@ def _model_to_dict(obj: Any) -> Dict:
         value = getattr(obj, column.name)
         # Handle datetime serialization
         if hasattr(value, 'isoformat'):
-            value = value.isoformat()
+            value = value.isoformat() + "Z"
         result[column.name] = value
     return result
 
@@ -157,6 +157,15 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     from datetime import datetime as dt
     counts = {}
 
+    def _parse_naive_utc(value: str) -> datetime:
+        """Parse ISO 8601 string and return a naive UTC datetime.
+
+        Strips timezone info so the result can be stored in PostgreSQL
+        TIMESTAMP WITHOUT TIME ZONE columns.
+        """
+        parsed = dt.fromisoformat(value)
+        return parsed.replace(tzinfo=None)
+
     # Clear existing data (in reverse order due to foreign keys)
     await db.execute(text("DELETE FROM issue_sync_jobs"))
     await db.execute(text("DELETE FROM attachment_mappings"))
@@ -173,7 +182,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
         # Parse datetime fields
         for field in ['created_at', 'updated_at']:
             if row.get(field) and isinstance(row[field], str):
-                row[field] = dt.fromisoformat(row[field])
+                row[field] = _parse_naive_utc(row[field])
         instance = GitLabInstance(**row)
         db.add(instance)
     counts['gitlab_instances'] = len(data.get('gitlab_instances', []))
@@ -182,7 +191,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     for row in data.get('instance_pairs', []):
         for field in ['created_at', 'updated_at']:
             if row.get(field) and isinstance(row[field], str):
-                row[field] = dt.fromisoformat(row[field])
+                row[field] = _parse_naive_utc(row[field])
         pair = InstancePair(**row)
         db.add(pair)
     counts['instance_pairs'] = len(data.get('instance_pairs', []))
@@ -191,7 +200,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     for row in data.get('mirrors', []):
         for field in ['created_at', 'updated_at', 'last_successful_update', 'mirror_token_expires_at']:
             if row.get(field) and isinstance(row[field], str):
-                row[field] = dt.fromisoformat(row[field])
+                row[field] = _parse_naive_utc(row[field])
         mirror = Mirror(**row)
         db.add(mirror)
     counts['mirrors'] = len(data.get('mirrors', []))
@@ -200,7 +209,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     for row in data.get('mirror_issue_configs', []):
         for field in ['created_at', 'updated_at', 'last_sync_at', 'next_sync_at']:
             if row.get(field) and isinstance(row[field], str):
-                row[field] = dt.fromisoformat(row[field])
+                row[field] = _parse_naive_utc(row[field])
         config = MirrorIssueConfig(**row)
         db.add(config)
     counts['mirror_issue_configs'] = len(data.get('mirror_issue_configs', []))
@@ -209,7 +218,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     for row in data.get('issue_mappings', []):
         for field in ['created_at', 'updated_at', 'last_synced_at', 'source_updated_at', 'target_updated_at']:
             if row.get(field) and isinstance(row[field], str):
-                row[field] = dt.fromisoformat(row[field])
+                row[field] = _parse_naive_utc(row[field])
         mapping = IssueMapping(**row)
         db.add(mapping)
     counts['issue_mappings'] = len(data.get('issue_mappings', []))
@@ -218,7 +227,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     for row in data.get('comment_mappings', []):
         for field in ['created_at', 'updated_at', 'last_synced_at']:
             if row.get(field) and isinstance(row[field], str):
-                row[field] = dt.fromisoformat(row[field])
+                row[field] = _parse_naive_utc(row[field])
         mapping = CommentMapping(**row)
         db.add(mapping)
     counts['comment_mappings'] = len(data.get('comment_mappings', []))
@@ -227,7 +236,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     for row in data.get('label_mappings', []):
         for field in ['created_at', 'updated_at']:
             if row.get(field) and isinstance(row[field], str):
-                row[field] = dt.fromisoformat(row[field])
+                row[field] = _parse_naive_utc(row[field])
         mapping = LabelMapping(**row)
         db.add(mapping)
     counts['label_mappings'] = len(data.get('label_mappings', []))
@@ -236,7 +245,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     for row in data.get('attachment_mappings', []):
         for field in ['created_at', 'uploaded_at']:
             if row.get(field) and isinstance(row[field], str):
-                row[field] = dt.fromisoformat(row[field])
+                row[field] = _parse_naive_utc(row[field])
         mapping = AttachmentMapping(**row)
         db.add(mapping)
     counts['attachment_mappings'] = len(data.get('attachment_mappings', []))
@@ -245,7 +254,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     for row in data.get('issue_sync_jobs', []):
         for field in ['created_at', 'started_at', 'completed_at']:
             if row.get(field) and isinstance(row[field], str):
-                row[field] = dt.fromisoformat(row[field])
+                row[field] = _parse_naive_utc(row[field])
         job = IssueSyncJob(**row)
         db.add(job)
     counts['issue_sync_jobs'] = len(data.get('issue_sync_jobs', []))
@@ -350,7 +359,7 @@ async def create_backup(
 
         # Create metadata file
         metadata = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
             "version": "2.1",  # Updated version for issue mirroring support
             "format": "json",
             "database_type": "postgresql",
