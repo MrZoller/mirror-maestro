@@ -6,7 +6,7 @@ import threading
 from datetime import datetime
 from typing import List, Optional, Set
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -124,6 +124,12 @@ class MirrorIssueConfigResponse(BaseModel):
     sync_interval_minutes: int
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer('created_at', 'updated_at', 'last_sync_at', 'next_sync_at')
+    def serialize_dt(self, dt: Optional[datetime], _info) -> Optional[str]:
+        if dt is None:
+            return None
+        return dt.isoformat() + "Z"
 
 
 # API Endpoints

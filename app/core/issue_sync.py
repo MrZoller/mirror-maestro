@@ -586,12 +586,12 @@ class IssueSyncEngine:
             # Determine which issues to sync
             if self.config.last_sync_at and not self.config.sync_existing_issues:
                 # Incremental sync: only issues updated after last sync
-                updated_after = self.config.last_sync_at.isoformat()
+                updated_after = self.config.last_sync_at.isoformat() + "Z"
                 logger.info(f"Incremental sync: fetching issues updated after {updated_after}")
             elif not self.config.sync_existing_issues:
                 # First sync without sync_existing_issues: use current time as baseline
                 # This means we won't sync any existing issues, only new ones going forward
-                updated_after = datetime.utcnow().isoformat()
+                updated_after = datetime.utcnow().isoformat() + "Z"
                 logger.info("First sync without sync_existing_issues: only new issues will be synced")
             else:
                 # Sync all issues (sync_existing_issues = True)

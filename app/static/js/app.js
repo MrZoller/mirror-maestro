@@ -23,12 +23,24 @@ const state = {
 };
 
 /**
+ * Ensure an ISO 8601 string is interpreted as UTC.
+ * Appends 'Z' to offset-less strings so new Date() parses them as UTC
+ * rather than local time.
+ */
+function _ensureUtc(isoString) {
+    if (!isoString) return isoString;
+    // Already has timezone info (Z, +HH:MM, -HH:MM)
+    if (/[Zz]$/.test(isoString) || /[+-]\d{2}:\d{2}$/.test(isoString)) return isoString;
+    return isoString + 'Z';
+}
+
+/**
  * Format an ISO 8601 timestamp as Zulu time: "YYYY-MM-DD HH:MM:SSZ".
  * Returns an empty string for falsy input.
  */
 function formatZulu(isoString) {
     if (!isoString) return '';
-    const d = new Date(isoString);
+    const d = new Date(_ensureUtc(isoString));
     if (isNaN(d.getTime())) return isoString;
     return d.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, 'Z');
 }
@@ -39,7 +51,7 @@ function formatZulu(isoString) {
  */
 function formatZuluDate(isoString) {
     if (!isoString) return '';
-    const d = new Date(isoString);
+    const d = new Date(_ensureUtc(isoString));
     if (isNaN(d.getTime())) return isoString;
     return d.toISOString().split('T')[0];
 }
