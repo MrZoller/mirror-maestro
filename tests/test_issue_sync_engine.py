@@ -6,6 +6,8 @@ from unittest.mock import Mock, AsyncMock, patch, MagicMock
 
 from app.core.issue_sync import (
     IssueSyncEngine,
+    MIRROR_FOOTER_MARKER,
+    MIRROR_FROM_LABEL_PREFIX,
     compute_content_hash,
     extract_footer,
     build_footer,
@@ -662,12 +664,15 @@ async def test_multi_instance_issue_chain_a_to_b_to_c(mock_config, mock_mirror):
 
 
 @pytest.mark.asyncio
-async def test_multi_instance_label_preservation_in_prepare_labels(mock_config, mock_mirror):
-    """Test that upstream Mirrored-From labels are preserved during propagation.
+async def test_multi_instance_label_stripping_in_prepare_labels(mock_config, mock_mirror):
+    """Test that upstream Mirrored-From labels are stripped during propagation.
 
     When syncing B→C, source labels on B may include Mirrored-From::gitlab-a.example.com
-    (from A→B sync). These must be preserved so that cyclic topologies (A→B→C→A) can
-    detect that an issue has already visited a given instance.
+    (from A→B sync).  These MUST be stripped because GitLab Premium/Ultimate
+    treats `::` labels as scoped labels with at-most-one-value-per-scope
+    semantics.  Carrying multiple Mirrored-From:: labels causes GitLab to
+    silently drop all but the last, which can destroy the direct-hop marker
+    needed for loop prevention.
     """
     instance_b = MagicMock(spec=GitLabInstance)
     instance_b.id = 1
@@ -704,11 +709,14 @@ async def test_multi_instance_label_preservation_in_prepare_labels(mock_config, 
 
     # Should include the current hop's Mirrored-From label
     assert "Mirrored-From::gitlab-b.example.com" in labels
-    # Should include regular source labels
+    # Should include regular source labels (non-Mirrored-From)
     assert "bug" in labels
     assert "priority::high" in labels
-    # Should PRESERVE upstream Mirrored-From labels for cycle detection
-    assert "Mirrored-From::gitlab-a.example.com" in labels
+    # Should STRIP upstream Mirrored-From labels to avoid scoped-label conflicts
+    assert "Mirrored-From::gitlab-a.example.com" not in labels
+    # Only one Mirrored-From label should exist
+    mirror_labels = [l for l in labels if l.startswith("Mirrored-From::")]
+    assert mirror_labels == ["Mirrored-From::gitlab-b.example.com"]
 
 
 @pytest.mark.asyncio
@@ -942,3 +950,246 @@ async def test_sync_sets_status_failed_when_all_fail(mock_config, make_engine):
     assert stats["issues_created"] == 0
     assert stats["issues_failed"] == 1
     assert mock_config.last_sync_status == "failed"
+
+
+# -------------------------------------------------------------------------
+# Multi-hop Chain Tests (A→B→C with C→B bounce prevention)
+# -------------------------------------------------------------------------
+
+
+def _make_instance(id: int, name: str, url: str):
+    """Helper to create a mock GitLab instance."""
+    inst = MagicMock(spec=GitLabInstance)
+    inst.id = id
+    inst.name = name
+    inst.url = url
+    inst.encrypted_token = f"enc:{name}-token"
+    return inst
+
+
+def _make_pair(id: int, source_id: int, target_id: int):
+    """Helper to create a mock instance pair."""
+    pair = MagicMock(spec=InstancePair)
+    pair.id = id
+    pair.source_instance_id = source_id
+    pair.target_instance_id = target_id
+    pair.mirror_direction = "push"
+    return pair
+
+
+def _make_mirror(id: int, pair_id: int, src_proj_id: int, src_path: str,
+                 tgt_proj_id: int, tgt_path: str):
+    """Helper to create a mock mirror."""
+    m = MagicMock(spec=Mirror)
+    m.id = id
+    m.instance_pair_id = pair_id
+    m.source_project_id = src_proj_id
+    m.source_project_path = src_path
+    m.target_project_id = tgt_proj_id
+    m.target_project_path = tgt_path
+    return m
+
+
+@pytest.mark.asyncio
+async def test_chain_abc_label_only_direct_hop(mock_config):
+    """Test A→B→C chain: issue on C gets only Mirrored-From::B (direct source).
+
+    Simulates:
+    1. Issue created on A, synced to B → B issue has Mirrored-From::A
+    2. B→C sync should produce labels with only Mirrored-From::B on C
+       (upstream Mirrored-From::A stripped for scoped-label safety)
+    3. C→B loop check finds Mirrored-From::B on C → skips (no bounce)
+    """
+    inst_a = _make_instance(1, "A", "https://gitlab-a.example.com")
+    inst_b = _make_instance(2, "B", "https://gitlab-b.example.com")
+    inst_c = _make_instance(3, "C", "https://gitlab-c.example.com")
+
+    pair_bc = _make_pair(2, inst_b.id, inst_c.id)
+    mirror_bc = _make_mirror(20, 2, 200, "group/proj-b", 300, "group/proj-c")
+
+    db = AsyncMock()
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine_bc = IssueSyncEngine(
+            db=db, config=mock_config, mirror=mirror_bc,
+            source_instance=inst_b, target_instance=inst_c,
+            instance_pair=pair_bc,
+        )
+
+    # Issue on B after A→B sync: has Mirrored-From::A and some regular labels
+    issue_on_b = {
+        "labels": [
+            "Mirrored-From::gitlab-a.example.com",
+            "bug",
+            "team::backend",
+        ],
+        "milestone": None, "iteration": None, "epic": None, "assignees": [],
+    }
+
+    labels_for_c = engine_bc._prepare_labels(issue_on_b)
+
+    # Only the direct-hop label should survive
+    assert "Mirrored-From::gitlab-b.example.com" in labels_for_c
+    assert "Mirrored-From::gitlab-a.example.com" not in labels_for_c
+    # Regular labels preserved
+    assert "bug" in labels_for_c
+    assert "team::backend" in labels_for_c
+
+
+@pytest.mark.asyncio
+async def test_chain_cb_loop_prevention_by_label(mock_config):
+    """Test C→B sync skips issue that has Mirrored-From::B label (came from B→C)."""
+    inst_b = _make_instance(2, "B", "https://gitlab-b.example.com")
+    inst_c = _make_instance(3, "C", "https://gitlab-c.example.com")
+
+    pair_cb = _make_pair(3, inst_c.id, inst_b.id)
+    mirror_cb = _make_mirror(30, 3, 300, "group/proj-c", 200, "group/proj-b")
+
+    db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=mock_result)
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine_cb = IssueSyncEngine(
+            db=db, config=mock_config, mirror=mirror_cb,
+            source_instance=inst_c, target_instance=inst_b,
+            instance_pair=pair_cb,
+        )
+
+    # Issue on C created by B→C sync: has Mirrored-From::B (direct source)
+    issue_on_c = {
+        "id": 500, "iid": 1,
+        "title": "Issue from A (via B)",
+        "description": "Some content",
+        "state": "opened",
+        "labels": ["Mirrored-From::gitlab-b.example.com", "bug"],
+        "web_url": "https://gitlab-c.example.com/group/proj-c/-/issues/1",
+    }
+
+    stats = {
+        "issues_processed": 0, "issues_created": 0, "issues_updated": 0,
+        "issues_skipped": 0, "issues_failed": 0, "errors": [],
+    }
+
+    await engine_cb._sync_issue(issue_on_c, stats)
+
+    # Should be skipped by loop prevention
+    assert stats["issues_skipped"] == 1
+    assert stats["issues_created"] == 0
+
+
+@pytest.mark.asyncio
+async def test_chain_cb_footer_loop_prevention(mock_config):
+    """Test C→B sync skips issue using footer-based detection.
+
+    Even if labels were mangled by GitLab scoped-label semantics and
+    the Mirrored-From::B label was lost, the description footer should
+    catch the loop because it references B's instance URL.
+    """
+    inst_b = _make_instance(2, "B", "https://gitlab-b.example.com")
+    inst_c = _make_instance(3, "C", "https://gitlab-c.example.com")
+
+    pair_cb = _make_pair(3, inst_c.id, inst_b.id)
+    mirror_cb = _make_mirror(30, 3, 300, "group/proj-c", 200, "group/proj-b")
+
+    db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=mock_result)
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine_cb = IssueSyncEngine(
+            db=db, config=mock_config, mirror=mirror_cb,
+            source_instance=inst_c, target_instance=inst_b,
+            instance_pair=pair_cb,
+        )
+
+    # Simulate scoped-label scenario: Mirrored-From::B was lost (replaced
+    # by Mirrored-From::A due to scoped-label semantics), but the footer
+    # still references B's instance URL.
+    footer = build_footer(
+        source_instance_url="https://gitlab-b.example.com",
+        source_project_path="group/proj-b",
+        source_issue_iid=42,
+        source_web_url="https://gitlab-b.example.com/group/proj-b/-/issues/42",
+        milestone=None, iteration=None, epic=None, assignees=[],
+    )
+    description_with_footer = f"Original content\n\n{footer}"
+
+    issue_on_c = {
+        "id": 500, "iid": 1,
+        "title": "Issue from A (via B)",
+        "description": description_with_footer,
+        "state": "opened",
+        # Label-based detection fails: only Mirrored-From::A survived (not B)
+        "labels": ["Mirrored-From::gitlab-a.example.com", "bug"],
+        "web_url": "https://gitlab-c.example.com/group/proj-c/-/issues/1",
+    }
+
+    stats = {
+        "issues_processed": 0, "issues_created": 0, "issues_updated": 0,
+        "issues_skipped": 0, "issues_failed": 0, "errors": [],
+    }
+
+    await engine_cb._sync_issue(issue_on_c, stats)
+
+    # Footer-based detection should catch the loop
+    assert stats["issues_skipped"] == 1
+    assert stats["issues_created"] == 0
+
+
+@pytest.mark.asyncio
+async def test_chain_native_issue_on_c_syncs_to_b(mock_config):
+    """Test that a native (non-mirrored) issue on C does sync to B.
+
+    Issues that originated on C (no Mirrored-From label, no mirror footer)
+    should NOT be blocked by loop prevention.
+    """
+    inst_b = _make_instance(2, "B", "https://gitlab-b.example.com")
+    inst_c = _make_instance(3, "C", "https://gitlab-c.example.com")
+
+    pair_cb = _make_pair(3, inst_c.id, inst_b.id)
+    mirror_cb = _make_mirror(30, 3, 300, "group/proj-c", 200, "group/proj-b")
+
+    db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=mock_result)
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine_cb = IssueSyncEngine(
+            db=db, config=mock_config, mirror=mirror_cb,
+            source_instance=inst_c, target_instance=inst_b,
+            instance_pair=pair_cb,
+        )
+
+    # Native issue on C — no mirror labels, no footer
+    native_issue = {
+        "id": 600, "iid": 5,
+        "title": "Native issue on C",
+        "description": "This issue was created directly on C.",
+        "state": "opened",
+        "labels": ["feature-request"],
+        "web_url": "https://gitlab-c.example.com/group/proj-c/-/issues/5",
+    }
+
+    stats = {
+        "issues_processed": 0, "issues_created": 0, "issues_updated": 0,
+        "issues_skipped": 0, "issues_failed": 0, "errors": [],
+    }
+
+    # Mock the create path — we just need to verify it's NOT skipped
+    engine_cb._find_existing_target_issue = AsyncMock(return_value=None)
+    engine_cb._execute_gitlab_api_call = AsyncMock(return_value={
+        "id": 700, "iid": 1, "title": "Native issue on C",
+        "description": "content", "state": "opened", "labels": [],
+        "web_url": "https://gitlab-b.example.com/group/proj-b/-/issues/1",
+    })
+    engine_cb._load_target_labels_cache = AsyncMock()
+    engine_cb._ensure_mirror_from_label = AsyncMock()
+
+    await engine_cb._sync_issue(native_issue, stats)
+
+    # Should NOT be skipped — it's a native issue
+    assert stats["issues_skipped"] == 0
