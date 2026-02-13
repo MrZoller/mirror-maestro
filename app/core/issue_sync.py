@@ -760,9 +760,10 @@ class IssueSyncEngine:
 
         stats["issues_processed"] += 1
 
-        # Loop prevention: Skip issues that originated from the target instance
-        # These have a Mirrored-From label pointing to the target, meaning they were
-        # created by the reverse sync and shouldn't be synced back (would create duplicates)
+        # Loop prevention: Skip issues that originated from the target instance.
+        # Check 1 — label-based: the direct-hop Mirrored-From label identifies
+        # the instance that pushed this issue.  If it matches the target we
+        # would be sending it back to where it came from.
         # Also check the legacy label format for backward compatibility after upgrades.
         source_labels = source_issue.get("labels", [])
         if (self.originated_from_target_label in source_labels
@@ -773,6 +774,25 @@ class IssueSyncEngine:
             )
             stats["issues_skipped"] += 1
             return
+
+        # Check 2 — description-footer-based: the Mirror Maestro footer
+        # embeds the source instance URL of the previous hop.  If that URL
+        # resolves to the target instance the issue is bouncing back.
+        # This is a secondary safety net for cases where the label-based
+        # check fails (e.g. labels stripped by scoped-label enforcement
+        # on certain GitLab versions, or label sync disabled).
+        source_description = source_issue.get("description") or ""
+        if MIRROR_FOOTER_MARKER in source_description:
+            _, footer_text = extract_footer(source_description)
+            if footer_text:
+                target_host = _extract_hostname(self.target_instance.url)
+                if target_host and f"://{target_host}" in footer_text:
+                    logger.debug(
+                        f"Skipping issue {source_issue_iid}: description footer "
+                        f"references target instance ({target_host})"
+                    )
+                    stats["issues_skipped"] += 1
+                    return
 
         # Check if issue is already mirrored
         result = await self.db.execute(
@@ -1069,16 +1089,27 @@ class IssueSyncEngine:
         """Prepare labels for target issue, including PM field conversions."""
         labels = []
 
-        # Add Mirrored-From label
+        # Add Mirrored-From label for the current hop (source instance).
         labels.append(self.mirror_from_label)
 
-        # Add source labels if enabled.
-        # Upstream Mirrored-From:: labels are intentionally preserved so that
-        # cyclic topologies (A→B→C→A) can detect that an issue has already
-        # visited the target instance and skip it during loop prevention.
+        # Add source labels if enabled, but strip any upstream Mirrored-From::
+        # labels.  In multi-hop chains (A→B→C) the source issue may carry
+        # Mirrored-From labels from earlier hops.  Forwarding them creates
+        # multiple Mirrored-From:: labels on the target issue.  GitLab EE
+        # treats `::` labels as scoped labels with at-most-one-value-per-
+        # scope semantics — but enforcement varies across versions (e.g.
+        # 18.4 enforces, 18.8 may not).  When a target instance DOES
+        # enforce scoping, it silently drops all but one Mirrored-From
+        # label, which can destroy the direct-hop marker needed for loop
+        # prevention.  Keeping only the current-hop marker avoids this
+        # regardless of target GitLab version.
         if self.config.sync_labels:
             source_labels = source_issue.get("labels", [])
-            labels.extend(source_labels)
+            mirror_prefix = f"{MIRROR_FROM_LABEL_PREFIX}::"
+            labels.extend(
+                lbl for lbl in source_labels
+                if not lbl.startswith(mirror_prefix)
+            )
 
         # Convert PM fields to labels
         pm_labels = convert_pm_fields_to_labels(
