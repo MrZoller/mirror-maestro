@@ -149,6 +149,8 @@ def test_extract_hostname():
     assert _extract_hostname("http://10.0.0.1:8080/") == "10.0.0.1:8080"
     assert _extract_hostname("https://gitlab.example.com:443") == "gitlab.example.com"
     assert _extract_hostname("http://gitlab.example.com:80") == "gitlab.example.com"
+    # Malformed port — should not crash, falls back to hostname only
+    assert _extract_hostname("https://gitlab.example.com:abc") == "gitlab.example.com"
 
 
 def test_extract_mirror_urls_from_description():

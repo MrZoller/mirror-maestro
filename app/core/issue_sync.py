@@ -170,8 +170,13 @@ def _extract_hostname(url: str) -> str:
     """
     parsed = urlparse(url)
     hostname = parsed.hostname or parsed.netloc or url
-    port = parsed.port
     scheme = parsed.scheme or "https"
+
+    # parsed.port raises ValueError on malformed ports (e.g. ":abc")
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
 
     # Include port only if non-standard
     standard_ports = {"http": 80, "https": 443}
