@@ -231,7 +231,9 @@ Loop prevention:
   4. MM1 syncs B→A: checks for "Mirrored-From::gitlab-a.example.com" on B → found → SKIPPED ✓
 ```
 
-**Label filtering**: When `sync_labels` is enabled, `Mirrored-From::` labels from upstream hops are automatically filtered out during propagation. Each issue on a target only receives a single `Mirrored-From` label identifying its immediate source instance.
+**Label preservation**: When `sync_labels` is enabled, upstream `Mirrored-From::` labels are preserved during propagation. This provides provenance tracking and enables cycle detection in more complex topologies (e.g. A→B→C→A). An issue on C that originally came from A will carry both `Mirrored-From::gitlab-a.example.com` and `Mirrored-From::gitlab-b.example.com`, allowing any sync targeting A to detect the origin and skip the issue.
+
+**Backward compatibility**: After upgrading from an older version that used `Mirrored-From::instance-{id}` labels, the loop prevention also checks for the legacy label format to avoid creating duplicates during the transition.
 
 ### Concurrent Sync Protection
 

@@ -519,6 +519,14 @@ class IssueSyncEngine:
         # If a source issue has this label, it was mirrored FROM the target, so skip it
         self.originated_from_target_label: str = get_mirror_from_label(target_instance.url)
 
+        # Backward compatibility: also recognise the legacy label format
+        # (Mirrored-From::instance-{id}) used before URL-based identifiers.
+        # Without this, issues tagged with the old format after an upgrade
+        # would not be detected by loop prevention, risking duplicates.
+        self._originated_from_target_label_legacy: str = (
+            f"{MIRROR_FROM_LABEL_PREFIX}::instance-{target_instance.id}"
+        )
+
     async def _execute_gitlab_api_call(
         self,
         operation_func,
@@ -739,8 +747,10 @@ class IssueSyncEngine:
         # Loop prevention: Skip issues that originated from the target instance
         # These have a Mirrored-From label pointing to the target, meaning they were
         # created by the reverse sync and shouldn't be synced back (would create duplicates)
+        # Also check the legacy label format for backward compatibility after upgrades.
         source_labels = source_issue.get("labels", [])
-        if self.originated_from_target_label in source_labels:
+        if (self.originated_from_target_label in source_labels
+                or self._originated_from_target_label_legacy in source_labels):
             logger.debug(
                 f"Skipping issue {source_issue_iid}: originated from target instance "
                 f"(has label '{self.originated_from_target_label}')"
@@ -1046,17 +1056,13 @@ class IssueSyncEngine:
         # Add Mirrored-From label
         labels.append(self.mirror_from_label)
 
-        # Add source labels if enabled
+        # Add source labels if enabled.
+        # Upstream Mirrored-From:: labels are intentionally preserved so that
+        # cyclic topologies (A→B→C→A) can detect that an issue has already
+        # visited the target instance and skip it during loop prevention.
         if self.config.sync_labels:
             source_labels = source_issue.get("labels", [])
-            # Filter out Mirrored-From:: labels from source to prevent label
-            # accumulation in multi-hop chains (e.g. A→B→C). Each hop adds
-            # only its own Mirrored-From label via mirror_from_label above.
-            mirrored_from_prefix = f"{MIRROR_FROM_LABEL_PREFIX}::"
-            labels.extend(
-                l for l in source_labels
-                if not l.startswith(mirrored_from_prefix)
-            )
+            labels.extend(source_labels)
 
         # Convert PM fields to labels
         pm_labels = convert_pm_fields_to_labels(

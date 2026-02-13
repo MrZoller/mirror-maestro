@@ -660,12 +660,12 @@ async def test_multi_instance_issue_chain_a_to_b_to_c(mock_config, mock_mirror):
 
 
 @pytest.mark.asyncio
-async def test_multi_instance_label_filtering_in_prepare_labels(mock_config, mock_mirror):
-    """Test that Mirrored-From labels from upstream hops are filtered during propagation.
+async def test_multi_instance_label_preservation_in_prepare_labels(mock_config, mock_mirror):
+    """Test that upstream Mirrored-From labels are preserved during propagation.
 
     When syncing B→C, source labels on B may include Mirrored-From::gitlab-a.example.com
-    (from A→B sync). This should be filtered out so C only gets
-    Mirrored-From::gitlab-b.example.com.
+    (from A→B sync). These must be preserved so that cyclic topologies (A→B→C→A) can
+    detect that an issue has already visited a given instance.
     """
     instance_b = MagicMock(spec=GitLabInstance)
     instance_b.id = 1
@@ -705,8 +705,118 @@ async def test_multi_instance_label_filtering_in_prepare_labels(mock_config, moc
     # Should include regular source labels
     assert "bug" in labels
     assert "priority::high" in labels
-    # Should NOT include Mirrored-From labels from previous hops
-    assert "Mirrored-From::gitlab-a.example.com" not in labels
+    # Should PRESERVE upstream Mirrored-From labels for cycle detection
+    assert "Mirrored-From::gitlab-a.example.com" in labels
+
+
+@pytest.mark.asyncio
+async def test_legacy_label_backward_compatibility(mock_config, mock_mirror, mock_instances, mock_pair):
+    """Test that old Mirrored-From::instance-{id} labels are still recognised.
+
+    After upgrading from the old ID-based format to URL-based format, issues
+    tagged with the legacy format must still be detected by loop prevention
+    to avoid creating duplicates.
+    """
+    source, target = mock_instances
+    db = AsyncMock()
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=mock_result)
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine = IssueSyncEngine(
+            db=db, config=mock_config, mirror=mock_mirror,
+            source_instance=source, target_instance=target,
+            instance_pair=mock_pair,
+        )
+
+    # Verify legacy label is set (target.id = 2)
+    assert engine._originated_from_target_label_legacy == "Mirrored-From::instance-2"
+
+    # Source issue tagged with OLD format label pointing to target
+    issue_with_legacy_label = {
+        "id": 700, "iid": 70,
+        "title": "Issue mirrored before upgrade",
+        "description": "Tagged with legacy format",
+        "labels": ["bug", "Mirrored-From::instance-2"],  # Legacy format
+        "web_url": "https://gitlab-source.example.com/group/source/-/issues/70",
+    }
+
+    stats = {
+        "issues_processed": 0, "issues_created": 0, "issues_updated": 0,
+        "issues_skipped": 0, "issues_failed": 0, "errors": [],
+    }
+
+    await engine._sync_issue(issue_with_legacy_label, stats)
+
+    # Should be skipped due to legacy label matching target instance
+    assert stats["issues_skipped"] == 1
+    assert stats["issues_created"] == 0
+
+
+@pytest.mark.asyncio
+async def test_cycle_detection_via_preserved_labels(mock_config, mock_mirror):
+    """Test that cyclic topologies (A→B→C→A) are detected via preserved labels.
+
+    When an issue flows A→B→C and then C→A is attempted, the preserved
+    Mirrored-From::gitlab-a.example.com label on C's issue should cause
+    the C→A sync to skip it (since A is the target).
+    """
+    # C→A sync engine
+    instance_c = MagicMock(spec=GitLabInstance)
+    instance_c.id = 3
+    instance_c.url = "https://gitlab-c.example.com"
+    instance_c.encrypted_token = "enc:c-token"
+
+    instance_a = MagicMock(spec=GitLabInstance)
+    instance_a.id = 1
+    instance_a.url = "https://gitlab-a.example.com"
+    instance_a.encrypted_token = "enc:a-token"
+
+    pair_ca = MagicMock(spec=InstancePair)
+    pair_ca.id = 1
+    pair_ca.source_instance_id = 3
+    pair_ca.target_instance_id = 1
+    pair_ca.mirror_direction = "push"
+
+    db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=mock_result)
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine_ca = IssueSyncEngine(
+            db=db, config=mock_config, mirror=mock_mirror,
+            source_instance=instance_c, target_instance=instance_a,
+            instance_pair=pair_ca,
+        )
+
+    # Issue on C that arrived via A→B→C chain.
+    # Because labels are preserved, it carries the origin label from A.
+    issue_on_c_from_a = {
+        "id": 200, "iid": 20,
+        "title": "Issue originally from A",
+        "description": "Created on A, synced A→B→C",
+        "labels": [
+            "bug",
+            "Mirrored-From::gitlab-b.example.com",   # From B→C hop
+            "Mirrored-From::gitlab-a.example.com",   # Preserved from A→B hop
+        ],
+        "web_url": "https://gitlab-c.example.com/group/project/-/issues/20",
+    }
+
+    stats = {
+        "issues_processed": 0, "issues_created": 0, "issues_updated": 0,
+        "issues_skipped": 0, "issues_failed": 0, "errors": [],
+    }
+
+    # C→A sync: target is A, so originated_from_target_label = Mirrored-From::gitlab-a.example.com
+    # The issue on C has this label (preserved from the original A→B hop) → SKIPPED
+    await engine_ca._sync_issue(issue_on_c_from_a, stats)
+
+    assert stats["issues_skipped"] == 1, "Issue should be skipped: it originated from A (the target)"
+    assert stats["issues_created"] == 0
 
 
 # -------------------------------------------------------------------------
