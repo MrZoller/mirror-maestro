@@ -778,8 +778,9 @@ class IssueSyncEngine:
         # Check 2 — description-footer-based: the Mirror Maestro footer
         # embeds the source instance URL of the previous hop.  If that URL
         # resolves to the target instance the issue is bouncing back.
-        # This catches cases where GitLab scoped-label semantics dropped
-        # the direct-hop Mirrored-From label (see _prepare_labels comment).
+        # This is a secondary safety net for cases where the label-based
+        # check fails (e.g. labels stripped by scoped-label enforcement
+        # on certain GitLab versions, or label sync disabled).
         source_description = source_issue.get("description") or ""
         if MIRROR_FOOTER_MARKER in source_description:
             _, footer_text = extract_footer(source_description)
@@ -1092,12 +1093,16 @@ class IssueSyncEngine:
         labels.append(self.mirror_from_label)
 
         # Add source labels if enabled, but strip any upstream Mirrored-From::
-        # labels.  GitLab Premium/Ultimate treats `::` labels as scoped labels
-        # with at-most-one-value-per-scope semantics.  If we carry forward
-        # both Mirrored-From::A and Mirrored-From::B, GitLab silently drops
-        # all but the last, which can destroy the direct-hop marker needed
-        # for loop prevention.  Keeping only the current-hop marker avoids
-        # scoped-label conflicts on all GitLab tiers.
+        # labels.  In multi-hop chains (A→B→C) the source issue may carry
+        # Mirrored-From labels from earlier hops.  Forwarding them creates
+        # multiple Mirrored-From:: labels on the target issue.  GitLab EE
+        # treats `::` labels as scoped labels with at-most-one-value-per-
+        # scope semantics — but enforcement varies across versions (e.g.
+        # 18.4 enforces, 18.8 may not).  When a target instance DOES
+        # enforce scoping, it silently drops all but one Mirrored-From
+        # label, which can destroy the direct-hop marker needed for loop
+        # prevention.  Keeping only the current-hop marker avoids this
+        # regardless of target GitLab version.
         if self.config.sync_labels:
             source_labels = source_issue.get("labels", [])
             mirror_prefix = f"{MIRROR_FROM_LABEL_PREFIX}::"

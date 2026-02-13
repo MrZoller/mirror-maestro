@@ -668,11 +668,11 @@ async def test_multi_instance_label_stripping_in_prepare_labels(mock_config, moc
     """Test that upstream Mirrored-From labels are stripped during propagation.
 
     When syncing B→C, source labels on B may include Mirrored-From::gitlab-a.example.com
-    (from A→B sync).  These MUST be stripped because GitLab Premium/Ultimate
-    treats `::` labels as scoped labels with at-most-one-value-per-scope
-    semantics.  Carrying multiple Mirrored-From:: labels causes GitLab to
-    silently drop all but the last, which can destroy the direct-hop marker
-    needed for loop prevention.
+    (from A→B sync).  These MUST be stripped because GitLab EE treats `::` labels
+    as scoped labels with at-most-one-value-per-scope semantics.  Enforcement
+    varies by version (e.g. 18.4 enforces, 18.8 may not), so when the target
+    instance DOES enforce scoping, it silently keeps only one Mirrored-From
+    label, destroying the direct-hop marker needed for loop prevention.
     """
     instance_b = MagicMock(spec=GitLabInstance)
     instance_b.id = 1
@@ -1083,9 +1083,9 @@ async def test_chain_cb_loop_prevention_by_label(mock_config):
 async def test_chain_cb_footer_loop_prevention(mock_config):
     """Test C→B sync skips issue using footer-based detection.
 
-    Even if labels were mangled by GitLab scoped-label semantics and
-    the Mirrored-From::B label was lost, the description footer should
-    catch the loop because it references B's instance URL.
+    Even if labels were mangled (e.g. scoped-label enforcement on certain
+    GitLab versions dropped the Mirrored-From::B label), the description
+    footer should catch the loop because it references B's instance URL.
     """
     inst_b = _make_instance(2, "B", "https://gitlab-b.example.com")
     inst_c = _make_instance(3, "C", "https://gitlab-c.example.com")
@@ -1105,9 +1105,9 @@ async def test_chain_cb_footer_loop_prevention(mock_config):
             instance_pair=pair_cb,
         )
 
-    # Simulate scoped-label scenario: Mirrored-From::B was lost (replaced
-    # by Mirrored-From::A due to scoped-label semantics), but the footer
-    # still references B's instance URL.
+    # Simulate scenario where Mirrored-From::B was lost (e.g. replaced by
+    # Mirrored-From::A due to scoped-label enforcement on C's GitLab
+    # version), but the footer still references B's instance URL.
     footer = build_footer(
         source_instance_url="https://gitlab-b.example.com",
         source_project_path="group/proj-b",
