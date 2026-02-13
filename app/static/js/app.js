@@ -2148,7 +2148,7 @@ function renderMirrors(mirrors) {
                             <div class="action-dropdown-menu">
                                 <button data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id}); closeAllDropdowns();">Refresh Status</button>
                                 <button data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id}); closeAllDropdowns();">Verify Mirror</button>
-                                <button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>
+                                ${mirror.effective_issue_sync_enabled ? `<button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>` : ''}
                                 <button onclick="rotateMirrorToken(${mirror.id}); closeAllDropdowns();">Rotate Token</button>
                                 <div class="dropdown-divider"></div>
                                 <button class="text-danger" onclick="deleteMirror(${mirror.id}); closeAllDropdowns();">Delete</button>
@@ -2761,7 +2761,7 @@ function renderTreeNode(node, level, parentPath = '') {
                                     <div class="action-dropdown-menu">
                                         <button data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id}); closeAllDropdowns();">Refresh Status</button>
                                         <button data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id}); closeAllDropdowns();">Verify Mirror</button>
-                                        <button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>
+                                        ${mirror.effective_issue_sync_enabled ? `<button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>` : ''}
                                         <button onclick="rotateMirrorToken(${mirror.id}); closeAllDropdowns();">Rotate Token</button>
                                         <div class="dropdown-divider"></div>
                                         <button class="text-danger" onclick="deleteMirror(${mirror.id}); closeAllDropdowns();">Delete</button>
