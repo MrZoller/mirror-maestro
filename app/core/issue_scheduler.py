@@ -301,6 +301,19 @@ class IssueScheduler:
             logger.error(f"Instance pair {mirror.instance_pair_id} not found for config {config.id}")
             return
 
+        # Check effective issue_sync_enabled (mirror override → pair default)
+        effective_issue_sync = (
+            mirror.issue_sync_enabled
+            if mirror.issue_sync_enabled is not None
+            else pair.issue_sync_enabled
+        )
+        if not effective_issue_sync:
+            logger.info(
+                f"Skipping sync for config {config.id} - issue sync is disabled "
+                f"(mirror override: {mirror.issue_sync_enabled}, pair default: {pair.issue_sync_enabled})"
+            )
+            return
+
         # Issue sync always flows source → target, same as mirror direction.
         # mirror.source_project lives on pair.source_instance and
         # mirror.target_project lives on pair.target_instance for both push

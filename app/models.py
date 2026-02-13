@@ -63,6 +63,9 @@ class InstancePair(Base):
     # Additional GitLab UI mirror settings
     mirror_branch_regex: Mapped[Optional[str]] = mapped_column(String(255))
 
+    # Issue sync default for mirrors in this pair
+    issue_sync_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
     description: Mapped[Optional[str]] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -96,6 +99,7 @@ class Mirror(Base):
     mirror_trigger_builds: Mapped[Optional[bool]] = mapped_column(Boolean)
     only_mirror_protected_branches: Mapped[Optional[bool]] = mapped_column(Boolean)
     mirror_branch_regex: Mapped[Optional[str]] = mapped_column(String(255))
+    issue_sync_enabled: Mapped[Optional[bool]] = mapped_column(Boolean)
 
     # Status tracking
     mirror_id: Mapped[Optional[int]] = mapped_column(Integer)  # GitLab mirror ID

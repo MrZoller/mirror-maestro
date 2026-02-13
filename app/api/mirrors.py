@@ -197,6 +197,7 @@ class MirrorCreate(BaseModel):
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
     mirror_branch_regex: str | None = None
+    issue_sync_enabled: bool | None = None
     enabled: bool = True
 
     @field_validator('mirror_branch_regex')
@@ -322,6 +323,7 @@ class MirrorUpdate(BaseModel):
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
     mirror_branch_regex: str | None = None
+    issue_sync_enabled: bool | None = None
     enabled: bool | None = None
 
     @field_validator('mirror_branch_regex')
@@ -351,12 +353,14 @@ class MirrorResponse(BaseModel):
     mirror_trigger_builds: bool | None
     only_mirror_protected_branches: bool | None
     mirror_branch_regex: str | None
+    issue_sync_enabled: bool | None
     # Effective settings (mirror overrides -> pair defaults)
     effective_mirror_direction: str | None = None
     effective_mirror_overwrite_diverged: bool | None = None
     effective_mirror_trigger_builds: bool | None = None
     effective_only_mirror_protected_branches: bool | None = None
     effective_mirror_branch_regex: str | None = None
+    effective_issue_sync_enabled: bool | None = None
     mirror_id: int | None
     last_successful_update: str | None
     last_update_at: str | None  # Last update attempt timestamp
@@ -442,6 +446,11 @@ async def _resolve_effective_settings(
         if mirror.mirror_branch_regex is not None
         else pair.mirror_branch_regex
     )
+    issue_sync_enabled = (
+        mirror.issue_sync_enabled
+        if mirror.issue_sync_enabled is not None
+        else pair.issue_sync_enabled
+    )
 
     # Pull-only settings: if direction is push, treat as not applicable.
     if direction == "push":
@@ -454,6 +463,7 @@ async def _resolve_effective_settings(
         "effective_only_mirror_protected_branches": only_protected,
         "effective_mirror_trigger_builds": trigger_builds,
         "effective_mirror_branch_regex": branch_regex,
+        "effective_issue_sync_enabled": issue_sync_enabled,
     }
 
 
@@ -612,6 +622,7 @@ async def list_mirrors(
                 mirror_trigger_builds=mirror.mirror_trigger_builds,
                 only_mirror_protected_branches=mirror.only_mirror_protected_branches,
                 mirror_branch_regex=mirror.mirror_branch_regex,
+                issue_sync_enabled=mirror.issue_sync_enabled,
                 mirror_id=mirror.mirror_id,
                 last_successful_update=mirror.last_successful_update.isoformat() + "Z" if mirror.last_successful_update else None,
                 last_update_at=mirror.last_update_at.isoformat() + "Z" if mirror.last_update_at else None,
@@ -1133,6 +1144,11 @@ async def create_mirror(
         if mirror.mirror_branch_regex is not None
         else pair.mirror_branch_regex
     )
+    issue_sync_enabled = (
+        mirror.issue_sync_enabled
+        if mirror.issue_sync_enabled is not None
+        else pair.issue_sync_enabled
+    )
 
     # Trigger initial sync after creation (best effort)
     # This starts the actual data synchronization on GitLab
@@ -1195,11 +1211,13 @@ async def create_mirror(
         mirror_trigger_builds=db_mirror.mirror_trigger_builds,
         only_mirror_protected_branches=db_mirror.only_mirror_protected_branches,
         mirror_branch_regex=db_mirror.mirror_branch_regex,
+        issue_sync_enabled=db_mirror.issue_sync_enabled,
         effective_mirror_direction=direction,
         effective_mirror_overwrite_diverged=overwrite_diverged,
         effective_mirror_trigger_builds=trigger_builds if direction == "pull" else None,
         effective_only_mirror_protected_branches=only_protected,
         effective_mirror_branch_regex=branch_regex if direction == "pull" else None,
+        effective_issue_sync_enabled=issue_sync_enabled,
         mirror_id=db_mirror.mirror_id,
         last_successful_update=db_mirror.last_successful_update.isoformat() + "Z" if db_mirror.last_successful_update else None,
         last_update_at=db_mirror.last_update_at.isoformat() + "Z" if db_mirror.last_update_at else None,
@@ -1405,6 +1423,7 @@ async def get_mirror(
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,
         mirror_branch_regex=mirror.mirror_branch_regex,
+        issue_sync_enabled=mirror.issue_sync_enabled,
         mirror_id=mirror.mirror_id,
         last_successful_update=mirror.last_successful_update.isoformat() + "Z" if mirror.last_successful_update else None,
         last_update_at=mirror.last_update_at.isoformat() + "Z" if mirror.last_update_at else None,
@@ -1448,6 +1467,8 @@ async def update_mirror(
         mirror.only_mirror_protected_branches = mirror_update.only_mirror_protected_branches
     if "mirror_branch_regex" in fields:
         mirror.mirror_branch_regex = mirror_update.mirror_branch_regex
+    if "issue_sync_enabled" in fields:
+        mirror.issue_sync_enabled = mirror_update.issue_sync_enabled
     if "enabled" in fields:
         mirror.enabled = mirror_update.enabled
 
@@ -1574,6 +1595,7 @@ async def update_mirror(
         mirror_trigger_builds=mirror.mirror_trigger_builds,
         only_mirror_protected_branches=mirror.only_mirror_protected_branches,
         mirror_branch_regex=mirror.mirror_branch_regex,
+        issue_sync_enabled=mirror.issue_sync_enabled,
         mirror_id=mirror.mirror_id,
         last_successful_update=mirror.last_successful_update.isoformat() + "Z" if mirror.last_successful_update else None,
         last_update_at=mirror.last_update_at.isoformat() + "Z" if mirror.last_update_at else None,

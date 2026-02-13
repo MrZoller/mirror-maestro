@@ -1540,6 +1540,7 @@ function renderPairs(pairs) {
             const pieces = [];
             pieces.push(`<span class="text-muted">overwrite:</span> ${fmtBool(!!pair.mirror_overwrite_diverged)}`);
             pieces.push(`<span class="text-muted">only_protected:</span> ${fmtBool(!!pair.only_mirror_protected_branches)}`);
+            pieces.push(`<span class="text-muted">issue_sync:</span> ${fmtBool(!!pair.issue_sync_enabled)}`);
             if (direction === 'pull') {
                 pieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(!!pair.mirror_trigger_builds)}`);
                 pieces.push(`<span class="text-muted">regex:</span> ${fmtStr(pair.mirror_branch_regex)}`);
@@ -1581,6 +1582,10 @@ function renderPairs(pairs) {
                             <div class="checkbox-group">
                                 <input type="checkbox" id="edit-pair-only-protected-${pair.id}" ${pair.only_mirror_protected_branches ? 'checked' : ''}>
                                 <label for="edit-pair-only-protected-${pair.id}">Only mirror protected branches</label>
+                            </div>
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="edit-pair-issue-sync-${pair.id}" ${pair.issue_sync_enabled ? 'checked' : ''}>
+                                <label for="edit-pair-issue-sync-${pair.id}">Enable issue sync</label>
                             </div>
                             <div style="display:grid; gap:8px">
                                 <input class="table-input" id="edit-pair-regex-${pair.id}" value="${escapeHtml(pair.mirror_branch_regex || '')}" placeholder="Mirror branch regex (pull only)">
@@ -1659,6 +1664,7 @@ async function savePairEdit(id) {
     const overwriteEl = document.getElementById(`edit-pair-overwrite-${id}`);
     const triggerEl = document.getElementById(`edit-pair-trigger-${id}`);
     const onlyProtectedEl = document.getElementById(`edit-pair-only-protected-${id}`);
+    const issueSyncEl = document.getElementById(`edit-pair-issue-sync-${id}`);
     const regexEl = document.getElementById(`edit-pair-regex-${id}`);
     const userEl = document.getElementById(`edit-pair-user-${id}`);
     if (!nameEl || !dirEl || !overwriteEl || !onlyProtectedEl) return;
@@ -1676,6 +1682,7 @@ async function savePairEdit(id) {
         only_mirror_protected_branches: !!onlyProtectedEl.checked,
         mirror_trigger_builds: isPush ? false : !!triggerEl?.checked,
         mirror_branch_regex: isPush ? null : (regexRaw || null),
+        issue_sync_enabled: !!issueSyncEl?.checked,
     };
 
     try {
@@ -1728,6 +1735,7 @@ async function createPair() {
         mirror_trigger_builds: formData.get('mirror_trigger_builds') === 'on',
         only_mirror_protected_branches: formData.get('only_mirror_protected_branches') === 'on',
         mirror_branch_regex: branchRegexRaw || null,
+        issue_sync_enabled: formData.get('issue_sync_enabled') === 'on',
         description: formData.get('description') || ''
     };
 
@@ -1992,6 +2000,7 @@ function renderMirrors(mirrors) {
             if (dir) pieces.push(`<span class="badge badge-info">${escapeHtml(dir)}</span>`);
             pieces.push(`<span class="text-muted">overwrite:</span> ${fmtBool(mirror.effective_mirror_overwrite_diverged)}`);
             pieces.push(`<span class="text-muted">only_protected:</span> ${fmtBool(mirror.effective_only_mirror_protected_branches)}`);
+            pieces.push(`<span class="text-muted">issue_sync:</span> ${fmtBool(mirror.effective_issue_sync_enabled)}`);
             if (dir === 'pull') {
                 pieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(mirror.effective_mirror_trigger_builds)}`);
                 pieces.push(`<span class="text-muted">regex:</span> ${fmtStr(mirror.effective_mirror_branch_regex)}`);
@@ -2008,6 +2017,7 @@ function renderMirrors(mirrors) {
             const overwriteSel = overrideBoolSelectValue(mirror.mirror_overwrite_diverged);
             const onlyProtectedSel = overrideBoolSelectValue(mirror.only_mirror_protected_branches);
             const triggerSel = overrideBoolSelectValue(mirror.mirror_trigger_builds);
+            const issueSyncSel = overrideBoolSelectValue(mirror.issue_sync_enabled);
 
             const regexMode = (mirror.mirror_branch_regex === null || mirror.mirror_branch_regex === undefined) ? '__inherit__' : '__override__';
 
@@ -2042,6 +2052,13 @@ function renderMirrors(mirrors) {
                                     <option value="__inherit__"${triggerSel === '__inherit__' ? ' selected' : ''}>Inherit</option>
                                     <option value="true"${triggerSel === 'true' ? ' selected' : ''}>true</option>
                                     <option value="false"${triggerSel === 'false' ? ' selected' : ''}>false</option>
+                                </select>
+
+                                <label class="text-muted" for="edit-mirror-issue-sync-${mirror.id}">issue_sync</label>
+                                <select class="table-select" id="edit-mirror-issue-sync-${mirror.id}">
+                                    <option value="__inherit__"${issueSyncSel === '__inherit__' ? ' selected' : ''}>Inherit</option>
+                                    <option value="true"${issueSyncSel === 'true' ? ' selected' : ''}>true</option>
+                                    <option value="false"${issueSyncSel === 'false' ? ' selected' : ''}>false</option>
                                 </select>
 
                                 <label class="text-muted">branch regex (pull only)</label>
@@ -2131,7 +2148,7 @@ function renderMirrors(mirrors) {
                             <div class="action-dropdown-menu">
                                 <button data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id}); closeAllDropdowns();">Refresh Status</button>
                                 <button data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id}); closeAllDropdowns();">Verify Mirror</button>
-                                <button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>
+                                ${mirror.effective_issue_sync_enabled ? `<button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>` : ''}
                                 <button onclick="rotateMirrorToken(${mirror.id}); closeAllDropdowns();">Rotate Token</button>
                                 <div class="dropdown-divider"></div>
                                 <button class="text-danger" onclick="deleteMirror(${mirror.id}); closeAllDropdowns();">Delete</button>
@@ -2689,6 +2706,7 @@ function renderTreeNode(node, level, parentPath = '') {
                 if (dir) settingsPieces.push(`<span class="badge badge-info">${escapeHtml(dir)}</span>`);
                 settingsPieces.push(`<span class="text-muted">overwrite:</span> ${fmtBool(mirror.effective_mirror_overwrite_diverged)}`);
                 settingsPieces.push(`<span class="text-muted">only_protected:</span> ${fmtBool(mirror.effective_only_mirror_protected_branches)}`);
+                settingsPieces.push(`<span class="text-muted">issue_sync:</span> ${fmtBool(mirror.effective_issue_sync_enabled)}`);
                 if (dir === 'pull') {
                     settingsPieces.push(`<span class="text-muted">trigger:</span> ${fmtBool(mirror.effective_mirror_trigger_builds)}`);
                     settingsPieces.push(`<span class="text-muted">regex:</span> ${fmtStr(mirror.effective_mirror_branch_regex)}`);
@@ -2743,7 +2761,7 @@ function renderTreeNode(node, level, parentPath = '') {
                                     <div class="action-dropdown-menu">
                                         <button data-refresh-btn="${mirror.id}" onclick="refreshMirrorStatus(${mirror.id}); closeAllDropdowns();">Refresh Status</button>
                                         <button data-verify-btn="${mirror.id}" onclick="verifyMirror(${mirror.id}); closeAllDropdowns();">Verify Mirror</button>
-                                        <button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>
+                                        ${mirror.effective_issue_sync_enabled ? `<button onclick="showIssueMirrorConfig(${mirror.id}); closeAllDropdowns();">Issue Sync</button>` : ''}
                                         <button onclick="rotateMirrorToken(${mirror.id}); closeAllDropdowns();">Rotate Token</button>
                                         <div class="dropdown-divider"></div>
                                         <button class="text-danger" onclick="deleteMirror(${mirror.id}); closeAllDropdowns();">Delete</button>
@@ -2862,6 +2880,7 @@ async function saveMirrorEdit(id) {
     const overwriteEl = document.getElementById(`edit-mirror-overwrite-${id}`);
     const onlyProtectedEl = document.getElementById(`edit-mirror-only-protected-${id}`);
     const triggerEl = document.getElementById(`edit-mirror-trigger-${id}`);
+    const issueSyncEl = document.getElementById(`edit-mirror-issue-sync-${id}`);
     const regexModeEl = document.getElementById(`edit-mirror-regex-mode-${id}`);
     const regexEl = document.getElementById(`edit-mirror-regex-${id}`);
     const userModeEl = document.getElementById(`edit-mirror-user-mode-${id}`);
@@ -2880,6 +2899,7 @@ async function saveMirrorEdit(id) {
         mirror_overwrite_diverged: parseBoolOverride(overwriteEl.value),
         only_mirror_protected_branches: parseBoolOverride(onlyProtectedEl.value),
         mirror_trigger_builds: isPush ? null : parseBoolOverride(triggerEl?.value || '__inherit__'),
+        issue_sync_enabled: parseBoolOverride(issueSyncEl?.value || '__inherit__'),
         mirror_branch_regex: null,
     };
 
@@ -3111,7 +3131,7 @@ async function searchProjectsForMirror(side) {
 
 function resetMirrorOverrides() {
     // Reset all select overrides to "inherit from pair"
-    const selectIds = ['mirror-overwrite', 'mirror-trigger', 'mirror-only-protected'];
+    const selectIds = ['mirror-overwrite', 'mirror-trigger', 'mirror-only-protected', 'mirror-issue-sync'];
     selectIds.forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.value = '__inherit__';
@@ -3212,6 +3232,12 @@ function updateMirrorFormPairDefaults() {
         if (inheritOpt) inheritOpt.textContent = `Inherit from pair (${fmtBool(pair.mirror_trigger_builds)})`;
     }
 
+    const issueSyncEl = document.getElementById('mirror-issue-sync');
+    if (issueSyncEl) {
+        const inheritOpt = issueSyncEl.querySelector('option[value="__inherit__"]');
+        if (inheritOpt) inheritOpt.textContent = `Inherit from pair (${fmtBool(pair.issue_sync_enabled)})`;
+    }
+
     // Update placeholders for text inputs to show pair defaults
     const regexEl = document.getElementById('mirror-branch-regex');
     if (regexEl) {
@@ -3286,6 +3312,10 @@ async function createMirror() {
     const onlyProtectedEl = document.getElementById('mirror-only-protected');
     if (onlyProtectedEl && onlyProtectedEl.value !== '__inherit__') {
         data.only_mirror_protected_branches = onlyProtectedEl.value === 'true';
+    }
+    const issueSyncEl = document.getElementById('mirror-issue-sync');
+    if (issueSyncEl && issueSyncEl.value !== '__inherit__') {
+        data.issue_sync_enabled = issueSyncEl.value === 'true';
     }
 
     const regexRaw = (formData.get('mirror_branch_regex') || '').toString().trim();

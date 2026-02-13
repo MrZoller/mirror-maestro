@@ -35,6 +35,7 @@ async def init_db():
     # Run migrations for existing databases
     await _migrate_add_mirror_status_columns()
     await _migrate_add_instance_version_columns()
+    await _migrate_add_issue_sync_enabled_columns()
     # Clean up orphaned issue sync data from previously deleted mirrors
     await _cleanup_orphaned_issue_sync_data()
 
@@ -114,6 +115,39 @@ async def _migrate_add_instance_version_columns():
                     ))
                 except Exception as e:
                     logging.debug(f"Could not add {col_name} column: {e}")
+
+
+async def _migrate_add_issue_sync_enabled_columns():
+    """
+    Add issue_sync_enabled column to instance_pairs and mirrors tables
+    if they don't exist (for existing databases predating this feature).
+    """
+    import logging
+    from sqlalchemy import text, inspect
+
+    async with engine.begin() as conn:
+        for table_name, default_clause in [
+            ('instance_pairs', ' DEFAULT FALSE'),
+            ('mirrors', ''),
+        ]:
+            def get_columns(sync_conn, tbl=table_name):
+                insp = inspect(sync_conn)
+                try:
+                    columns = insp.get_columns(tbl)
+                    return {col['name'] for col in columns}
+                except Exception:
+                    return set()
+
+            existing_columns = await conn.run_sync(get_columns)
+
+            if 'issue_sync_enabled' not in existing_columns:
+                logging.info(f"Adding issue_sync_enabled column to {table_name} table")
+                try:
+                    await conn.execute(text(
+                        f"ALTER TABLE {table_name} ADD COLUMN issue_sync_enabled BOOLEAN{default_clause}"
+                    ))
+                except Exception as e:
+                    logging.debug(f"Could not add issue_sync_enabled column to {table_name}: {e}")
 
 
 async def _cleanup_orphaned_issue_sync_data():
