@@ -396,8 +396,10 @@ async def test_transaction_rollback_on_failure(db_session):
 
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
     mock_target.id = 2
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):
@@ -472,8 +474,10 @@ async def test_idempotency_detects_orphaned_issues(db_session):
 
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
     mock_target.id = 2
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):
@@ -534,8 +538,10 @@ async def test_resource_cleanup_detects_orphans(db_session):
 
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
     mock_target.id = 2
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     # Create orphaned comment mapping (no parent issue mapping)
@@ -599,8 +605,10 @@ async def test_circuit_breaker_integration(db_session):
 
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
     mock_target.id = 2
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):
@@ -804,8 +812,10 @@ async def test_configurable_circuit_breaker_integration(db_session):
     mock_mirror = Mock(spec=Mirror)
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
     mock_target.id = 2
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):
