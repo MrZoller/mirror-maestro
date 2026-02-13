@@ -1446,3 +1446,78 @@ async def test_verify_mirrors_batch_empty(client):
     assert resp.status_code == 200
     assert resp.json() == []
 
+
+@pytest.mark.asyncio
+async def test_issue_sync_enabled_two_tier_resolution(client, session_maker, monkeypatch):
+    """Test that issue_sync_enabled follows the two-tier resolution pattern:
+    mirror override → pair default."""
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.inits.clear()
+    FakeGitLabClient.pull_calls.clear()
+    FakeGitLabClient.pull_mirrors.clear()
+    FakeGitLabClient.token_create_calls.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+
+    # Create pair with issue_sync_enabled=True
+    resp = await client.post("/api/pairs", json={
+        "name": "pair-issue-sync",
+        "source_instance_id": src_id,
+        "target_instance_id": tgt_id,
+        "mirror_direction": "pull",
+        "issue_sync_enabled": True,
+    })
+    assert resp.status_code == 201
+    pair_id = resp.json()["id"]
+    assert resp.json()["issue_sync_enabled"] is True
+
+    # Create mirror without issue_sync_enabled override -> inherits from pair
+    resp = await client.post("/api/mirrors", json={
+        "instance_pair_id": pair_id,
+        "source_project_id": 1,
+        "source_project_path": "group/proj",
+        "target_project_id": 2,
+        "target_project_path": "group/proj-mirror",
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    mirror_id = data["id"]
+    assert data["issue_sync_enabled"] is None  # no override
+    assert data["effective_issue_sync_enabled"] is True  # inherited from pair
+
+    # Get mirror and verify
+    resp = await client.get(f"/api/mirrors/{mirror_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["issue_sync_enabled"] is None
+    assert data["effective_issue_sync_enabled"] is True
+
+    # Override at mirror level to False
+    resp = await client.put(f"/api/mirrors/{mirror_id}", json={"issue_sync_enabled": False})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["issue_sync_enabled"] is False
+    assert data["effective_issue_sync_enabled"] is False  # mirror override wins
+
+    # Clear the override (set to null) -> inherits from pair again
+    resp = await client.put(f"/api/mirrors/{mirror_id}", json={"issue_sync_enabled": None})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["issue_sync_enabled"] is None
+    assert data["effective_issue_sync_enabled"] is True  # back to pair default
+
+    # Update pair to disable issue sync
+    resp = await client.put(f"/api/pairs/{pair_id}", json={"issue_sync_enabled": False})
+    assert resp.status_code == 200
+    assert resp.json()["issue_sync_enabled"] is False
+
+    # Mirror should now inherit False
+    resp = await client.get(f"/api/mirrors/{mirror_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["issue_sync_enabled"] is None
+    assert data["effective_issue_sync_enabled"] is False
+

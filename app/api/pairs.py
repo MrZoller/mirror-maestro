@@ -70,6 +70,7 @@ class InstancePairCreate(BaseModel):
     mirror_trigger_builds: bool = False
     only_mirror_protected_branches: bool = False
     mirror_branch_regex: str | None = None
+    issue_sync_enabled: bool = False
     description: str = ""
 
     @field_validator('name')
@@ -141,6 +142,7 @@ class InstancePairUpdate(BaseModel):
     mirror_trigger_builds: bool | None = None
     only_mirror_protected_branches: bool | None = None
     mirror_branch_regex: str | None = None
+    issue_sync_enabled: bool | None = None
     description: str | None = None
 
     @field_validator('name')
@@ -204,6 +206,7 @@ class InstancePairResponse(BaseModel):
     mirror_trigger_builds: bool
     only_mirror_protected_branches: bool
     mirror_branch_regex: str | None
+    issue_sync_enabled: bool
     description: str | None
     created_at: str
     updated_at: str
@@ -263,6 +266,7 @@ async def list_pairs(
             mirror_trigger_builds=pair.mirror_trigger_builds,
             only_mirror_protected_branches=pair.only_mirror_protected_branches,
             mirror_branch_regex=pair.mirror_branch_regex,
+            issue_sync_enabled=pair.issue_sync_enabled,
             description=pair.description,
             created_at=pair.created_at.isoformat() + "Z",
             updated_at=pair.updated_at.isoformat() + "Z"
@@ -341,6 +345,7 @@ async def create_pair(
         mirror_trigger_builds=pair.mirror_trigger_builds,
         only_mirror_protected_branches=pair.only_mirror_protected_branches,
         mirror_branch_regex=pair.mirror_branch_regex,
+        issue_sync_enabled=pair.issue_sync_enabled,
         description=pair.description
     )
     db.add(db_pair)
@@ -357,6 +362,7 @@ async def create_pair(
         mirror_trigger_builds=db_pair.mirror_trigger_builds,
         only_mirror_protected_branches=db_pair.only_mirror_protected_branches,
         mirror_branch_regex=db_pair.mirror_branch_regex,
+        issue_sync_enabled=db_pair.issue_sync_enabled,
         description=db_pair.description,
         created_at=db_pair.created_at.isoformat() + "Z",
         updated_at=db_pair.updated_at.isoformat() + "Z",
@@ -390,6 +396,7 @@ async def get_pair(
         mirror_trigger_builds=pair.mirror_trigger_builds,
         only_mirror_protected_branches=pair.only_mirror_protected_branches,
         mirror_branch_regex=pair.mirror_branch_regex,
+        issue_sync_enabled=pair.issue_sync_enabled,
         description=pair.description,
         created_at=pair.created_at.isoformat() + "Z",
         updated_at=pair.updated_at.isoformat() + "Z"
@@ -479,6 +486,8 @@ async def update_pair(
         pair.only_mirror_protected_branches = pair_update.only_mirror_protected_branches
     if "mirror_branch_regex" in fields:
         pair.mirror_branch_regex = pair_update.mirror_branch_regex
+    if "issue_sync_enabled" in fields:
+        pair.issue_sync_enabled = pair_update.issue_sync_enabled
     if "description" in fields:
         pair.description = pair_update.description
 
@@ -495,6 +504,7 @@ async def update_pair(
         mirror_trigger_builds=pair.mirror_trigger_builds,
         only_mirror_protected_branches=pair.only_mirror_protected_branches,
         mirror_branch_regex=pair.mirror_branch_regex,
+        issue_sync_enabled=pair.issue_sync_enabled,
         description=pair.description,
         created_at=pair.created_at.isoformat() + "Z",
         updated_at=pair.updated_at.isoformat() + "Z",

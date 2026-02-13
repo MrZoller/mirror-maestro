@@ -306,6 +306,10 @@
                             <input type="checkbox" id="pair-only-protected" name="only_mirror_protected_branches">
                             <label for="pair-only-protected">Only mirror protected branches</label>
                         </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="pair-issue-sync" name="issue_sync_enabled">
+                            <label for="pair-issue-sync">Enable issue sync</label>
+                        </div>
                         <div class="form-row mt-10">
                             <div class="form-group">
                                 <label for="pair-branch-regex">Mirror branch regex</label>
@@ -431,6 +435,14 @@
                             <div class="form-group">
                                 <label for="mirror-trigger">Trigger builds (pull only)</label>
                                 <select id="mirror-trigger" name="mirror_trigger_builds" class="form-select">
+                                    <option value="__inherit__" selected>Inherit from pair</option>
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="mirror-issue-sync">Issue sync</label>
+                                <select id="mirror-issue-sync" name="issue_sync_enabled" class="form-select">
                                     <option value="__inherit__" selected>Inherit from pair</option>
                                     <option value="true">Yes</option>
                                     <option value="false">No</option>
