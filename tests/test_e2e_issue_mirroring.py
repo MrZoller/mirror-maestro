@@ -167,7 +167,7 @@ async def test_issue_sync_basic_flow(client, e2e_config_dual, resource_tracker):
     assert "This issue should be mirrored" in target_issue["description"]
 
     # Verify labels (including Mirrored-From and PM labels)
-    assert "Mirrored-From::instance-" in " ".join(target_issue["labels"])
+    assert "Mirrored-From::" in " ".join(target_issue["labels"])
     assert "bug" in target_issue["labels"]
     assert "priority::high" in target_issue["labels"]
 
@@ -396,8 +396,10 @@ async def test_transaction_rollback_on_failure(db_session):
 
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
     mock_target.id = 2
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):
@@ -472,8 +474,10 @@ async def test_idempotency_detects_orphaned_issues(db_session):
 
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
     mock_target.id = 2
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):
@@ -534,8 +538,10 @@ async def test_resource_cleanup_detects_orphans(db_session):
 
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
     mock_target.id = 2
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     # Create orphaned comment mapping (no parent issue mapping)
@@ -599,8 +605,10 @@ async def test_circuit_breaker_integration(db_session):
 
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
     mock_target.id = 2
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):
@@ -804,8 +812,10 @@ async def test_configurable_circuit_breaker_integration(db_session):
     mock_mirror = Mock(spec=Mirror)
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
     mock_target.id = 2
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):

@@ -159,9 +159,47 @@ def convert_pm_fields_to_labels(
     return labels
 
 
-def get_mirror_from_label(instance_id: int) -> str:
-    """Get the Mirrored-From label name for an instance."""
-    return f"{MIRROR_FROM_LABEL_PREFIX}::instance-{instance_id}"
+def _extract_hostname(url: str) -> str:
+    """Extract hostname (with non-standard port) from a URL for use in labels.
+
+    Standard ports (80 for http, 443 for https) are omitted.
+    Examples:
+        https://gitlab.example.com       → gitlab.example.com
+        https://gitlab.example.com:8443  → gitlab.example.com:8443
+        http://10.0.0.1:8080/            → 10.0.0.1:8080
+    """
+    parsed = urlparse(url)
+    hostname = parsed.hostname or parsed.netloc or url
+    scheme = parsed.scheme or "https"
+
+    # parsed.port raises ValueError on malformed ports (e.g. ":abc")
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+
+    # Include port only if non-standard
+    standard_ports = {"http": 80, "https": 443}
+    if port and port != standard_ports.get(scheme):
+        return f"{hostname}:{port}"
+    return hostname
+
+
+def get_mirror_from_label(instance_url: str) -> str:
+    """Get the Mirrored-From label name for a GitLab instance.
+
+    Uses the instance URL hostname as a globally unique identifier,
+    ensuring labels are unambiguous across multiple Mirror Maestro
+    deployments that share GitLab instances.
+
+    Args:
+        instance_url: The GitLab instance URL (e.g. https://gitlab.example.com)
+
+    Returns:
+        Label string like 'Mirrored-From::gitlab.example.com'
+    """
+    host = _extract_hostname(instance_url)
+    return f"{MIRROR_FROM_LABEL_PREFIX}::{host}"
 
 
 def extract_mirror_urls_from_description(description: Optional[str]) -> Set[str]:
@@ -480,11 +518,30 @@ class IssueSyncEngine:
 
         # Cache for labels
         self.target_labels_cache: Dict[str, Dict[str, Any]] = {}
-        self.mirror_from_label: str = get_mirror_from_label(source_instance.id)
+        self.mirror_from_label: str = get_mirror_from_label(source_instance.url)
 
         # Loop prevention: label that indicates issue originated from target instance
         # If a source issue has this label, it was mirrored FROM the target, so skip it
-        self.originated_from_target_label: str = get_mirror_from_label(target_instance.id)
+        self.originated_from_target_label: str = get_mirror_from_label(target_instance.url)
+
+        # Backward compatibility: also recognise the legacy label format
+        # (Mirrored-From::instance-{id}) used before URL-based identifiers.
+        # Without this, issues tagged with the old format after an upgrade
+        # would not be detected by loop prevention, risking duplicates.
+        #
+        # NOTE: The legacy check uses local DB IDs which can collide across
+        # separate MM deployments — the same limitation that existed before
+        # URL-based labels.  This is an accepted tradeoff: the legacy check
+        # prevents duplicates during the single-instance upgrade transition,
+        # while the new URL-based labels handle the multi-instance case.
+        # Once issues are re-synced with new labels the legacy path becomes
+        # a no-op.
+        self._originated_from_target_label_legacy: str = (
+            f"{MIRROR_FROM_LABEL_PREFIX}::instance-{target_instance.id}"
+        )
+        self._mirror_from_label_legacy: str = (
+            f"{MIRROR_FROM_LABEL_PREFIX}::instance-{source_instance.id}"
+        )
 
     async def _execute_gitlab_api_call(
         self,
@@ -706,8 +763,10 @@ class IssueSyncEngine:
         # Loop prevention: Skip issues that originated from the target instance
         # These have a Mirrored-From label pointing to the target, meaning they were
         # created by the reverse sync and shouldn't be synced back (would create duplicates)
+        # Also check the legacy label format for backward compatibility after upgrades.
         source_labels = source_issue.get("labels", [])
-        if self.originated_from_target_label in source_labels:
+        if (self.originated_from_target_label in source_labels
+                or self._originated_from_target_label_legacy in source_labels):
             logger.debug(
                 f"Skipping issue {source_issue_iid}: originated from target instance "
                 f"(has label '{self.originated_from_target_label}')"
@@ -1013,7 +1072,10 @@ class IssueSyncEngine:
         # Add Mirrored-From label
         labels.append(self.mirror_from_label)
 
-        # Add source labels if enabled
+        # Add source labels if enabled.
+        # Upstream Mirrored-From:: labels are intentionally preserved so that
+        # cyclic topologies (A→B→C→A) can detect that an issue has already
+        # visited the target instance and skip it during loop prevention.
         if self.config.sync_labels:
             source_labels = source_issue.get("labels", [])
             labels.extend(source_labels)
@@ -1342,21 +1404,34 @@ class IssueSyncEngine:
 
         try:
             # Find orphaned issues on target
-            # Use limited pages for cleanup to avoid long-running operations
+            # Search both current and legacy label formats to catch issues
+            # created before the upgrade to URL-based labels.
             cleanup_max_pages = min(10, settings.max_pages_per_request)
-            target_issues = await self._execute_gitlab_api_call(
-                self.target_client.get_issues,
-                "cleanup_fetch_target_issues",
-                self.target_project_id,
-                labels=self.mirror_from_label,
-                state="all",
-                per_page=100,
-                get_all=True,
-                max_pages=cleanup_max_pages
-            )
+            target_issues = []
+            for label_to_search in (self.mirror_from_label, self._mirror_from_label_legacy):
+                batch = await self._execute_gitlab_api_call(
+                    self.target_client.get_issues,
+                    "cleanup_fetch_target_issues",
+                    self.target_project_id,
+                    labels=label_to_search,
+                    state="all",
+                    per_page=100,
+                    get_all=True,
+                    max_pages=cleanup_max_pages
+                )
+                target_issues.extend(batch)
+
+            # Deduplicate by issue ID (an issue may match both label formats)
+            seen_ids: Set[int] = set()
+            unique_issues = []
+            for issue in target_issues:
+                issue_id = issue.get("id")
+                if issue_id is not None and issue_id not in seen_ids:
+                    seen_ids.add(issue_id)
+                    unique_issues.append(issue)
 
             # Check each issue against database mappings
-            for issue in target_issues:
+            for issue in unique_issues:
                 target_issue_id = issue.get("id")
                 target_issue_iid = issue.get("iid")
                 if target_issue_id is None:
@@ -1456,40 +1531,39 @@ class IssueSyncEngine:
             Existing issue dict if found, None otherwise
         """
         try:
-            # Search for issues with our Mirrored-From label
-            # Search all pages (up to max limit) to avoid missing orphaned issues
-            # that may have moved beyond page 1 due to pagination order changes
-            target_issues = await self._execute_gitlab_api_call(
-                self.target_client.get_issues,
-                f"search_existing_issue_{source_issue_iid}",
-                self.target_project_id,
-                labels=self.mirror_from_label,
-                state="all",
-                per_page=100,
-                get_all=True,  # Search all pages to find orphaned issues
-                max_pages=settings.max_pages_per_request,  # Prevent unbounded pagination
-            )
-
-            # Limit the number of issues we check to prevent performance issues
-            max_issues_to_check = settings.max_issues_per_sync
-            issues_checked = 0
-
-            # Look for issue with matching source reference in description
             source_ref = f"{self.source_project_path}#{source_issue_iid}"
-            for issue in target_issues:
-                if issues_checked >= max_issues_to_check:
-                    logger.warning(
-                        f"Searched {max_issues_to_check} issues without finding match for source #{source_issue_iid}. "
-                        f"Consider increasing max_issues_per_sync if orphans are expected."
-                    )
-                    break
 
-                description = issue.get("description", "")
-                if source_ref in description and MIRROR_FOOTER_MARKER in description:
-                    logger.debug(f"Found existing target issue {issue.get('iid')} for source {source_issue_iid}")
-                    return issue
+            # Search using current URL-based label first, then fall back to
+            # legacy ID-based label for issues created before the upgrade.
+            for label_to_search in (self.mirror_from_label, self._mirror_from_label_legacy):
+                target_issues = await self._execute_gitlab_api_call(
+                    self.target_client.get_issues,
+                    f"search_existing_issue_{source_issue_iid}",
+                    self.target_project_id,
+                    labels=label_to_search,
+                    state="all",
+                    per_page=100,
+                    get_all=True,
+                    max_pages=settings.max_pages_per_request,
+                )
 
-                issues_checked += 1
+                max_issues_to_check = settings.max_issues_per_sync
+                issues_checked = 0
+
+                for issue in target_issues:
+                    if issues_checked >= max_issues_to_check:
+                        logger.warning(
+                            f"Searched {max_issues_to_check} issues without finding match for source #{source_issue_iid}. "
+                            f"Consider increasing max_issues_per_sync if orphans are expected."
+                        )
+                        break
+
+                    description = issue.get("description", "")
+                    if source_ref in description and MIRROR_FOOTER_MARKER in description:
+                        logger.debug(f"Found existing target issue {issue.get('iid')} for source {source_issue_iid}")
+                        return issue
+
+                    issues_checked += 1
 
             return None
         except Exception as e:
