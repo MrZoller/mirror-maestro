@@ -159,9 +159,42 @@ def convert_pm_fields_to_labels(
     return labels
 
 
-def get_mirror_from_label(instance_id: int) -> str:
-    """Get the Mirrored-From label name for an instance."""
-    return f"{MIRROR_FROM_LABEL_PREFIX}::instance-{instance_id}"
+def _extract_hostname(url: str) -> str:
+    """Extract hostname (with non-standard port) from a URL for use in labels.
+
+    Standard ports (80 for http, 443 for https) are omitted.
+    Examples:
+        https://gitlab.example.com       → gitlab.example.com
+        https://gitlab.example.com:8443  → gitlab.example.com:8443
+        http://10.0.0.1:8080/            → 10.0.0.1:8080
+    """
+    parsed = urlparse(url)
+    hostname = parsed.hostname or parsed.netloc or url
+    port = parsed.port
+    scheme = parsed.scheme or "https"
+
+    # Include port only if non-standard
+    standard_ports = {"http": 80, "https": 443}
+    if port and port != standard_ports.get(scheme):
+        return f"{hostname}:{port}"
+    return hostname
+
+
+def get_mirror_from_label(instance_url: str) -> str:
+    """Get the Mirrored-From label name for a GitLab instance.
+
+    Uses the instance URL hostname as a globally unique identifier,
+    ensuring labels are unambiguous across multiple Mirror Maestro
+    deployments that share GitLab instances.
+
+    Args:
+        instance_url: The GitLab instance URL (e.g. https://gitlab.example.com)
+
+    Returns:
+        Label string like 'Mirrored-From::gitlab.example.com'
+    """
+    host = _extract_hostname(instance_url)
+    return f"{MIRROR_FROM_LABEL_PREFIX}::{host}"
 
 
 def extract_mirror_urls_from_description(description: Optional[str]) -> Set[str]:
@@ -480,11 +513,11 @@ class IssueSyncEngine:
 
         # Cache for labels
         self.target_labels_cache: Dict[str, Dict[str, Any]] = {}
-        self.mirror_from_label: str = get_mirror_from_label(source_instance.id)
+        self.mirror_from_label: str = get_mirror_from_label(source_instance.url)
 
         # Loop prevention: label that indicates issue originated from target instance
         # If a source issue has this label, it was mirrored FROM the target, so skip it
-        self.originated_from_target_label: str = get_mirror_from_label(target_instance.id)
+        self.originated_from_target_label: str = get_mirror_from_label(target_instance.url)
 
     async def _execute_gitlab_api_call(
         self,
@@ -1016,7 +1049,14 @@ class IssueSyncEngine:
         # Add source labels if enabled
         if self.config.sync_labels:
             source_labels = source_issue.get("labels", [])
-            labels.extend(source_labels)
+            # Filter out Mirrored-From:: labels from source to prevent label
+            # accumulation in multi-hop chains (e.g. A→B→C). Each hop adds
+            # only its own Mirrored-From label via mirror_from_label above.
+            mirrored_from_prefix = f"{MIRROR_FROM_LABEL_PREFIX}::"
+            labels.extend(
+                l for l in source_labels
+                if not l.startswith(mirrored_from_prefix)
+            )
 
         # Convert PM fields to labels
         pm_labels = convert_pm_fields_to_labels(

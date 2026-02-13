@@ -167,7 +167,7 @@ async def test_issue_sync_basic_flow(client, e2e_config_dual, resource_tracker):
     assert "This issue should be mirrored" in target_issue["description"]
 
     # Verify labels (including Mirrored-From and PM labels)
-    assert "Mirrored-From::instance-" in " ".join(target_issue["labels"])
+    assert "Mirrored-From::" in " ".join(target_issue["labels"])
     assert "bug" in target_issue["labels"]
     assert "priority::high" in target_issue["labels"]
 

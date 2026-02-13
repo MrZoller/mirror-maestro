@@ -11,6 +11,7 @@ from app.core.issue_sync import (
     build_footer,
     convert_pm_fields_to_labels,
     get_mirror_from_label,
+    _extract_hostname,
     extract_mirror_urls_from_description,
     extract_filename_from_url,
     replace_urls_in_description,
@@ -123,9 +124,31 @@ def test_convert_pm_fields_to_labels_empty():
 
 
 def test_get_mirror_from_label():
-    """Test mirror-from label generation."""
-    label = get_mirror_from_label(123)
-    assert label == "Mirrored-From::instance-123"
+    """Test mirror-from label generation uses URL hostname."""
+    label = get_mirror_from_label("https://gitlab.example.com")
+    assert label == "Mirrored-From::gitlab.example.com"
+
+    # With non-standard port
+    label = get_mirror_from_label("https://gitlab.example.com:8443")
+    assert label == "Mirrored-From::gitlab.example.com:8443"
+
+    # Standard HTTPS port is omitted
+    label = get_mirror_from_label("https://gitlab.example.com:443")
+    assert label == "Mirrored-From::gitlab.example.com"
+
+    # IP address with port
+    label = get_mirror_from_label("http://10.0.0.1:8080")
+    assert label == "Mirrored-From::10.0.0.1:8080"
+
+
+def test_extract_hostname():
+    """Test hostname extraction from URLs."""
+    assert _extract_hostname("https://gitlab.example.com") == "gitlab.example.com"
+    assert _extract_hostname("https://gitlab.example.com/") == "gitlab.example.com"
+    assert _extract_hostname("https://gitlab.example.com:8443") == "gitlab.example.com:8443"
+    assert _extract_hostname("http://10.0.0.1:8080/") == "10.0.0.1:8080"
+    assert _extract_hostname("https://gitlab.example.com:443") == "gitlab.example.com"
+    assert _extract_hostname("http://gitlab.example.com:80") == "gitlab.example.com"
 
 
 def test_extract_mirror_urls_from_description():
@@ -323,8 +346,8 @@ async def test_prepare_labels(mock_config, mock_mirror, mock_instances, mock_pai
 
         labels = engine._prepare_labels(source_issue)
 
-        # Should include Mirrored-From label
-        assert "Mirrored-From::instance-1" in labels
+        # Should include Mirrored-From label based on source URL hostname
+        assert "Mirrored-From::gitlab-source.example.com" in labels
 
         # Should include source labels
         assert "bug" in labels
@@ -417,8 +440,8 @@ async def test_sync_engine_loop_prevention(mock_config, mock_mirror, mock_instan
         )
 
         # Verify the originated_from_target_label is set correctly
-        # Target instance ID is 2, so label should be Mirrored-From::instance-2
-        assert engine.originated_from_target_label == "Mirrored-From::instance-2"
+        # Target instance URL is https://gitlab-target.example.com
+        assert engine.originated_from_target_label == "Mirrored-From::gitlab-target.example.com"
 
         # Source issue that originated from target (has the target's Mirrored-From label)
         # This simulates an issue on source that was originally mirrored from target
@@ -427,7 +450,7 @@ async def test_sync_engine_loop_prevention(mock_config, mock_mirror, mock_instan
             "iid": 50,
             "title": "Issue that came from target",
             "description": "This issue was synced from target to source",
-            "labels": ["bug", "Mirrored-From::instance-2"],  # Has target's label
+            "labels": ["bug", "Mirrored-From::gitlab-target.example.com"],  # Has target's label
             "web_url": "https://gitlab-source.example.com/group/source/-/issues/50",
         }
 
@@ -450,7 +473,7 @@ async def test_sync_engine_loop_prevention(mock_config, mock_mirror, mock_instan
             "errors": [],
         }
 
-        # Test: Issue with target's Mirrored-From label should be skipped
+        # Test: Issue with target's Mirrored-From label (target hostname) should be skipped
         await engine._sync_issue(source_issue_from_target, stats)
 
         assert stats["issues_processed"] == 1
@@ -484,8 +507,9 @@ async def test_sync_engine_loop_prevention(mock_config, mock_mirror, mock_instan
 async def test_sync_engine_loop_prevention_with_different_label(mock_config, mock_mirror, mock_instances, mock_pair):
     """Test that issues with a DIFFERENT Mirrored-From label are NOT skipped.
 
-    An issue with Mirrored-From::instance-3 (a third instance) should still be synced,
-    only Mirrored-From::instance-{target_id} should be skipped.
+    An issue with Mirrored-From::gitlab-third.example.com (a third instance) should
+    still be synced, only Mirrored-From::{target_hostname} should be skipped.
+    This is the key behavior that enables multi-hop syncing (A→B→C).
     """
     source, target = mock_instances
     db = AsyncMock()
@@ -506,7 +530,7 @@ async def test_sync_engine_loop_prevention_with_different_label(mock_config, moc
             "iid": 60,
             "title": "Issue from third instance",
             "description": "This came from a third GitLab",
-            "labels": ["bug", "Mirrored-From::instance-3"],  # Different instance ID
+            "labels": ["bug", "Mirrored-From::gitlab-third.example.com"],  # Different instance
             "web_url": "https://gitlab-source.example.com/group/source/-/issues/60",
         }
 
@@ -527,11 +551,162 @@ async def test_sync_engine_loop_prevention_with_different_label(mock_config, moc
         with patch.object(engine, '_create_target_issue', new_callable=AsyncMock) as mock_create:
             await engine._sync_issue(issue_from_third_instance, stats)
 
-            # Should NOT be skipped - the label is for instance-3, not instance-2 (target)
+            # Should NOT be skipped - the label is for a different hostname
             assert stats["issues_processed"] == 1
             assert stats["issues_skipped"] == 0
             # Should proceed to create since no mapping exists
             assert mock_create.called
+
+
+@pytest.mark.asyncio
+async def test_multi_instance_issue_chain_a_to_b_to_c(mock_config, mock_mirror):
+    """Test issue syncing across multiple Mirror Maestro instances (A→B→C).
+
+    Scenario:
+      MM1 manages instances A and B.
+      MM2 manages instances B and C.
+      An issue on A is synced to B by MM1, then from B to C by MM2.
+
+    Previously, using local DB IDs (instance-1, instance-2) could cause ID
+    collisions across MM instances, incorrectly skipping issues. Using URL
+    hostnames as identifiers resolves this.
+    """
+    # --- MM1: Instance A (id=1) → Instance B (id=2) ---
+    instance_a = MagicMock(spec=GitLabInstance)
+    instance_a.id = 1
+    instance_a.name = "GitLab A"
+    instance_a.url = "https://gitlab-a.example.com"
+    instance_a.encrypted_token = "enc:a-token"
+
+    instance_b_mm1 = MagicMock(spec=GitLabInstance)
+    instance_b_mm1.id = 2
+    instance_b_mm1.name = "GitLab B"
+    instance_b_mm1.url = "https://gitlab-b.example.com"
+    instance_b_mm1.encrypted_token = "enc:b-token"
+
+    pair_ab = MagicMock(spec=InstancePair)
+    pair_ab.id = 1
+    pair_ab.source_instance_id = 1
+    pair_ab.target_instance_id = 2
+    pair_ab.mirror_direction = "push"
+
+    db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=mock_result)
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine_mm1 = IssueSyncEngine(
+            db=db, config=mock_config, mirror=mock_mirror,
+            source_instance=instance_a, target_instance=instance_b_mm1,
+            instance_pair=pair_ab,
+        )
+
+    # Verify labels use URL hostnames, not DB IDs
+    assert engine_mm1.mirror_from_label == "Mirrored-From::gitlab-a.example.com"
+    assert engine_mm1.originated_from_target_label == "Mirrored-From::gitlab-b.example.com"
+
+    # --- MM2: Instance B (id=1 in MM2!) → Instance C (id=2 in MM2) ---
+    # Note: B has id=1 in MM2 (same auto-increment starting point, different DB)
+    instance_b_mm2 = MagicMock(spec=GitLabInstance)
+    instance_b_mm2.id = 1  # Different DB ID, same GitLab instance
+    instance_b_mm2.name = "GitLab B"
+    instance_b_mm2.url = "https://gitlab-b.example.com"  # Same URL as in MM1
+    instance_b_mm2.encrypted_token = "enc:b-token"
+
+    instance_c = MagicMock(spec=GitLabInstance)
+    instance_c.id = 2
+    instance_c.name = "GitLab C"
+    instance_c.url = "https://gitlab-c.example.com"
+    instance_c.encrypted_token = "enc:c-token"
+
+    pair_bc = MagicMock(spec=InstancePair)
+    pair_bc.id = 1
+    pair_bc.source_instance_id = 1
+    pair_bc.target_instance_id = 2
+    pair_bc.mirror_direction = "push"
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine_mm2 = IssueSyncEngine(
+            db=db, config=mock_config, mirror=mock_mirror,
+            source_instance=instance_b_mm2, target_instance=instance_c,
+            instance_pair=pair_bc,
+        )
+
+    # MM2 uses URL hostnames too — B and C are correctly identified
+    assert engine_mm2.mirror_from_label == "Mirrored-From::gitlab-b.example.com"
+    assert engine_mm2.originated_from_target_label == "Mirrored-From::gitlab-c.example.com"
+
+    # Issue on B that was mirrored from A (by MM1)
+    issue_on_b_from_a = {
+        "id": 100, "iid": 10,
+        "title": "Issue originally from A",
+        "description": "Created on A, mirrored to B",
+        "labels": ["bug", "Mirrored-From::gitlab-a.example.com"],
+        "web_url": "https://gitlab-b.example.com/group/project/-/issues/10",
+    }
+
+    stats = {
+        "issues_processed": 0, "issues_created": 0, "issues_updated": 0,
+        "issues_skipped": 0, "issues_failed": 0, "errors": [],
+    }
+
+    # MM2 syncing B→C should NOT skip this issue
+    # (it has Mirrored-From::gitlab-a.example.com, not gitlab-c.example.com)
+    with patch.object(engine_mm2, '_create_target_issue', new_callable=AsyncMock) as mock_create:
+        await engine_mm2._sync_issue(issue_on_b_from_a, stats)
+        assert stats["issues_skipped"] == 0
+        assert mock_create.called, "Issue from A should be synced from B to C"
+
+
+@pytest.mark.asyncio
+async def test_multi_instance_label_filtering_in_prepare_labels(mock_config, mock_mirror):
+    """Test that Mirrored-From labels from upstream hops are filtered during propagation.
+
+    When syncing B→C, source labels on B may include Mirrored-From::gitlab-a.example.com
+    (from A→B sync). This should be filtered out so C only gets
+    Mirrored-From::gitlab-b.example.com.
+    """
+    instance_b = MagicMock(spec=GitLabInstance)
+    instance_b.id = 1
+    instance_b.url = "https://gitlab-b.example.com"
+    instance_b.encrypted_token = "enc:b-token"
+
+    instance_c = MagicMock(spec=GitLabInstance)
+    instance_c.id = 2
+    instance_c.url = "https://gitlab-c.example.com"
+    instance_c.encrypted_token = "enc:c-token"
+
+    pair_bc = MagicMock(spec=InstancePair)
+    pair_bc.id = 1
+    pair_bc.source_instance_id = 1
+    pair_bc.target_instance_id = 2
+    pair_bc.mirror_direction = "push"
+
+    db = AsyncMock()
+
+    with patch('app.core.issue_sync.GitLabClient'):
+        engine = IssueSyncEngine(
+            db=db, config=mock_config, mirror=mock_mirror,
+            source_instance=instance_b, target_instance=instance_c,
+            instance_pair=pair_bc,
+        )
+
+    # Source issue on B has Mirrored-From label from A→B sync
+    source_issue = {
+        "labels": ["bug", "priority::high", "Mirrored-From::gitlab-a.example.com"],
+        "milestone": None, "iteration": None, "epic": None, "assignees": [],
+    }
+
+    labels = engine._prepare_labels(source_issue)
+
+    # Should include the current hop's Mirrored-From label
+    assert "Mirrored-From::gitlab-b.example.com" in labels
+    # Should include regular source labels
+    assert "bug" in labels
+    assert "priority::high" in labels
+    # Should NOT include Mirrored-From labels from previous hops
+    assert "Mirrored-From::gitlab-a.example.com" not in labels
 
 
 # -------------------------------------------------------------------------

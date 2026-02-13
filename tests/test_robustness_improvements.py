@@ -500,7 +500,9 @@ async def test_find_existing_target_issue_found():
 
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):
@@ -543,7 +545,9 @@ async def test_find_existing_target_issue_not_found():
 
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):
@@ -578,7 +582,9 @@ async def test_find_existing_handles_search_failure():
     mock_mirror = Mock(spec=Mirror)
     mock_source = Mock(spec=GitLabInstance)
     mock_source.id = 1
+    mock_source.url = "https://source.gitlab.com"
     mock_target = Mock(spec=GitLabInstance)
+    mock_target.url = "https://target.gitlab.com"
     mock_pair = Mock(spec=InstancePair)
 
     with patch('app.core.issue_sync.GitLabClient'):

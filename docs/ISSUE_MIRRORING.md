@@ -80,7 +80,7 @@ Mirror Maestro's issue mirroring feature allows you to automatically synchronize
 **✅ Sync Labels** (default: enabled)
 - Copies labels from source to target
 - Auto-creates labels on target if they don't exist
-- Adds "Mirrored-From::instance-{id}" label for tracking
+- Adds "Mirrored-From::{hostname}" label for tracking
 
 **✅ Sync Attachments** (default: enabled)
 - Downloads attachments from source
@@ -182,18 +182,20 @@ GitLab Premium/Ultimate features (milestones, iterations, epics, assignees) are 
 
 To prevent infinite sync loops when using bidirectional mirroring (A→B and B→A), the sync engine:
 
-1. **Adds a "Mirrored-From" label** to every mirrored issue: `Mirrored-From::instance-{source_id}`
-2. **Skips issues with reverse label**: Before syncing, checks if the source issue has a `Mirrored-From::instance-{target_id}` label, indicating it originated from the target instance and shouldn't be synced back
+1. **Adds a "Mirrored-From" label** to every mirrored issue: `Mirrored-From::{source_hostname}`
+2. **Skips issues with reverse label**: Before syncing, checks if the source issue has a `Mirrored-From::{target_hostname}` label, indicating it originated from the target instance and shouldn't be synced back
+
+Labels use the GitLab instance **URL hostname** as the identifier (e.g. `Mirrored-From::gitlab.example.com`), which is globally unique. This ensures correct behavior even when multiple Mirror Maestro instances manage overlapping GitLab instances (see [Multi-Instance Deployments](#multi-instance-deployments) below).
 
 **How it works:**
 ```
-Instance A                          Instance B
------------                         -----------
+Instance A (gitlab-a.example.com)   Instance B (gitlab-b.example.com)
+---------------------------------   ---------------------------------
 Issue #100 (native)
      ↓ A→B sync
-                                    Issue #200 (Mirrored-From::instance-A)
+                                    Issue #200 (Mirrored-From::gitlab-a.example.com)
                                          ↓ B→A sync attempts
-                                    SKIPPED: has Mirrored-From::instance-A label
+                                    SKIPPED: has Mirrored-From::gitlab-a.example.com
                                     (target of B→A is A, so skip)
 ```
 
@@ -201,8 +203,35 @@ This means:
 - ✅ Issues sync one direction only (from their origin instance)
 - ✅ Updates to the original issue sync to mirrors
 - ✅ No duplicate issues created from bidirectional syncs
+- ✅ Works correctly across multiple Mirror Maestro instances
 - ⚠️ Edits made directly on mirrored issues will be overwritten by the next sync from the source
 - 💡 Best practice: Edit issues on their origin instance, use mirrors as read-only copies
+
+### Multi-Instance Deployments
+
+Mirror Maestro supports chaining multiple instances for multi-hop issue syncing. For example:
+
+```
+MM 1 (manages A ↔ B)              MM 2 (manages B ↔ C)
+========================           ========================
+GitLab A ←→ GitLab B              GitLab B ←→ GitLab C
+```
+
+This allows issues to flow A→B→C and C→B→A across network boundaries where no single Mirror Maestro instance can reach all three GitLab instances.
+
+**How multi-hop works:**
+```
+Issue created on A:
+  1. MM1 syncs A→B: issue on B gets "Mirrored-From::gitlab-a.example.com"
+  2. MM2 syncs B→C: checks for "Mirrored-From::gitlab-c.example.com" → not present → syncs
+     Issue on C gets "Mirrored-From::gitlab-b.example.com"
+
+Loop prevention:
+  3. MM2 syncs C→B: checks for "Mirrored-From::gitlab-b.example.com" on C → found → SKIPPED ✓
+  4. MM1 syncs B→A: checks for "Mirrored-From::gitlab-a.example.com" on B → found → SKIPPED ✓
+```
+
+**Label filtering**: When `sync_labels` is enabled, `Mirrored-From::` labels from upstream hops are automatically filtered out during propagation. Each issue on a target only receives a single `Mirrored-From` label identifying its immediate source instance.
 
 ### Concurrent Sync Protection
 
