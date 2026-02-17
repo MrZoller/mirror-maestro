@@ -487,6 +487,11 @@ function createTableEnhancer(table, tbody, config) {
     }
 
     function refresh() {
+        // Skip enhancer processing when tbody is in tree view mode.
+        // Tree view uses colspan group rows that the enhancer would
+        // misclassify as meta/placeholder rows and hide.
+        if (tbody.dataset.viewMode === 'tree') return;
+
         ensureUI();
         updateSelectOptions();
         applyFiltering();
@@ -1965,6 +1970,9 @@ function renderMirrors(mirrors) {
     const tbody = document.getElementById('mirrors-list');
     if (!tbody) return;
 
+    // Mark tbody as flat view so the table enhancer processes normally
+    tbody.dataset.viewMode = 'flat';
+
     if (mirrors.length === 0) {
         showEmptyState(
             tbody,
@@ -2617,6 +2625,9 @@ function renderMirrorsTree(mirrors) {
     const tbody = document.getElementById('mirrors-list');
     if (!tbody) return;
 
+    // Mark tbody as tree view so the table enhancer skips processing
+    tbody.dataset.viewMode = 'tree';
+
     if (mirrors.length === 0) {
         showEmptyState(
             tbody,
@@ -2848,13 +2859,20 @@ function beginMirrorEdit(id) {
     state.editing.mirrorId = id;
     state.editing.instanceId = null;
     state.editing.pairId = null;
+    // Edit controls require the flat table layout, so temporarily switch to flat
+    // if currently in tree view.
     renderMirrors(state.mirrors);
     setTimeout(() => applyMirrorEditControls(id), 0);
 }
 
 function cancelMirrorEdit() {
     state.editing.mirrorId = null;
-    renderMirrors(state.mirrors);
+    // Restore the correct view mode after cancelling edit
+    if (state.mirrorsPagination.viewMode === 'tree') {
+        renderMirrorsTree(state.mirrors);
+    } else {
+        renderMirrors(state.mirrors);
+    }
 }
 
 function applyMirrorEditControls(mirrorId) {
