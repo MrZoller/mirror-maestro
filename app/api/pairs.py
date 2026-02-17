@@ -732,9 +732,13 @@ async def sync_all_mirrors(
             continue
 
         try:
-            # Trigger mirror update with retry logic
-            def trigger_update():
-                return client.trigger_mirror_update(project_id, mirror.mirror_id)
+            # Trigger mirror update with retry logic (use correct method for direction)
+            if direction == "push":
+                def trigger_update():
+                    return client.trigger_mirror_update(project_id, mirror.mirror_id)
+            else:
+                def trigger_update():
+                    return client.trigger_pull_mirror_update(project_id)
 
             await rate_limiter.execute_with_retry(
                 trigger_update,
