@@ -3137,10 +3137,6 @@ table tbody tr:hover {
     font-weight: 400;
 }
 
-.tree-group-children {
-    display: table-row-group;
-}
-
 .tree-mirror-row {
     border-left: 3px solid var(--border-color);
 }
