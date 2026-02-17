@@ -120,6 +120,11 @@ class FakeGitLabClient:
                 mirror_branch_regex,
             )
         )
+        # Reflect state change in fake data so subsequent reads see the update
+        if enabled is not None and project_id in self.__class__.project_mirrors:
+            for gm in self.__class__.project_mirrors[project_id]:
+                if gm.get("id") == mirror_id:
+                    gm["enabled"] = enabled
         return {"id": mirror_id}
 
     def update_pull_mirror(
@@ -149,6 +154,9 @@ class FakeGitLabClient:
                 mirror_branch_regex,
             )
         )
+        # Reflect state change in fake data so subsequent reads see the update
+        if enabled is not None and project_id in self.__class__.pull_mirrors:
+            self.__class__.pull_mirrors[project_id]["enabled"] = enabled
         return {"id": project_id}
 
 
@@ -1520,4 +1528,231 @@ async def test_issue_sync_enabled_two_tier_resolution(client, session_maker, mon
     data = resp.json()
     assert data["issue_sync_enabled"] is None
     assert data["effective_issue_sync_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_trigger_update_re_enables_paused_pull_mirror(client, session_maker, monkeypatch):
+    """When a pull mirror is disabled/paused on GitLab, triggering sync should re-enable it first."""
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.trigger_pull_calls.clear()
+    FakeGitLabClient.update_pull_calls.clear()
+    FakeGitLabClient.pull_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="platform/proj",
+            target_project_id=2,
+            target_project_path="platform/proj",
+            mirror_id=77,
+            enabled=False,
+            last_update_status="failed",
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        mirror_id = m.id
+
+    # GitLab reports the mirror as disabled (paused due to failures)
+    FakeGitLabClient.pull_mirrors[2] = {
+        "id": 77,
+        "url": "https://src.example.com/platform/proj.git",
+        "enabled": False,
+        "update_status": "started",
+        "last_update_at": "2024-01-15T10:30:00Z",
+        "last_successful_update_at": None,
+        "last_error": "13:fetch remote: fatal: remote error: ...",
+    }
+
+    resp = await client.post(f"/api/mirrors/{mirror_id}/update")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "re_enabled_and_update_triggered"
+
+    # update_pull_mirror should have been called with enabled=True
+    assert len(FakeGitLabClient.update_pull_calls) == 1
+    update_call = FakeGitLabClient.update_pull_calls[-1]
+    # update_pull_calls format: (project_id, url, enabled, ...)
+    assert update_call[0] == 2  # target project_id
+    assert update_call[2] is True  # enabled=True
+
+    # trigger should have been called
+    assert len(FakeGitLabClient.trigger_pull_calls) == 1
+    assert FakeGitLabClient.trigger_pull_calls[-1] == (2,)
+
+    # Local DB should now have enabled=True
+    async with session_maker() as s:
+        m2 = (await s.execute(select(Mirror).where(Mirror.id == mirror_id))).scalar_one()
+        assert m2.enabled is True
+
+
+@pytest.mark.asyncio
+async def test_trigger_update_re_enables_paused_push_mirror(client, session_maker, monkeypatch):
+    """When a push mirror is disabled/paused on GitLab, triggering sync should re-enable it first."""
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.trigger_calls.clear()
+    FakeGitLabClient.update_calls.clear()
+    FakeGitLabClient.project_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="push")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=10,
+            source_project_path="platform/proj",
+            target_project_id=20,
+            target_project_path="platform/proj",
+            mirror_id=88,
+            enabled=False,
+            last_update_status="failed",
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        mirror_id = m.id
+
+    # GitLab reports the push mirror as disabled
+    FakeGitLabClient.project_mirrors[10] = [
+        {
+            "id": 88,
+            "url": "https://tgt.example.com/platform/proj.git",
+            "enabled": False,
+            "update_status": "started",
+            "last_update_at": "2024-01-15T10:30:00Z",
+            "last_successful_update_at": None,
+            "last_error": "13:fetch remote: fatal: ...",
+        }
+    ]
+
+    resp = await client.post(f"/api/mirrors/{mirror_id}/update")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "re_enabled_and_update_triggered"
+
+    # update_mirror should have been called with enabled=True
+    assert len(FakeGitLabClient.update_calls) == 1
+    update_call = FakeGitLabClient.update_calls[-1]
+    # update_calls format: (project_id, mirror_id, url, enabled, ...)
+    assert update_call[0] == 10  # source project_id
+    assert update_call[1] == 88  # mirror_id
+    assert update_call[3] is True  # enabled=True
+
+    # trigger should have been called
+    assert len(FakeGitLabClient.trigger_calls) == 1
+    assert FakeGitLabClient.trigger_calls[-1] == (10, 88)
+
+
+@pytest.mark.asyncio
+async def test_trigger_update_skips_re_enable_for_enabled_mirror(client, session_maker, monkeypatch):
+    """When a mirror is already enabled on GitLab, no re-enable call should be made."""
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.trigger_pull_calls.clear()
+    FakeGitLabClient.update_pull_calls.clear()
+    FakeGitLabClient.pull_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="platform/proj",
+            target_project_id=2,
+            target_project_path="platform/proj",
+            mirror_id=77,
+            enabled=True,
+            last_update_status="pending",
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        mirror_id = m.id
+
+    # Mirror is enabled on GitLab
+    FakeGitLabClient.pull_mirrors[2] = {
+        "id": 77,
+        "url": "https://src.example.com/platform/proj.git",
+        "enabled": True,
+        "update_status": "started",
+        "last_update_at": "2024-01-15T10:30:00Z",
+        "last_successful_update_at": None,
+        "last_error": None,
+    }
+
+    resp = await client.post(f"/api/mirrors/{mirror_id}/update")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "update_triggered"
+
+    # update_pull_mirror should NOT have been called
+    assert len(FakeGitLabClient.update_pull_calls) == 0
+
+    # trigger should have been called
+    assert len(FakeGitLabClient.trigger_pull_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_status_syncs_enabled_field(client, session_maker, monkeypatch):
+    """Test that refreshing mirror status syncs the enabled field from GitLab."""
+    from app.api import mirrors as mod
+
+    monkeypatch.setattr(mod, "GitLabClient", FakeGitLabClient)
+    FakeGitLabClient.pull_mirrors.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="platform/proj",
+            target_project_id=2,
+            target_project_path="platform/proj",
+            mirror_id=77,
+            enabled=True,
+            last_update_status="success",
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        mirror_id = m.id
+
+    # GitLab reports the mirror as disabled (auto-paused by GitLab)
+    FakeGitLabClient.pull_mirrors[2] = {
+        "id": 77,
+        "url": "https://src.example.com/platform/proj.git",
+        "enabled": False,
+        "update_status": "failed",
+        "last_update_at": "2024-01-15T10:30:00Z",
+        "last_successful_update_at": "2024-01-14T08:00:00Z",
+        "last_error": "13:fetch remote: fatal: ...",
+    }
+
+    resp = await client.post(f"/api/mirrors/{mirror_id}/refresh-status")
+    assert resp.status_code == 200
+
+    # Local DB should now reflect the disabled state from GitLab
+    async with session_maker() as s:
+        m2 = (await s.execute(select(Mirror).where(Mirror.id == mirror_id))).scalar_one()
+        assert m2.enabled is False
+        assert m2.last_update_status == "failed"
+        assert m2.last_error == "13:fetch remote: fatal: ..."
 

@@ -3429,14 +3429,20 @@ async function createMirror() {
 
 async function triggerMirrorUpdate(id) {
     try {
-        await apiRequest(`/api/mirrors/${id}/update`, { method: 'POST' });
-        showMessage('Mirror update triggered', 'success');
+        const result = await apiRequest(`/api/mirrors/${id}/update`, { method: 'POST' });
+        if (result.status === 're_enabled_and_update_triggered') {
+            showMessage('Mirror was paused — re-enabled and sync triggered', 'success');
+        } else {
+            showMessage('Mirror update triggered', 'success');
+        }
         await loadMirrors();
 
         // Poll status with increasing delays until sync completes or max attempts reached.
         // Delays: 5s, 10s, 15s, 30s, 30s (total ~90s coverage)
         pollMirrorSyncStatus(id);
     } catch (error) {
+        const msg = (error && error.message) ? error.message : 'Failed to trigger mirror update';
+        showMessage(msg, 'error');
         console.error('Failed to trigger mirror update:', error);
     }
 }
