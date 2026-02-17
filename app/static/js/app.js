@@ -1786,8 +1786,8 @@ async function syncAllMirrors(pairId) {
     // Get mirror count first
     let mirrorCount = 0;
     try {
-        const mirrors = await apiRequest(`/api/mirrors?instance_pair_id=${pairId}&enabled=true`);
-        mirrorCount = (mirrors || []).length;
+        const response = await apiRequest(`/api/mirrors?instance_pair_id=${pairId}&enabled=true`);
+        mirrorCount = response.total || 0;
     } catch (e) {
         console.error('Failed to get mirror count:', e);
     }
