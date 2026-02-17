@@ -210,7 +210,39 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.error(f"Failed to start issue sync scheduler: {e}", exc_info=True)
 
+    # Start TLS keep-alive manager (if enabled)
+    if settings.tls_keepalive_enabled:
+        try:
+            from app.core.tls_keepalive import get_tls_keepalive_manager
+            from app.models import GitLabInstance
+
+            manager = get_tls_keepalive_manager()
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(GitLabInstance).where(
+                        GitLabInstance.tls_keepalive_enabled.is_(True)
+                    )
+                )
+                enabled_instances = result.scalars().all()
+                instances = [
+                    {"id": inst.id, "name": inst.name, "url": inst.url}
+                    for inst in enabled_instances
+                ]
+            await manager.start(instances)
+        except Exception as e:
+            logging.error(f"Failed to start TLS keep-alive manager: {e}", exc_info=True)
+
     yield
+
+    # Shutdown - stop TLS keep-alive manager
+    if settings.tls_keepalive_enabled:
+        try:
+            from app.core.tls_keepalive import get_tls_keepalive_manager
+            manager = get_tls_keepalive_manager()
+            await manager.stop()
+            logging.info("TLS keep-alive manager stopped")
+        except Exception as e:
+            logging.error(f"Error stopping TLS keep-alive manager: {e}", exc_info=True)
 
     # Shutdown - wait for all sync jobs to complete gracefully
     try:

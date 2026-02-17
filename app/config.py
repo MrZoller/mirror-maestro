@@ -130,6 +130,11 @@ class Settings(BaseSettings):
     # Stale job cleanup
     stale_job_timeout_minutes: int = 60  # Jobs running longer than this are considered stale and will be marked as failed
 
+    # TLS Keep-Alive (for AWS/enterprise environments with firewall idle timeouts)
+    # Maintains persistent openssl s_client connections to keep network paths alive
+    tls_keepalive_enabled: bool = False  # Master switch (per-instance opt-in still required)
+    tls_keepalive_interval: int = 5  # Seconds to wait before reconnecting after disconnect
+
     @field_validator('environment')
     @classmethod
     def validate_environment(cls, v: str) -> str:
@@ -294,6 +299,14 @@ class Settings(BaseSettings):
         """Ensure stale job timeout is positive."""
         if v <= 0:
             raise ValueError("stale_job_timeout_minutes must be positive")
+        return v
+
+    @field_validator('tls_keepalive_interval')
+    @classmethod
+    def validate_tls_keepalive_interval(cls, v: int) -> int:
+        """Ensure TLS keep-alive interval is positive."""
+        if v <= 0:
+            raise ValueError("tls_keepalive_interval must be positive")
         return v
 
     @model_validator(mode='after')

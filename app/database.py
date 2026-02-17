@@ -36,6 +36,7 @@ async def init_db():
     await _migrate_add_mirror_status_columns()
     await _migrate_add_instance_version_columns()
     await _migrate_add_issue_sync_enabled_columns()
+    await _migrate_add_tls_keepalive_column()
     # Clean up orphaned issue sync data from previously deleted mirrors
     await _cleanup_orphaned_issue_sync_data()
 
@@ -148,6 +149,35 @@ async def _migrate_add_issue_sync_enabled_columns():
                     ))
                 except Exception as e:
                     logging.debug(f"Could not add issue_sync_enabled column to {table_name}: {e}")
+
+
+async def _migrate_add_tls_keepalive_column():
+    """
+    Add tls_keepalive_enabled column to gitlab_instances table
+    if it doesn't exist (for existing databases predating this feature).
+    """
+    import logging
+    from sqlalchemy import text, inspect
+
+    async with engine.begin() as conn:
+        def get_columns(sync_conn):
+            insp = inspect(sync_conn)
+            try:
+                columns = insp.get_columns('gitlab_instances')
+                return {col['name'] for col in columns}
+            except Exception:
+                return set()
+
+        existing_columns = await conn.run_sync(get_columns)
+
+        if 'tls_keepalive_enabled' not in existing_columns:
+            logging.info("Adding tls_keepalive_enabled column to gitlab_instances table")
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE gitlab_instances ADD COLUMN tls_keepalive_enabled BOOLEAN"
+                ))
+            except Exception as e:
+                logging.debug(f"Could not add tls_keepalive_enabled column: {e}")
 
 
 async def _cleanup_orphaned_issue_sync_data():

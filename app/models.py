@@ -38,6 +38,8 @@ class GitLabInstance(Base):
     # GitLab instance version/edition (best-effort, fetched on creation and refresh)
     gitlab_version: Mapped[Optional[str]] = mapped_column(String(50))
     gitlab_edition: Mapped[Optional[str]] = mapped_column(String(50))
+    # TLS keep-alive: maintain persistent openssl s_client connection to this host
+    tls_keepalive_enabled: Mapped[Optional[bool]] = mapped_column(Boolean)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
