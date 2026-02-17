@@ -1,3 +1,17 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:fb435df8557dba763d1219f53130d15ea94a33473b08dfeec642c656439153c0
-size 1061
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fc6d26" />
+      <stop offset="100%" style="stop-color:#1f75cb" />
+    </linearGradient>
+  </defs>
+  <circle cx="16" cy="16" r="15" fill="url(#bg)"/>
+  <!-- Left arrow -->
+  <polygon points="5,16 11,10 11,22" fill="white" opacity="0.9"/>
+  <rect x="10" y="14" width="6" height="4" rx="1" fill="white" opacity="0.9"/>
+  <!-- Right arrow -->
+  <polygon points="27,16 21,10 21,22" fill="white" opacity="0.9"/>
+  <rect x="16" y="14" width="6" height="4" rx="1" fill="white" opacity="0.9"/>
+  <!-- Center diamond -->
+  <polygon points="16,12 19,16 16,20 13,16" fill="white"/>
+</svg>

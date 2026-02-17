@@ -1,3 +1,37 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:5bd6ea4a157eddbc4d80734004a9f9e4abc2a504aa3aa4aca03d1e6376cb8de3
-size 1061
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e8e8e8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer circle -->
+  <circle cx="60" cy="60" r="56" fill="none" stroke="white" stroke-width="2.5" opacity="0.9"/>
+
+  <!-- Left arrow (push) -->
+  <g transform="translate(60, 60)">
+    <!-- Left arrow body -->
+    <rect x="-38" y="-5" width="28" height="10" rx="2" fill="white" opacity="0.9"/>
+    <!-- Left arrowhead pointing left -->
+    <polygon points="-38,0 -24,-14 -24,14" fill="white" opacity="0.9"/>
+  </g>
+
+  <!-- Right arrow (pull) -->
+  <g transform="translate(60, 60)">
+    <!-- Right arrow body -->
+    <rect x="10" y="-5" width="28" height="10" rx="2" fill="white" opacity="0.9"/>
+    <!-- Right arrowhead pointing right -->
+    <polygon points="38,0 24,-14 24,14" fill="white" opacity="0.9"/>
+  </g>
+
+  <!-- Center mirror line (reflection axis) -->
+  <line x1="60" y1="22" x2="60" y2="98" stroke="white" stroke-width="2.5" stroke-dasharray="4,4" opacity="0.6"/>
+
+  <!-- Center diamond (mirror point) -->
+  <polygon points="60,50 68,60 60,70 52,60" fill="white" opacity="0.95"/>
+
+  <!-- Conductor baton accent (diagonal line top-right) -->
+  <line x1="78" y1="18" x2="96" y2="8" stroke="white" stroke-width="2.5" stroke-linecap="round" opacity="0.7"/>
+  <circle cx="97" cy="7" r="3" fill="white" opacity="0.7"/>
+</svg>
