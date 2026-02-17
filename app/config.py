@@ -134,6 +134,7 @@ class Settings(BaseSettings):
     # Maintains persistent openssl s_client connections to keep network paths alive
     tls_keepalive_enabled: bool = False  # Master switch (per-instance opt-in still required)
     tls_keepalive_interval: int = 5  # Seconds to wait before reconnecting after disconnect
+    tls_keepalive_tls_version: str = "1.2"  # TLS version to use ("1.2", "1.3", or "" for auto-negotiate)
 
     @field_validator('environment')
     @classmethod
@@ -307,6 +308,15 @@ class Settings(BaseSettings):
         """Ensure TLS keep-alive interval is positive."""
         if v <= 0:
             raise ValueError("tls_keepalive_interval must be positive")
+        return v
+
+    @field_validator('tls_keepalive_tls_version')
+    @classmethod
+    def validate_tls_keepalive_tls_version(cls, v: str) -> str:
+        """Validate TLS version for keep-alive connections."""
+        v = v.strip()
+        if v and v not in ('1.0', '1.1', '1.2', '1.3'):
+            raise ValueError("tls_keepalive_tls_version must be '1.0', '1.1', '1.2', '1.3', or '' (auto)")
         return v
 
     @model_validator(mode='after')

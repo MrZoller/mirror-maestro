@@ -52,8 +52,17 @@ class TLSKeepAliveManager:
     This keeps the TLS session / network path alive for other connections.
     """
 
-    def __init__(self, reconnect_interval: int = 5):
+    # Mapping from user-facing version string to openssl s_client flag
+    _TLS_VERSION_FLAGS = {
+        "1.2": "-tls1_2",
+        "1.3": "-tls1_3",
+        "1.1": "-tls1_1",
+        "1.0": "-tls1",
+    }
+
+    def __init__(self, reconnect_interval: int = 5, tls_version: str = ""):
         self._reconnect_interval = reconnect_interval
+        self._tls_version = tls_version.strip()
         self._tasks: dict[int, asyncio.Task] = {}  # instance_id -> task
         self._statuses: dict[int, KeepAliveStatus] = {}  # instance_id -> status
         self._stop_event = asyncio.Event()
@@ -253,8 +262,20 @@ class TLSKeepAliveManager:
         connect_arg = f"{host}:{port}"
         logger.debug(f"TLS keep-alive connecting to {connect_arg}")
 
+        cmd = ["openssl", "s_client", "-connect", connect_arg]
+        if self._tls_version:
+            flag = self._TLS_VERSION_FLAGS.get(self._tls_version)
+            if flag:
+                cmd.append(flag)
+            else:
+                logger.warning(
+                    f"Unknown TLS version '{self._tls_version}', "
+                    f"valid options: {', '.join(sorted(self._TLS_VERSION_FLAGS))}. "
+                    f"Falling back to auto-negotiate."
+                )
+
         proc = await asyncio.create_subprocess_exec(
-            "openssl", "s_client", "-connect", connect_arg,
+            *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
@@ -302,5 +323,6 @@ def get_tls_keepalive_manager() -> TLSKeepAliveManager:
         from app.config import settings
         _manager = TLSKeepAliveManager(
             reconnect_interval=settings.tls_keepalive_interval,
+            tls_version=settings.tls_keepalive_tls_version,
         )
     return _manager

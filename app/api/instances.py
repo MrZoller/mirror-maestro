@@ -825,5 +825,6 @@ async def tls_keepalive_status(
         "manager_running": manager.is_running,
         "active_connections": manager.active_count,
         "reconnect_interval_seconds": settings.tls_keepalive_interval,
+        "tls_version": settings.tls_keepalive_tls_version or "auto",
         "connections": manager.get_status(),
     }
