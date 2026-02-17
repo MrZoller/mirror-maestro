@@ -2678,7 +2678,7 @@ function renderTreeNode(node, level, parentPath = '') {
         if (hasChildren) {
             // Group node (collapsible)
             html += `
-                <tr class="tree-group-row" data-level="${level}">
+                <tr class="tree-group-row" data-level="${level}" data-tree-path="${escapeHtml(currentPath)}">
                     <td colspan="9" style="padding-left: ${indent}px;">
                         <div class="tree-group-header" onclick="toggleTreeGroup(this)">
                             <span class="tree-toggle">▼</span>
@@ -2687,9 +2687,7 @@ function renderTreeNode(node, level, parentPath = '') {
                         </div>
                     </td>
                 </tr>
-                <tbody class="tree-group-children">
-                    ${renderTreeNode(item.children, level + 1, currentPath)}
-                </tbody>
+                ${renderTreeNode(item.children, level + 1, currentPath)}
             `;
         }
 
@@ -2743,7 +2741,7 @@ function renderTreeNode(node, level, parentPath = '') {
                 const targetBaseUrl = getInstanceUrl('target');
 
                 html += `
-                    <tr class="tree-mirror-row" data-mirror-id="${mirror.id}" data-level="${level}" style="padding-left: ${indent}px;">
+                    <tr class="tree-mirror-row" data-mirror-id="${mirror.id}" data-level="${level}" data-tree-path="${escapeHtml(currentPath)}" style="padding-left: ${indent}px;">
                         <td style="padding-left: ${indent + 20}px;">${formatProjectPath(mirror.source_project_path, { baseUrl: sourceBaseUrl })}</td>
                         <td>${formatProjectPath(mirror.target_project_path, { baseUrl: targetBaseUrl })}</td>
                         <td>${settingsCell}</td>
@@ -2789,13 +2787,24 @@ function countMirrorsInTree(node) {
 function toggleTreeGroup(element) {
     const toggle = element.querySelector('.tree-toggle');
     const row = element.closest('tr');
-    const childrenBody = row.nextElementSibling;
+    const isCollapsed = row.dataset.collapsed === 'true';
 
-    if (childrenBody && childrenBody.classList.contains('tree-group-children')) {
-        const isCollapsed = childrenBody.style.display === 'none';
-        childrenBody.style.display = isCollapsed ? '' : 'none';
-        toggle.textContent = isCollapsed ? '▼' : '▶';
-    }
+    // Toggle collapsed state on this group
+    row.dataset.collapsed = isCollapsed ? 'false' : 'true';
+    toggle.textContent = isCollapsed ? '▼' : '▶';
+
+    // Re-evaluate visibility of all rows based on which groups are collapsed
+    const tbody = row.closest('tbody');
+    const collapsedPaths = [];
+    tbody.querySelectorAll('tr.tree-group-row[data-collapsed="true"]').forEach(r => {
+        collapsedPaths.push(r.dataset.treePath + '/');
+    });
+
+    tbody.querySelectorAll('tr[data-tree-path]').forEach(r => {
+        const path = r.dataset.treePath;
+        const isHidden = collapsedPaths.some(cp => path.startsWith(cp));
+        r.style.display = isHidden ? 'none' : '';
+    });
 }
 
 // View mode toggle
