@@ -1904,8 +1904,63 @@ async def trigger_mirror_update(
     if not instance:
         raise HTTPException(status_code=404, detail="GitLab instance not found")
 
+    re_enabled = False
     try:
         client = GitLabClient(instance.url, instance.encrypted_token, timeout=settings.gitlab_api_timeout)
+
+        # Check if the mirror is disabled/paused on GitLab (e.g. after repeated
+        # sync failures GitLab automatically pauses the mirror).  If so,
+        # re-enable it before triggering the sync – otherwise the trigger API
+        # call is silently ignored by GitLab.
+        try:
+            if direction == "push":
+                gitlab_mirrors = await _execute_gitlab_op(
+                    client=client,
+                    operation=lambda c: c.get_project_mirrors(project_id) or [],
+                    operation_name=f"pre_sync_check_push({project_id})",
+                )
+                gitlab_mirror = None
+                for gm in gitlab_mirrors:
+                    if gm.get("id") == mirror.mirror_id:
+                        gitlab_mirror = gm
+                        break
+            else:
+                gitlab_mirror = await _execute_gitlab_op(
+                    client=client,
+                    operation=lambda c: c.get_pull_mirror(project_id),
+                    operation_name=f"pre_sync_check_pull({project_id})",
+                )
+
+            if gitlab_mirror and gitlab_mirror.get("enabled") is False:
+                logger.info(
+                    f"Mirror {mirror_id} is disabled/paused on GitLab. "
+                    f"Re-enabling before sync trigger."
+                )
+                if direction == "push":
+                    await _execute_gitlab_op(
+                        client=client,
+                        operation=lambda c: c.update_mirror(
+                            project_id, mirror.mirror_id, enabled=True
+                        ),
+                        operation_name=f"re_enable_push_mirror({project_id}, {mirror.mirror_id})",
+                    )
+                else:
+                    await _execute_gitlab_op(
+                        client=client,
+                        operation=lambda c: c.update_pull_mirror(
+                            project_id, enabled=True
+                        ),
+                        operation_name=f"re_enable_pull_mirror({project_id})",
+                    )
+                re_enabled = True
+                mirror.enabled = True
+                await db.commit()
+        except HTTPException:
+            raise
+        except Exception as check_err:
+            # Non-fatal: if the pre-check fails we still attempt the trigger
+            logger.warning(f"Pre-sync enabled check failed (non-critical): {check_err}")
+
         if direction == "push":
             # Push mirrors use the remote_mirrors sync endpoint
             await _execute_gitlab_op(
@@ -1936,7 +1991,10 @@ async def trigger_mirror_update(
             mirror.last_update_at = datetime.utcnow()
             await db.commit()
 
-        return {"status": "update_triggered"}
+        status = "update_triggered"
+        if re_enabled:
+            status = "re_enabled_and_update_triggered"
+        return {"status": status}
     except HTTPException:
         raise
     except Exception as e:
@@ -2575,6 +2633,12 @@ async def _refresh_mirror_status(
             last_successful_update = dt.replace(tzinfo=None)
         except (ValueError, AttributeError):
             pass
+
+    # Sync enabled state from GitLab (mirrors can be auto-paused by GitLab
+    # after repeated failures, so keep the local DB in sync)
+    gitlab_enabled = gitlab_mirror.get("enabled")
+    if gitlab_enabled is not None:
+        mirror.enabled = bool(gitlab_enabled)
 
     # Update the database
     mirror.last_update_status = update_status
