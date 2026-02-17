@@ -3088,13 +3088,23 @@ function selectProject(side, project) {
     checkProjectMirrors(side);
 }
 
-async function searchProjectsForMirror(side) {
+async function searchProjectsForMirror(side, { linkedQuery } = {}) {
+    const otherSide = side === 'source' ? 'target' : 'source';
+    const isLinked = linkedQuery !== undefined;
     const instanceId = side === 'source' ? state.mirrorProjectInstances.source : state.mirrorProjectInstances.target;
     const input = document.getElementById(`mirror-${side}-project-input`);
     const hidden = document.getElementById(`mirror-${side}-project`);
     const dropdown = document.getElementById(`${side}-project-dropdown`);
 
     if (!input || !dropdown) return;
+
+    // For linked searches, skip if this side already has a selection
+    if (isLinked && hidden && hidden.value) return;
+
+    // For linked searches, set the input text to match the other side
+    if (isLinked) {
+        input.value = linkedQuery;
+    }
 
     // Clear selection when user types (they're searching for something new)
     if (hidden) {
@@ -3103,23 +3113,32 @@ async function searchProjectsForMirror(side) {
     }
 
     if (!instanceId) {
-        dropdown.innerHTML = '<div class="autocomplete-hint">Select an instance pair first</div>';
-        dropdown.classList.add('active');
+        if (!isLinked) {
+            dropdown.innerHTML = '<div class="autocomplete-hint">Select an instance pair first</div>';
+            dropdown.classList.add('active');
+        }
         autocompleteState[side].projects = [];
         return;
     }
 
     const q = (input.value || '').toString().trim();
     if (q.length < 2) {
-        dropdown.innerHTML = '<div class="autocomplete-hint">Type at least 2 characters to search</div>';
-        dropdown.classList.add('active');
+        if (!isLinked) {
+            dropdown.innerHTML = '<div class="autocomplete-hint">Type at least 2 characters to search</div>';
+            dropdown.classList.add('active');
+        } else {
+            dropdown.innerHTML = '';
+            dropdown.classList.remove('active');
+        }
         autocompleteState[side].projects = [];
         return;
     }
 
-    // Show loading state
-    dropdown.innerHTML = '<div class="autocomplete-loading"><div class="spinner"></div> Searching...</div>';
-    dropdown.classList.add('active');
+    // Show loading state only for the actively-typed side
+    if (!isLinked) {
+        dropdown.innerHTML = '<div class="autocomplete-loading"><div class="spinner"></div> Searching...</div>';
+        dropdown.classList.add('active');
+    }
 
     const perPage = 50;
     try {
@@ -3132,6 +3151,7 @@ async function searchProjectsForMirror(side) {
 
         if (projects.length === 0) {
             dropdown.innerHTML = '<div class="autocomplete-empty">No projects found</div>';
+            if (isLinked) dropdown.classList.remove('active');
             return;
         }
 
@@ -3151,6 +3171,11 @@ async function searchProjectsForMirror(side) {
 
         dropdown.innerHTML = items + moreHint;
 
+        // For linked searches, keep dropdown hidden until user focuses this input
+        if (isLinked) {
+            dropdown.classList.remove('active');
+        }
+
         // Add click handlers to items
         dropdown.querySelectorAll('.autocomplete-item').forEach((item) => {
             item.addEventListener('click', () => {
@@ -3161,7 +3186,17 @@ async function searchProjectsForMirror(side) {
 
     } catch (error) {
         console.error('Failed to search projects:', error);
-        dropdown.innerHTML = '<div class="autocomplete-empty">Search failed</div>';
+        if (!isLinked) {
+            dropdown.innerHTML = '<div class="autocomplete-empty">Search failed</div>';
+        }
+    }
+
+    // After a user-initiated search, also search the other side with the same query
+    if (!isLinked) {
+        const otherHidden = document.getElementById(`mirror-${otherSide}-project`);
+        if (!otherHidden || !otherHidden.value) {
+            searchProjectsForMirror(otherSide, { linkedQuery: q });
+        }
     }
 }
 
