@@ -1332,6 +1332,9 @@ function renderInstances(instances) {
                     <td>
                         <input class="table-input" type="password" id="edit-instance-token-${instance.id}" value="" placeholder="New access token (leave blank to keep)">
                     </td>
+                    <td style="text-align: center;">
+                        <input type="checkbox" id="edit-instance-tls-keepalive-${instance.id}" ${instance.tls_keepalive_enabled ? 'checked' : ''}>
+                    </td>
                     <td>
                         <div class="table-actions">
                             <button class="btn btn-primary btn-small" onclick="saveInstanceEdit(${instance.id})">Save</button>
@@ -1350,6 +1353,9 @@ function renderInstances(instances) {
                 <td><span class="text-muted">${escapeHtml(instance.description || 'N/A')}</span></td>
                 <td>
                     <span class="text-muted" title="Token value is never displayed">••••••••</span>
+                </td>
+                <td style="text-align: center;">
+                    ${instance.tls_keepalive_enabled ? '<span title="TLS Keep-Alive enabled">On</span>' : '<span class="text-muted">Off</span>'}
                 </td>
                 <td>
                     <div class="table-actions">
@@ -1381,9 +1387,11 @@ async function saveInstanceEdit(id) {
     const tokenEl = document.getElementById(`edit-instance-token-${id}`);
     if (!nameEl || !descEl) return;
 
+    const tlsEl = document.getElementById(`edit-instance-tls-keepalive-${id}`);
     const payload = {
         name: (nameEl.value || '').toString().trim(),
         description: (descEl.value || '').toString().trim() || null,
+        tls_keepalive_enabled: !!tlsEl?.checked,
     };
     const tokenRaw = (tokenEl?.value || '').toString().trim();
     if (tokenRaw) {
@@ -1416,7 +1424,8 @@ async function createInstance(event) {
         name: formData.get('name'),
         url: formData.get('url'),
         token: formData.get('token'),
-        description: formData.get('description') || ''
+        description: formData.get('description') || '',
+        tls_keepalive_enabled: !!document.getElementById('instance-tls-keepalive')?.checked,
     };
 
     try {

@@ -230,6 +230,12 @@
                         <textarea id="instance-description" name="description" placeholder="Optional description"></textarea>
                     </div>
 
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="instance-tls-keepalive" name="tls_keepalive_enabled">
+                        <label for="instance-tls-keepalive">Enable TLS Keep-Alive</label>
+                        <span class="text-muted" style="font-size: 0.85em; margin-left: 0.5em;">(Maintains a persistent openssl connection to keep firewall/NAT state alive)</span>
+                    </div>
+
                     <button type="submit" class="btn btn-primary">Add Instance</button>
                 </form>
             </div>
@@ -247,11 +253,12 @@
                             <th>Version</th>
                             <th>Description</th>
                             <th>Access Token</th>
+                            <th>TLS Keep-Alive</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="instances-list">
-                        <tr><td colspan="6" class="text-center"><div class="spinner"></div></td></tr>
+                        <tr><td colspan="7" class="text-center"><div class="spinner"></div></td></tr>
                     </tbody>
                 </table>
             </div>

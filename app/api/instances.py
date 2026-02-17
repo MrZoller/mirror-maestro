@@ -104,6 +104,7 @@ class GitLabInstanceCreate(BaseModel):
     url: str
     token: str
     description: str = ""
+    tls_keepalive_enabled: bool = False
 
     @field_validator('name')
     @classmethod
@@ -157,6 +158,7 @@ class GitLabInstanceUpdate(BaseModel):
     url: str | None = None
     token: str | None = None
     description: str | None = None
+    tls_keepalive_enabled: bool | None = None
 
     @field_validator('name')
     @classmethod
@@ -215,6 +217,7 @@ class GitLabInstanceResponse(BaseModel):
     description: str | None
     gitlab_version: str | None = None
     gitlab_edition: str | None = None
+    tls_keepalive_enabled: bool = False
     created_at: str
     updated_at: str
 
@@ -255,6 +258,7 @@ async def list_instances(
             description=inst.description,
             gitlab_version=inst.gitlab_version,
             gitlab_edition=inst.gitlab_edition,
+            tls_keepalive_enabled=inst.tls_keepalive_enabled or False,
             created_at=inst.created_at.isoformat() + "Z",
             updated_at=inst.updated_at.isoformat() + "Z"
         )
@@ -341,6 +345,7 @@ async def _create_instance_impl(instance: GitLabInstanceCreate, db: AsyncSession
         description=instance.description,
         gitlab_version=gitlab_version,
         gitlab_edition=gitlab_edition,
+        tls_keepalive_enabled=instance.tls_keepalive_enabled or None,
     )
     db.add(db_instance)
     await db.commit()
@@ -355,6 +360,7 @@ async def _create_instance_impl(instance: GitLabInstanceCreate, db: AsyncSession
         description=db_instance.description,
         gitlab_version=db_instance.gitlab_version,
         gitlab_edition=db_instance.gitlab_edition,
+        tls_keepalive_enabled=db_instance.tls_keepalive_enabled or False,
         created_at=db_instance.created_at.isoformat() + "Z",
         updated_at=db_instance.updated_at.isoformat() + "Z"
     )
@@ -384,6 +390,7 @@ async def get_instance(
         description=instance.description,
         gitlab_version=instance.gitlab_version,
         gitlab_edition=instance.gitlab_edition,
+        tls_keepalive_enabled=instance.tls_keepalive_enabled or False,
         created_at=instance.created_at.isoformat() + "Z",
         updated_at=instance.updated_at.isoformat() + "Z"
     )
@@ -455,8 +462,18 @@ async def update_instance(
     if "description" in fields:
         instance.description = instance_update.description
 
+    if "tls_keepalive_enabled" in fields:
+        instance.tls_keepalive_enabled = instance_update.tls_keepalive_enabled
+
     await db.commit()
     await db.refresh(instance)
+
+    # Refresh TLS keep-alive connections if the setting changed
+    if "tls_keepalive_enabled" in fields:
+        try:
+            await _refresh_tls_keepalive(db)
+        except Exception as e:
+            logger.warning(f"Failed to refresh TLS keep-alive after update: {e}")
 
     return GitLabInstanceResponse(
         id=instance.id,
@@ -467,6 +484,7 @@ async def update_instance(
         description=instance.description,
         gitlab_version=instance.gitlab_version,
         gitlab_edition=instance.gitlab_edition,
+        tls_keepalive_enabled=instance.tls_keepalive_enabled or False,
         created_at=instance.created_at.isoformat() + "Z",
         updated_at=instance.updated_at.isoformat() + "Z"
     )
@@ -641,6 +659,7 @@ async def refresh_instance_version(
         description=instance.description,
         gitlab_version=instance.gitlab_version,
         gitlab_edition=instance.gitlab_edition,
+        tls_keepalive_enabled=instance.tls_keepalive_enabled or False,
         created_at=instance.created_at.isoformat() + "Z",
         updated_at=instance.updated_at.isoformat() + "Z"
     )
@@ -760,3 +779,52 @@ async def get_project_mirrors(
             status_code=500,
             detail="Failed to fetch project mirrors from GitLab. Check server logs for details."
         )
+
+
+# ---------------------------------------------------------------------------
+# TLS Keep-Alive
+# ---------------------------------------------------------------------------
+
+async def _refresh_tls_keepalive(db: AsyncSession) -> None:
+    """Refresh TLS keep-alive connections based on current database state."""
+    if not settings.tls_keepalive_enabled:
+        return
+
+    from app.core.tls_keepalive import get_tls_keepalive_manager
+
+    manager = get_tls_keepalive_manager()
+    if not manager.is_running:
+        return
+
+    result = await db.execute(
+        select(GitLabInstance).where(GitLabInstance.tls_keepalive_enabled.is_(True))
+    )
+    enabled_instances = result.scalars().all()
+
+    instances = [
+        {"id": inst.id, "name": inst.name, "url": inst.url}
+        for inst in enabled_instances
+    ]
+    await manager.refresh(instances)
+
+
+@router.get("/tls-keepalive/status")
+async def tls_keepalive_status(
+    _: str = Depends(verify_credentials),
+):
+    """
+    Get the status of TLS keep-alive connections.
+
+    Returns the global enabled state and per-instance connection status.
+    """
+    from app.core.tls_keepalive import get_tls_keepalive_manager
+
+    manager = get_tls_keepalive_manager()
+    return {
+        "globally_enabled": settings.tls_keepalive_enabled,
+        "manager_running": manager.is_running,
+        "active_connections": manager.active_count,
+        "reconnect_interval_seconds": settings.tls_keepalive_interval,
+        "tls_version": settings.tls_keepalive_tls_version or "auto",
+        "connections": manager.get_status(),
+    }
