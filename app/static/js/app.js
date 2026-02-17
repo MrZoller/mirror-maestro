@@ -3469,6 +3469,9 @@ async function createMirror() {
 
         showMessage('Mirror created successfully', 'success');
         form.reset();
+        clearProjectAutocomplete('source');
+        clearProjectAutocomplete('target');
+        clearProjectMirrorBadges();
         await loadMirrors(true);
     } catch (error) {
         console.error('Failed to create mirror:', error);
