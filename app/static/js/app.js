@@ -11,7 +11,7 @@ const state = {
         orderBy: 'created_at',
         orderDir: 'desc',
         groupPath: '',
-        viewMode: 'flat', // 'flat' or 'tree'
+        viewMode: 'tree', // 'flat' or 'tree'
     },
     selectedPair: null,
     mirrorProjectInstances: { source: null, target: null },
@@ -1353,7 +1353,7 @@ function renderInstances(instances) {
         return `
             <tr>
                 <td><strong>${escapeHtml(instance.name)}</strong></td>
-                <td>${escapeHtml(instance.url)}</td>
+                <td><a href="${escapeHtml(instance.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(instance.url)}</a></td>
                 <td>${formatGitLabVersion(instance)}</td>
                 <td><span class="text-muted">${escapeHtml(instance.description || 'N/A')}</span></td>
                 <td>
@@ -3088,6 +3088,137 @@ function selectProject(side, project) {
     checkProjectMirrors(side);
 }
 
+/**
+ * Parse a search query that may contain a group path prefix.
+ * Examples:
+ *   "docs"              -> { gitlabSearch: "docs", pathFilter: null }
+ *   "my-group/docs"     -> { gitlabSearch: "docs", pathFilter: "my-group/docs" }
+ *   "org/team/project"  -> { gitlabSearch: "project", pathFilter: "org/team/project" }
+ *   "my-group/"         -> { gitlabSearch: "",  pathFilter: "my-group/" }
+ */
+function parseProjectSearchQuery(q) {
+    if (!q.includes('/')) {
+        return { gitlabSearch: q, pathFilter: null };
+    }
+    const lastSlash = q.lastIndexOf('/');
+    const gitlabSearch = q.substring(lastSlash + 1);
+    return { gitlabSearch, pathFilter: q.toLowerCase() };
+}
+
+/**
+ * Filter projects by path prefix when the user includes a group path in their search.
+ */
+function filterProjectsByPath(projects, pathFilter) {
+    if (!pathFilter) return projects;
+    return projects.filter(p => {
+        const fullPath = (p.path_with_namespace || '').toLowerCase();
+        return fullPath.includes(pathFilter);
+    });
+}
+
+/**
+ * Render autocomplete dropdown items and wire up click handlers.
+ */
+function renderAutocompleteItems(dropdown, projects, side, pathFilter, hasMore, currentPage) {
+    const items = projects.map((p, i) => {
+        const fullPath = (p.path_with_namespace || p.name || '').toString();
+        let displayHtml;
+        if (pathFilter) {
+            // Highlight the matching path portion
+            const lowerPath = fullPath.toLowerCase();
+            const matchIdx = lowerPath.indexOf(pathFilter);
+            if (matchIdx >= 0) {
+                const before = escapeHtml(fullPath.substring(0, matchIdx));
+                const match = escapeHtml(fullPath.substring(matchIdx, matchIdx + pathFilter.length));
+                const after = escapeHtml(fullPath.substring(matchIdx + pathFilter.length));
+                displayHtml = `${before}<strong>${match}</strong>${after}`;
+            } else {
+                displayHtml = escapeHtml(fullPath);
+            }
+        } else {
+            displayHtml = escapeHtml(fullPath);
+        }
+        return `
+            <div class="autocomplete-item" data-index="${i}">
+                <span class="autocomplete-item-path">${displayHtml}</span>
+                <span class="autocomplete-item-id">ID: ${p.id}</span>
+            </div>
+        `;
+    }).join('');
+
+    let footer = '';
+    if (hasMore) {
+        footer = `<div class="autocomplete-load-more" data-page="${currentPage + 1}">Load more results...</div>`;
+    }
+
+    dropdown.innerHTML = items + footer;
+
+    // Add click handlers to items
+    dropdown.querySelectorAll('.autocomplete-item').forEach((item) => {
+        item.addEventListener('click', () => {
+            const index = parseInt(item.dataset.index);
+            selectProject(side, projects[index]);
+        });
+    });
+
+    // Add click handler for "Load more" button
+    const loadMoreBtn = dropdown.querySelector('.autocomplete-load-more');
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const nextPage = parseInt(loadMoreBtn.dataset.page);
+            loadMoreProjects(side, nextPage);
+        });
+    }
+}
+
+async function loadMoreProjects(side, page) {
+    const instanceId = side === 'source' ? state.mirrorProjectInstances.source : state.mirrorProjectInstances.target;
+    const input = document.getElementById(`mirror-${side}-project-input`);
+    const dropdown = document.getElementById(`${side}-project-dropdown`);
+
+    if (!input || !dropdown || !instanceId) return;
+
+    const q = (input.value || '').toString().trim();
+    const { gitlabSearch, pathFilter } = parseProjectSearchQuery(q);
+    const searchTerm = gitlabSearch.length >= 2 ? gitlabSearch : q;
+
+    const perPage = 100;
+
+    // Replace load more button with loading indicator
+    const loadMoreBtn = dropdown.querySelector('.autocomplete-load-more');
+    if (loadMoreBtn) {
+        loadMoreBtn.innerHTML = '<div class="spinner"></div> Loading...';
+        loadMoreBtn.classList.add('loading');
+    }
+
+    try {
+        const res = await apiRequest(
+            `/api/instances/${instanceId}/projects?search=${encodeURIComponent(searchTerm)}&per_page=${perPage}&page=${page}&get_all=false`
+        );
+        const newProjects = res?.projects || [];
+        let filtered = filterProjectsByPath(newProjects, pathFilter);
+
+        // Deduplicate against existing projects
+        const existingIds = new Set(autocompleteState[side].projects.map(p => p.id));
+        filtered = filtered.filter(p => !existingIds.has(p.id));
+
+        // Append to existing projects
+        const allProjects = [...autocompleteState[side].projects, ...filtered];
+        autocompleteState[side].projects = allProjects;
+        autocompleteState[side].highlightedIndex = -1;
+
+        const hasMore = newProjects.length >= perPage;
+        renderAutocompleteItems(dropdown, allProjects, side, pathFilter, hasMore, page);
+    } catch (error) {
+        console.error('Failed to load more projects:', error);
+        if (loadMoreBtn) {
+            loadMoreBtn.textContent = 'Failed to load — click to retry';
+            loadMoreBtn.classList.remove('loading');
+        }
+    }
+}
+
 async function searchProjectsForMirror(side, { linkedQuery } = {}) {
     const otherSide = side === 'source' ? 'target' : 'source';
     const isLinked = linkedQuery !== undefined;
@@ -3140,49 +3271,42 @@ async function searchProjectsForMirror(side, { linkedQuery } = {}) {
         dropdown.classList.add('active');
     }
 
-    const perPage = 50;
+    // Parse search query: support "group/subgroup/project" style searches
+    const { gitlabSearch, pathFilter } = parseProjectSearchQuery(q);
+
+    // Use the project name part for GitLab API search (needs at least 2 chars),
+    // fall back to full query if the project name part is too short
+    const searchTerm = gitlabSearch.length >= 2 ? gitlabSearch : q;
+
+    const perPage = 100;
     try {
         const res = await apiRequest(
-            `/api/instances/${instanceId}/projects?search=${encodeURIComponent(q)}&per_page=${perPage}&page=1&get_all=false`
+            `/api/instances/${instanceId}/projects?search=${encodeURIComponent(searchTerm)}&per_page=${perPage}&page=1&get_all=false`
         );
-        const projects = res?.projects || [];
+        const allResults = res?.projects || [];
+
+        // Apply client-side path filtering when user included group path
+        const projects = filterProjectsByPath(allResults, pathFilter);
         autocompleteState[side].projects = projects;
         autocompleteState[side].highlightedIndex = -1;
 
         if (projects.length === 0) {
-            dropdown.innerHTML = '<div class="autocomplete-empty">No projects found</div>';
+            let message = 'No projects found';
+            if (pathFilter && allResults.length > 0) {
+                message = `No projects matching path "${escapeHtml(q)}" — try a shorter path`;
+            }
+            dropdown.innerHTML = `<div class="autocomplete-empty">${message}</div>`;
             if (isLinked) dropdown.classList.remove('active');
             return;
         }
 
-        const items = projects.map((p, i) => {
-            const fullPath = (p.path_with_namespace || p.name || '').toString();
-            return `
-                <div class="autocomplete-item" data-index="${i}">
-                    <span class="autocomplete-item-path">${escapeHtml(fullPath)}</span>
-                    <span class="autocomplete-item-id">ID: ${p.id}</span>
-                </div>
-            `;
-        }).join('');
-
-        const moreHint = projects.length >= perPage
-            ? '<div class="autocomplete-more-hint">Showing first 50 matches — refine search to narrow</div>'
-            : '';
-
-        dropdown.innerHTML = items + moreHint;
+        const hasMore = allResults.length >= perPage;
+        renderAutocompleteItems(dropdown, projects, side, pathFilter, hasMore, 1);
 
         // For linked searches, keep dropdown hidden until user focuses this input
         if (isLinked) {
             dropdown.classList.remove('active');
         }
-
-        // Add click handlers to items
-        dropdown.querySelectorAll('.autocomplete-item').forEach((item) => {
-            item.addEventListener('click', () => {
-                const index = parseInt(item.dataset.index);
-                selectProject(side, projects[index]);
-            });
-        });
 
     } catch (error) {
         console.error('Failed to search projects:', error);

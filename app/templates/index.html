@@ -397,13 +397,13 @@
                                 <input type="text"
                                        id="mirror-source-project-input"
                                        class="autocomplete-input"
-                                       placeholder="Type to search projects…"
+                                       placeholder="Search by name or group/name…"
                                        autocomplete="off">
                                 <input type="hidden" id="mirror-source-project" name="source_project_id" required>
                                 <div class="autocomplete-dropdown" id="source-project-dropdown"></div>
                             </div>
                             <div id="source-project-mirrors-badge" class="project-mirrors-badge"></div>
-                            <div class="text-muted" style="margin-top: 6px;">Type to search, then select from the list.</div>
+                            <div class="text-muted" style="margin-top: 6px;">Use group/project to narrow results, e.g. "my-group/docs"</div>
                         </div>
                         <div class="form-group">
                             <label for="mirror-target-project-input">Target Project *</label>
@@ -411,13 +411,13 @@
                                 <input type="text"
                                        id="mirror-target-project-input"
                                        class="autocomplete-input"
-                                       placeholder="Type to search projects…"
+                                       placeholder="Search by name or group/name…"
                                        autocomplete="off">
                                 <input type="hidden" id="mirror-target-project" name="target_project_id" required>
                                 <div class="autocomplete-dropdown" id="target-project-dropdown"></div>
                             </div>
                             <div id="target-project-mirrors-badge" class="project-mirrors-badge"></div>
-                            <div class="text-muted" style="margin-top: 6px;">Type to search, then select from the list.</div>
+                            <div class="text-muted" style="margin-top: 6px;">Use group/project to narrow results, e.g. "my-group/docs"</div>
                         </div>
                     </div>
                     <div class="form-group">
@@ -473,7 +473,7 @@
                     <div class="flex" style="gap:10px;">
                         <button class="btn btn-secondary btn-small" onclick="loadMirrors()" title="Refresh mirrors list">↻ Refresh</button>
                         <button class="btn btn-secondary btn-small" onclick="toggleMirrorViewMode()" title="Toggle between flat list and tree view">
-                            <span id="view-mode-icon">🌳</span> Tree View
+                            <span id="view-mode-icon">📋</span> Flat View
                         </button>
                         <button id="verify-all-btn" class="btn btn-info btn-small" onclick="verifyAllMirrors()" title="Check all mirrors for orphan/drift issues">
                             Verify All
