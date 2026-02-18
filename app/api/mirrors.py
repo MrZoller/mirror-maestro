@@ -1591,19 +1591,31 @@ async def update_mirror(
 
     # Auto-create MirrorIssueConfig when issue sync becomes effectively enabled
     # so the scheduler can pick it up without requiring a separate manual step.
-    if "issue_sync_enabled" in fields and mirror_update.issue_sync_enabled is True:
-        existing_config = await db.execute(
-            select(MirrorIssueConfig).where(MirrorIssueConfig.mirror_id == mirror.id)
+    # This covers both setting issue_sync_enabled=True explicitly AND clearing
+    # the override to null when the pair default is True.
+    if "issue_sync_enabled" in fields:
+        pair_for_check = await db.execute(
+            select(InstancePair).where(InstancePair.id == mirror.instance_pair_id)
         )
-        if not existing_config.scalar_one_or_none():
-            issue_config = MirrorIssueConfig(mirror_id=mirror.id)
-            db.add(issue_config)
-            try:
-                await db.commit()
-                logger.info(f"Auto-created issue sync config for mirror {mirror.id}")
-            except Exception as e:
-                await db.rollback()
-                logger.warning(f"Failed to auto-create issue sync config for mirror {mirror.id}: {e}")
+        pair_obj = pair_for_check.scalar_one_or_none()
+        effective_issue_sync = (
+            mirror.issue_sync_enabled
+            if mirror.issue_sync_enabled is not None
+            else (pair_obj.issue_sync_enabled if pair_obj else False)
+        )
+        if effective_issue_sync:
+            existing_config = await db.execute(
+                select(MirrorIssueConfig).where(MirrorIssueConfig.mirror_id == mirror.id)
+            )
+            if not existing_config.scalar_one_or_none():
+                issue_config = MirrorIssueConfig(mirror_id=mirror.id)
+                db.add(issue_config)
+                try:
+                    await db.commit()
+                    logger.info(f"Auto-created issue sync config for mirror {mirror.id}")
+                except Exception as e:
+                    await db.rollback()
+                    logger.warning(f"Failed to auto-create issue sync config for mirror {mirror.id}: {e}")
 
     pair_result = await db.execute(select(InstancePair).where(InstancePair.id == mirror.instance_pair_id))
     pair = pair_result.scalar_one_or_none()
