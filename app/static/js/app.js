@@ -11,7 +11,7 @@ const state = {
         orderBy: 'created_at',
         orderDir: 'desc',
         groupPath: '',
-        viewMode: 'flat', // 'flat' or 'tree'
+        viewMode: 'tree', // 'flat' or 'tree'
     },
     selectedPair: null,
     mirrorProjectInstances: { source: null, target: null },
@@ -1353,7 +1353,7 @@ function renderInstances(instances) {
         return `
             <tr>
                 <td><strong>${escapeHtml(instance.name)}</strong></td>
-                <td>${escapeHtml(instance.url)}</td>
+                <td><a href="${escapeHtml(instance.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(instance.url)}</a></td>
                 <td>${formatGitLabVersion(instance)}</td>
                 <td><span class="text-muted">${escapeHtml(instance.description || 'N/A')}</span></td>
                 <td>
