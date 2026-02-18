@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from app.database import get_db
-from app.models import InstancePair, GitLabInstance, Mirror
+from app.models import InstancePair, GitLabInstance, Mirror, MirrorIssueConfig
 from app.core.auth import verify_credentials
 from app.api.mirrors import _delete_issue_sync_data_for_mirrors
 from app.core.gitlab_client import GitLabClient
@@ -493,6 +493,30 @@ async def update_pair(
 
     await db.commit()
     await db.refresh(pair)
+
+    # Auto-create MirrorIssueConfig for mirrors under this pair when issue sync
+    # is enabled at the pair level, so the scheduler can pick them up without
+    # requiring the user to manually open each mirror's issue sync dialog.
+    if "issue_sync_enabled" in fields and pair_update.issue_sync_enabled is True:
+        mirrors_result = await db.execute(
+            select(Mirror).where(Mirror.instance_pair_id == pair.id)
+        )
+        mirrors = mirrors_result.scalars().all()
+        for m in mirrors:
+            # Only create config for mirrors that would effectively inherit
+            # issue_sync_enabled=True (i.e., no per-mirror override to False)
+            if m.issue_sync_enabled is not False:
+                existing = await db.execute(
+                    select(MirrorIssueConfig).where(MirrorIssueConfig.mirror_id == m.id)
+                )
+                if not existing.scalar_one_or_none():
+                    db.add(MirrorIssueConfig(mirror_id=m.id))
+                    logger.info(f"Auto-created issue sync config for mirror {m.id} (pair-level enable)")
+        try:
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            logger.warning(f"Failed to auto-create issue sync configs for pair {pair.id}: {e}")
 
     return InstancePairResponse(
         id=pair.id,

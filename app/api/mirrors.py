@@ -1018,6 +1018,7 @@ async def _create_mirror_internal(
         mirror_trigger_builds=mirror_data.mirror_trigger_builds,
         only_mirror_protected_branches=mirror_data.only_mirror_protected_branches,
         mirror_branch_regex=mirror_data.mirror_branch_regex,
+        issue_sync_enabled=mirror_data.issue_sync_enabled,
         mirror_id=gitlab_mirror_id,
         enabled=mirror_data.enabled,
         last_update_status="pending",
@@ -1149,6 +1150,24 @@ async def create_mirror(
         if mirror.issue_sync_enabled is not None
         else pair.issue_sync_enabled
     )
+
+    # Auto-create MirrorIssueConfig when issue sync is effectively enabled
+    # so the scheduler can pick it up without requiring the user to manually
+    # open the issue sync settings dialog and save.
+    if issue_sync_enabled:
+        existing_config = await db.execute(
+            select(MirrorIssueConfig).where(MirrorIssueConfig.mirror_id == db_mirror.id)
+        )
+        if not existing_config.scalar_one_or_none():
+            issue_config = MirrorIssueConfig(mirror_id=db_mirror.id)
+            db.add(issue_config)
+            try:
+                await db.commit()
+                await db.refresh(db_mirror)
+                logger.info(f"Auto-created issue sync config for mirror {db_mirror.id}")
+            except Exception as e:
+                await db.rollback()
+                logger.warning(f"Failed to auto-create issue sync config for mirror {db_mirror.id}: {e}")
 
     # Trigger initial sync after creation (best effort)
     # This starts the actual data synchronization on GitLab
@@ -1569,6 +1588,22 @@ async def update_mirror(
             status_code=500,
             detail="Failed to update mirror. Database changes have been rolled back."
         )
+
+    # Auto-create MirrorIssueConfig when issue sync becomes effectively enabled
+    # so the scheduler can pick it up without requiring a separate manual step.
+    if "issue_sync_enabled" in fields and mirror_update.issue_sync_enabled is True:
+        existing_config = await db.execute(
+            select(MirrorIssueConfig).where(MirrorIssueConfig.mirror_id == mirror.id)
+        )
+        if not existing_config.scalar_one_or_none():
+            issue_config = MirrorIssueConfig(mirror_id=mirror.id)
+            db.add(issue_config)
+            try:
+                await db.commit()
+                logger.info(f"Auto-created issue sync config for mirror {mirror.id}")
+            except Exception as e:
+                await db.rollback()
+                logger.warning(f"Failed to auto-create issue sync config for mirror {mirror.id}: {e}")
 
     pair_result = await db.execute(select(InstancePair).where(InstancePair.id == mirror.instance_pair_id))
     pair = pair_result.scalar_one_or_none()
