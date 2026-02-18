@@ -171,6 +171,60 @@ def _check_default_credentials():
         logging.warning("=" * 60)
 
 
+async def _reconcile_issue_sync_configs():
+    """Create missing MirrorIssueConfig records for mirrors with issue sync enabled.
+
+    Mirrors created before auto-creation was added may have issue sync
+    effectively enabled (via mirror-level or pair-level setting) but lack
+    a MirrorIssueConfig record, which the scheduler requires to run syncs.
+    """
+    from app.models import Mirror, InstancePair, MirrorIssueConfig
+
+    async with AsyncSessionLocal() as db:
+        # Find all mirrors that do NOT have a MirrorIssueConfig yet
+        from sqlalchemy import exists, and_
+        has_config = (
+            select(MirrorIssueConfig.id)
+            .where(MirrorIssueConfig.mirror_id == Mirror.id)
+            .correlate(Mirror)
+            .exists()
+        )
+        result = await db.execute(
+            select(Mirror).where(~has_config)
+        )
+        mirrors_without_config = result.scalars().all()
+
+        if not mirrors_without_config:
+            return
+
+        # Load all relevant pairs in one query
+        pair_ids = {m.instance_pair_id for m in mirrors_without_config}
+        pairs_result = await db.execute(
+            select(InstancePair).where(InstancePair.id.in_(pair_ids))
+        )
+        pairs_by_id = {p.id: p for p in pairs_result.scalars().all()}
+
+        created = 0
+        for mirror in mirrors_without_config:
+            pair = pairs_by_id.get(mirror.instance_pair_id)
+            if not pair:
+                continue
+
+            # Resolve effective issue_sync_enabled
+            effective = (
+                mirror.issue_sync_enabled
+                if mirror.issue_sync_enabled is not None
+                else pair.issue_sync_enabled
+            )
+            if effective:
+                db.add(MirrorIssueConfig(mirror_id=mirror.id))
+                created += 1
+
+        if created:
+            await db.commit()
+            logging.info(f"Reconciled {created} missing issue sync config(s)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle events for the application."""
@@ -202,6 +256,14 @@ async def lifespan(app: FastAPI):
         logging.error(f"Token migration failed: {e}")
         # Don't fail startup - mirrors without tokens can still work if
         # they were configured manually or use SSH
+
+    # Reconcile missing MirrorIssueConfig records for mirrors that have
+    # issue sync effectively enabled but were created before auto-creation
+    # was added.  This is idempotent and safe to run on every startup.
+    try:
+        await _reconcile_issue_sync_configs()
+    except Exception as e:
+        logging.error(f"Issue sync config reconciliation failed: {e}", exc_info=True)
 
     # Start issue sync scheduler
     try:
