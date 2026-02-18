@@ -868,7 +868,7 @@ table tbody tr:hover {
     top: 100%;
     left: 0;
     right: 0;
-    max-height: 280px;
+    max-height: 350px;
     overflow-y: auto;
     background: var(--card-background);
     border: 1px solid var(--border-color);
@@ -941,6 +941,43 @@ table tbody tr:hover {
     background: var(--background);
     text-align: center;
     border-top: 1px solid var(--border-color);
+}
+
+.autocomplete-load-more {
+    padding: 10px 14px;
+    font-size: 0.8rem;
+    color: var(--secondary-color);
+    background: var(--background);
+    text-align: center;
+    border-top: 1px solid var(--border-color);
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.autocomplete-load-more:hover {
+    background: var(--secondary-color);
+    color: white;
+}
+
+.autocomplete-load-more.loading {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.autocomplete-item-path strong {
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.autocomplete-item:hover .autocomplete-item-path strong,
+.autocomplete-item.highlighted .autocomplete-item-path strong {
+    color: inherit;
+    text-decoration: underline;
 }
 
 /* Messages */
