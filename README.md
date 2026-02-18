@@ -851,8 +851,8 @@ Archives are portable across Mirror Maestro versions and can be restored on any 
 ## API Documentation
 
 The application provides a RESTful API. Once running, visit:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+- Swagger UI: `http://localhost/docs` (or `https://localhost/docs` with SSL)
+- ReDoc: `http://localhost/redoc` (or `https://localhost/redoc` with SSL)
 
 ### Key Endpoints
 
