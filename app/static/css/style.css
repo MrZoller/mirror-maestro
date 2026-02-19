@@ -2448,61 +2448,120 @@ table tbody tr:hover {
    Backup & Restore Styles
    ================================ */
 
+/* Backup two-column layout */
+.backup-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: start;
+}
+
+.backup-card {
+    display: flex;
+    flex-direction: column;
+}
+
+.backup-card-header {
+    margin-bottom: 16px;
+}
+
+.backup-card-header p {
+    margin-top: 4px;
+}
+
 /* Backup statistics grid */
 .backup-stat-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
-    margin-bottom: 24px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
 }
 
 .backup-stat {
     background: var(--background);
-    padding: 16px;
-    border-radius: var(--radius-md);
+    padding: 12px 8px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border-color);
     text-align: center;
 }
 
-.backup-stat-label {
-    font-size: 0.9rem;
-    color: var(--text-muted);
-    margin-bottom: 8px;
-}
-
 .backup-stat-value {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
     font-weight: 600;
     color: var(--primary-color);
+    line-height: 1.2;
 }
 
-.backup-info {
-    margin: 24px 0;
+.backup-stat-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 4px;
 }
 
 .backup-includes {
-    margin: 20px 0;
-    padding: 16px;
+    margin-bottom: 12px;
+    padding: 10px 14px;
     background: var(--background);
-    border-radius: var(--radius-md);
-    border-left: 4px solid var(--primary-color);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--primary-color);
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
 }
 
-.backup-includes ul {
-    margin: 8px 0 0 0;
-    padding-left: 20px;
+/* Backup info grid */
+.backup-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
 }
 
-.backup-includes li {
-    margin: 6px 0;
+.backup-info-item {
+    padding: 12px 14px;
+    background: var(--background);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.backup-info-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.backup-info-desc {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+/* Best practices list */
+.backup-practices {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.backup-practice-item {
+    padding: 8px 12px;
+    background: var(--background);
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    border-left: 3px solid var(--border-color);
 }
 
 /* Alert boxes */
 .alert {
-    padding: 16px;
-    border-radius: var(--radius-md);
-    margin: 16px 0;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 12px;
     border-left: 4px solid;
+    font-size: 0.9rem;
+    line-height: 1.5;
 }
 
 .alert ul {
@@ -2595,9 +2654,19 @@ table tbody tr:hover {
 }
 
 /* Responsive adjustments */
+@media (max-width: 900px) {
+    .backup-columns {
+        grid-template-columns: 1fr;
+    }
+}
+
 @media (max-width: 768px) {
     .backup-stat-grid {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .backup-info-grid {
+        grid-template-columns: 1fr;
     }
 
     .backup-upload {
