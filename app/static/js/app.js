@@ -3698,6 +3698,10 @@ async function exportMirrors() {
             exportHeaders['Authorization'] = `Bearer ${authState.token}`;
         }
         const response = await fetch(`/api/export/pair/${state.selectedPair}`, { headers: exportHeaders });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to export mirrors');
+        }
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -3708,7 +3712,7 @@ async function exportMirrors() {
         showMessage('Mirrors exported successfully', 'success');
     } catch (error) {
         console.error('Failed to export mirrors:', error);
-        showMessage('Failed to export mirrors', 'error');
+        showMessage(`Failed to export mirrors: ${error.message}`, 'error');
     }
 }
 
