@@ -178,31 +178,58 @@ Chart.js renders the dashboard charts.
 ```
 mirror-maestro/
 ├── app/
-│   ├── api/              # API route handlers
-│   │   ├── dashboard.py  # Dashboard metrics
-│   │   ├── instances.py  # GitLab instance management
-│   │   ├── pairs.py      # Instance pair management
-│   │   ├── mirrors.py    # Mirror CRUD operations
-│   │   ├── topology.py   # Topology visualization
-│   │   └── export.py     # Import/export functionality
-│   ├── core/             # Core functionality
-│   │   ├── auth.py       # Authentication
-│   │   ├── encryption.py # Token encryption
-│   │   ├── gitlab_client.py # GitLab API wrapper
-│   │   └── rate_limiter.py # Rate limiting for batch operations
-│   ├── static/           # Frontend assets
-│   │   ├── css/          # Modern CSS with design tokens
-│   │   └── js/           # Vanilla JS with D3.js & Chart.js
-│   ├── templates/        # HTML templates
-│   ├── config.py         # Application configuration
-│   ├── database.py       # Database setup
-│   ├── models.py         # SQLAlchemy models
-│   └── main.py           # FastAPI application
-├── data/                 # Database and encryption keys
-├── docker-compose.yml    # Docker Compose configuration
-├── Dockerfile            # Docker image definition
-├── requirements.txt      # Python dependencies
-└── README.md             # This file
+│   ├── api/                    # API route handlers (FastAPI routers)
+│   │   ├── auth.py             # Authentication endpoints (login, logout, token validation)
+│   │   ├── users.py            # User management API (multi-user mode)
+│   │   ├── dashboard.py        # Dashboard statistics and metrics
+│   │   ├── instances.py        # GitLab instance CRUD
+│   │   ├── pairs.py            # Instance pair CRUD
+│   │   ├── mirrors.py          # Mirror CRUD, sync, and token management
+│   │   ├── issue_mirrors.py    # Issue sync job management and execution
+│   │   ├── topology.py         # Topology visualization data
+│   │   ├── export.py           # Import/export functionality
+│   │   ├── backup.py           # Configuration backup/restore
+│   │   ├── search.py           # Global search across resources
+│   │   └── health.py           # Health checks and system status
+│   ├── core/                   # Core business logic
+│   │   ├── auth.py             # HTTP Basic Auth & JWT token handling
+│   │   ├── encryption.py       # Fernet encryption for tokens
+│   │   ├── gitlab_client.py    # GitLab API wrapper
+│   │   ├── mirror_gitlab_service.py # Mirror operations with rate limiting & circuit breakers
+│   │   ├── issue_sync.py       # Issue synchronization engine
+│   │   ├── issue_scheduler.py  # APScheduler for scheduled issue syncs
+│   │   ├── rate_limiter.py     # Rate limiting & circuit breaker implementation
+│   │   ├── api_rate_limiter.py # HTTP-level rate limiting (slowapi)
+│   │   ├── jwt_secret.py       # JWT secret key manager
+│   │   ├── logging_utils.py    # Logging configuration
+│   │   └── tls_keepalive.py    # TLS keep-alive connection manager
+│   ├── static/                 # Frontend assets
+│   │   ├── css/                # Modern CSS with design tokens
+│   │   ├── js/                 # Vanilla JS with D3.js & Chart.js
+│   │   └── images/             # Favicons and logos
+│   ├── templates/              # Jinja2 HTML templates
+│   ├── config.py               # Pydantic Settings configuration
+│   ├── database.py             # SQLAlchemy async setup & migrations
+│   ├── models.py               # SQLAlchemy ORM models
+│   └── main.py                 # FastAPI application entry point
+├── tests/                      # Test suite (30 test files)
+├── docs/                       # Documentation
+│   ├── ISSUE_MIRRORING.md      # Issue syncing user guide
+│   ├── ENTERPRISE_DEPLOYMENT.md # Enterprise deployment guide
+│   └── screenshots/            # Application screenshots
+├── scripts/                    # Utility scripts
+├── migrations/                 # Alembic database migrations
+├── nginx/                      # Nginx reverse proxy configuration
+├── data/                       # Runtime data (encryption keys, gitignored)
+├── docker-compose.yml          # Docker Compose configuration
+├── Dockerfile                  # Container image definition
+├── alembic.ini                 # Database migration configuration
+├── requirements.txt            # Production dependencies
+├── requirements-dev.txt        # Development dependencies
+├── pyproject.toml              # Project metadata and pytest config
+├── CHANGELOG.md                # Version history
+├── CONTRIBUTING.md             # Contribution guidelines
+└── README.md                   # This file
 ```
 
 ## Quick Start
@@ -1178,16 +1205,16 @@ Contributions are welcome! Please:
 
 ## Roadmap
 
-- [x] Mirror status monitoring dashboard (Live dashboard with charts and real-time updates ✨)
-- [x] Dark mode support (Beautiful theme with smooth transitions ✨)
-- [x] Enhanced topology visualization (Animated particles, zoom controls, hover highlighting ✨)
-- [ ] Support for scheduled mirror synchronization
-- [ ] Email notifications for mirror failures
-- [ ] Support for SSH-based mirroring
-- [ ] Multi-user support with role-based access
+- [x] Mirror status monitoring dashboard (Live dashboard with charts and real-time updates)
+- [x] Dark mode support (Beautiful theme with smooth transitions)
+- [x] Enhanced topology visualization (Animated particles, zoom controls, hover highlighting)
+- [x] Scheduled mirror synchronization (Issue sync with configurable intervals via APScheduler)
+- [x] Multi-user support with role-based access (JWT-based with admin/user roles)
 - [x] Advanced filtering and search
 - [x] Mirror health checks and diagnostics
 - [x] PostgreSQL database support
+- [ ] Email notifications for mirror failures
+- [ ] Support for SSH-based mirroring
 
 ## Related Projects
 

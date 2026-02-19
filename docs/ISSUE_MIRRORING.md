@@ -631,6 +631,6 @@ A: Currently, no. Minimum sync interval is 5 minutes. Real-time webhook support 
 ## Support
 
 For issues, questions, or feature requests:
-- GitHub Issues: https://github.com/anthropics/mirror-maestro/issues
-- Documentation: https://github.com/anthropics/mirror-maestro/docs
+- GitHub Issues: https://github.com/MrZoller/mirror-maestro/issues
+- Documentation: https://github.com/MrZoller/mirror-maestro/docs
 

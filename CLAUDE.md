@@ -33,18 +33,29 @@ This document provides comprehensive guidance for AI assistants working on the M
 - **Templates**: Jinja2
 - **API Client**: python-gitlab
 - **Encryption**: Fernet (symmetric encryption via cryptography library)
-- **Authentication**: HTTP Basic Auth (optional)
-- **Deployment**: Docker and Docker Compose
+- **Authentication**: HTTP Basic Auth (single-user) or JWT tokens (multi-user)
+- **Visualization**: Chart.js (dashboard charts), D3.js (topology graph)
+- **Scheduling**: APScheduler (issue sync scheduling)
+- **Deployment**: Docker and Docker Compose (nginx + app + PostgreSQL)
 
 ### Core Features
 
 - Manage multiple GitLab instances and instance pairs
 - Create and configure push/pull mirrors with minimal input
-- Group access token management with rotation support
+- Automatic project access token management with rotation support
 - Two-tier configuration (per-mirror overrides → pair defaults; direction is pair-only)
+- Issue mirroring between GitLab instances (comments, labels, attachments, time tracking)
+- Multi-user authentication with admin/user roles (JWT-based)
 - Topology visualization with D3.js
+- Dashboard with Chart.js health charts and activity timeline
 - Import/export mirror configurations
+- Backup and restore functionality
+- Global search across instances, pairs, and mirrors
+- Health checks with component status monitoring
+- Rate limiting, circuit breakers, and retry logic for GitLab API resilience
+- Dark mode with localStorage persistence
 - Encrypted token storage
+- Enterprise deployment support (air-gapped environments, local artifact mirrors)
 
 ## Architecture
 
@@ -60,40 +71,51 @@ This document provides comprehensive guidance for AI assistants working on the M
 ### Application Layers
 
 ```
-┌─────────────────────────────────────┐
-│   Frontend (Vanilla JS + CSS)      │
-│   - app.js (state management)       │
-│   - topology.js (D3.js graph)       │
-└──────────────┬──────────────────────┘
+┌──────────────────────────────────────────────┐
+│   Frontend (Vanilla JS + CSS)                │
+│   - app.js (state management, SPA logic)     │
+│   - topology.js (D3.js graph)                │
+│   - Chart.js (dashboard charts)              │
+└──────────────┬───────────────────────────────┘
                │ HTTP/JSON
-┌──────────────▼──────────────────────┐
-│   API Layer (FastAPI Routers)      │
-│   - instances.py                    │
-│   - pairs.py                        │
-│   - mirrors.py                      │
-│   - topology.py                     │
-│   - export.py                       │
-│   - dashboard.py                    │
-└──────────────┬──────────────────────┘
+┌──────────────▼───────────────────────────────┐
+│   nginx (reverse proxy, SSL termination)     │
+└──────────────┬───────────────────────────────┘
+               │ HTTP :8000
+┌──────────────▼───────────────────────────────┐
+│   API Layer (FastAPI Routers - 13 modules)   │
+│   - auth.py, users.py (authentication)       │
+│   - instances.py, pairs.py, mirrors.py       │
+│   - issue_mirrors.py (issue sync management) │
+│   - topology.py, dashboard.py, export.py     │
+│   - backup.py, search.py, health.py          │
+└──────────────┬───────────────────────────────┘
                │
-┌──────────────▼──────────────────────┐
-│   Core Business Logic               │
-│   - gitlab_client.py (API wrapper)  │
-│   - encryption.py (token security)  │
-│   - auth.py (HTTP Basic)            │
-└──────────────┬──────────────────────┘
+┌──────────────▼───────────────────────────────┐
+│   Core Business Logic (12 modules)           │
+│   - gitlab_client.py (API wrapper)           │
+│   - mirror_gitlab_service.py (resilience)    │
+│   - issue_sync.py (issue sync engine)        │
+│   - issue_scheduler.py (APScheduler)         │
+│   - encryption.py (token security)           │
+│   - auth.py (Basic + JWT)                    │
+│   - rate_limiter.py, api_rate_limiter.py     │
+│   - jwt_secret.py, tls_keepalive.py          │
+└──────────────┬───────────────────────────────┘
                │
-┌──────────────▼──────────────────────┐
-│   Data Layer (SQLAlchemy)           │
-│   - models.py (ORM models)          │
-│   - database.py (session management)│
-└──────────────┬──────────────────────┘
+┌──────────────▼───────────────────────────────┐
+│   Data Layer (SQLAlchemy 2.0 async)          │
+│   - models.py (10 ORM models)               │
+│   - database.py (session mgmt, migrations)  │
+│   - Alembic (schema versioning)              │
+└──────────────┬───────────────────────────────┘
                │
-┌──────────────▼──────────────────────┐
-│   PostgreSQL Database (async)       │
-│   - Encrypted tokens                │
-│   - Configuration data              │
-└─────────────────────────────────────┘
+┌──────────────▼───────────────────────────────┐
+│   PostgreSQL Database (async via asyncpg)    │
+│   - Encrypted tokens                         │
+│   - Configuration, mirrors, issue mappings   │
+│   - User accounts (multi-user mode)          │
+└──────────────────────────────────────────────┘
 ```
 
 ## Codebase Structure
@@ -103,54 +125,89 @@ mirror-maestro/
 ├── app/                              # Main application code
 │   ├── api/                          # API route handlers (FastAPI routers)
 │   │   ├── __init__.py
+│   │   ├── auth.py                   # Authentication endpoints (login, logout, token validation)
+│   │   ├── users.py                  # User management API (multi-user mode)
+│   │   ├── dashboard.py              # Dashboard statistics and metrics
 │   │   ├── instances.py              # GitLab instance CRUD
 │   │   ├── pairs.py                  # Instance pair CRUD
 │   │   ├── mirrors.py                # Mirror CRUD, sync, and token management
-│   │   ├── topology.py               # Topology visualization API
-│   │   ├── dashboard.py              # Dashboard metrics
-│   │   └── export.py                 # Import/export functionality
+│   │   ├── issue_mirrors.py          # Issue sync job management and execution
+│   │   ├── topology.py              # Topology visualization data
+│   │   ├── export.py                 # Import/export functionality
+│   │   ├── backup.py                 # Configuration backup/restore
+│   │   ├── search.py                 # Global search across resources
+│   │   └── health.py                 # Health checks and system status
 │   │
 │   ├── core/                         # Core business logic
 │   │   ├── __init__.py
-│   │   ├── auth.py                   # HTTP Basic authentication
+│   │   ├── auth.py                   # HTTP Basic Auth & JWT token handling
 │   │   ├── encryption.py             # Fernet encryption for tokens
-│   │   └── gitlab_client.py          # GitLab API wrapper
+│   │   ├── gitlab_client.py          # GitLab API wrapper
+│   │   ├── mirror_gitlab_service.py  # Mirror operations with rate limiting & circuit breakers
+│   │   ├── issue_sync.py             # Issue synchronization engine
+│   │   ├── issue_scheduler.py        # APScheduler for scheduled issue syncs
+│   │   ├── rate_limiter.py           # Rate limiting & circuit breaker implementation
+│   │   ├── api_rate_limiter.py       # HTTP-level rate limiting (slowapi)
+│   │   ├── jwt_secret.py             # JWT secret key manager
+│   │   ├── logging_utils.py          # Logging configuration utilities
+│   │   └── tls_keepalive.py          # TLS keep-alive connection manager
 │   │
 │   ├── static/                       # Frontend assets
 │   │   ├── css/
 │   │   │   └── style.css             # Modern CSS with design tokens
-│   │   └── js/
-│   │       ├── app.js                # Main frontend logic
-│   │       └── topology.js           # D3.js topology visualization
+│   │   ├── js/
+│   │   │   ├── app.js                # Main frontend logic (SPA, state management)
+│   │   │   └── topology.js           # D3.js topology visualization
+│   │   └── images/                   # Favicons, logos, and icons
 │   │
 │   ├── templates/                    # Jinja2 templates
 │   │   └── index.html                # Single-page application
 │   │
 │   ├── __init__.py                   # Package marker
-│   ├── config.py                     # Pydantic Settings configuration
-│   ├── database.py                   # SQLAlchemy async setup
-│   ├── models.py                     # Database models
-│   └── main.py                       # FastAPI application entry point
+│   ├── config.py                     # Pydantic Settings configuration (60+ settings)
+│   ├── database.py                   # SQLAlchemy async setup & migration helpers
+│   ├── models.py                     # Database models (10 ORM models)
+│   └── main.py                       # FastAPI application entry point with middleware
 │
-├── tests/                            # Test suite
-│   ├── conftest.py                   # Pytest fixtures
-│   ├── test_api_*.py                 # API endpoint tests
-│   ├── test_core_*.py                # Core module tests
+├── tests/                            # Test suite (30 test files)
+│   ├── conftest.py                   # Pytest fixtures and test database setup
+│   ├── e2e_helpers.py                # E2E test utilities and mock factories
+│   ├── test_*_api.py                 # API endpoint tests
+│   ├── test_*.py                     # Unit and integration tests
+│   ├── test_e2e_*.py                 # End-to-end tests (cross-instance, multi-project)
 │   └── test_e2e_live_gitlab.py       # Live GitLab E2E tests (opt-in)
 │
 ├── docs/                             # Documentation
-│   └── screenshots/                  # Application screenshots
+│   ├── ISSUE_MIRRORING.md            # Issue syncing user guide
+│   ├── ISSUE_MIRRORING_PLAN.md       # Issue syncing implementation plan
+│   ├── ENTERPRISE_DEPLOYMENT.md      # Enterprise deployment guide
+│   └── screenshots/                  # Application screenshots and demos
 │
 ├── scripts/                          # Utility scripts
 │   ├── seed_data.py                  # Sample data generation
-│   └── take-screenshots.js           # Playwright screenshot automation
+│   ├── take-screenshots.js           # Playwright screenshot automation
+│   ├── download-vendor-assets.sh     # Download vendor JS libraries for air-gapped deployments
+│   ├── generate-self-signed-cert.sh  # SSL certificate generation
+│   ├── setup-ssl.sh                  # SSL/nginx configuration
+│   └── migrate-lfs.sh               # Git LFS migration utility
+│
+├── migrations/                       # Alembic database migrations
+│   ├── env.py                        # Alembic environment
+│   ├── script.py.mako                # Migration template
+│   └── versions/                     # Migration files
+│
+├── nginx/                            # Nginx reverse proxy configuration
+│   └── templates/
+│       ├── default.conf.template     # HTTP-only configuration
+│       └── default-ssl.conf.template # HTTPS/SSL configuration
 │
 ├── data/                             # Runtime data (gitignored)
 │   └── encryption.key                # Fernet encryption key
 │
 ├── .github/                          # GitHub configuration
 │   ├── workflows/
-│   │   ├── tests.yml                 # CI/CD pipeline
+│   │   ├── tests.yml                 # CI/CD test pipeline
+│   │   ├── release.yml               # Release/build pipeline (Docker images)
 │   │   └── e2e-live-gitlab.yml       # Live GitLab E2E workflow
 │   ├── ISSUE_TEMPLATE/
 │   ├── pull_request_template.md
@@ -159,11 +216,16 @@ mirror-maestro/
 ├── .env.example                      # Environment variable template
 ├── .gitignore                        # Git ignore rules
 ├── .editorconfig                     # Editor settings
+├── alembic.ini                       # Alembic migration configuration
 ├── docker-compose.yml                # Docker Compose configuration
 ├── Dockerfile                        # Container image definition
 ├── pyproject.toml                    # Project metadata and pytest config
 ├── requirements.txt                  # Production dependencies
 ├── requirements-dev.txt              # Development dependencies
+├── CHANGELOG.md                      # Version history
+├── CONTRIBUTING.md                   # Contribution guidelines
+├── CODE_OF_CONDUCT.md                # Community guidelines
+├── SECURITY.md                       # Security policy
 ├── LICENSE                           # MIT License
 ├── README.md                         # User documentation
 └── CLAUDE.md                         # This file (AI assistant guide)
@@ -229,17 +291,29 @@ class GitLabInstance(Base):
 - Proper nullable handling
 
 **Models**:
-1. `GitLabInstance` - GitLab instance configuration
-2. `InstancePair` - Pairs of instances for mirroring
-3. `Mirror` - Individual mirror configurations (includes auto-managed token fields)
+1. `User` - Multi-user authentication (username, email, hashed_password, is_admin, is_active)
+2. `GitLabInstance` - GitLab instance configuration
+3. `InstancePair` - Pairs of instances for mirroring
+4. `Mirror` - Individual mirror configurations (includes auto-managed token fields)
+5. `MirrorIssueConfig` - Issue sync configuration per mirror
+6. `IssueMapping` - Track issue correspondences between source and target
+7. `CommentMapping` - Track comment correspondences
+8. `LabelMapping` - Custom label mapping across instances
+9. `AttachmentMapping` - Track attachment correspondences
+10. `IssueSyncJob` - Async job tracking for issue syncs
 
 #### 3. Database Access (`app/database.py`)
 
 **Session Management**:
 ```python
+# SQL echo only enabled in development to prevent credential exposure
+_enable_sql_echo = (
+    settings.log_level.upper() == "DEBUG" and
+    settings.environment == "development"
+)
 async_engine = create_async_engine(
     settings.database_url,
-    echo=settings.log_level == "DEBUG"
+    echo=_enable_sql_echo
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -352,7 +426,11 @@ plaintext_token = encryption.decrypt(instance.encrypted_token)
 
 #### 6. Authentication (`app/core/auth.py`)
 
-**HTTP Basic Auth**:
+**Dual Authentication Modes**:
+
+Mirror Maestro supports two authentication modes, controlled by the `MULTI_USER_ENABLED` setting:
+
+**Single-User Mode** (HTTP Basic Auth):
 ```python
 security = HTTPBasic()
 
@@ -374,12 +452,20 @@ async def verify_credentials(credentials: HTTPAuthCredentials = Depends(security
     return credentials.username
 ```
 
+**Multi-User Mode** (JWT-based):
+- Login via `POST /api/login` returns a JWT token
+- Tokens validated via `Authorization: Bearer <token>` header
+- JWT secret auto-generated and persisted to `data/jwt_secret.key`
+- User management via `app/api/users.py` (admin-only)
+- Password hashing with bcrypt
+- Admin and regular user roles
+
 **Usage in Routes**:
 ```python
 @router.get("/api/instances")
 async def list_instances(
     db: AsyncSession = Depends(get_db),
-    _: str = Depends(verify_credentials)  # Auth dependency
+    _: str = Depends(verify_credentials)  # Auth dependency (works in both modes)
 ):
     # Route implementation
 ```
@@ -557,7 +643,8 @@ pytest -m live_gitlab -v
 
 **PostgreSQL Schema Management**:
 
-With PostgreSQL, schema changes are handled via SQLAlchemy's metadata:
+The project uses both SQLAlchemy's metadata for initial table creation and Alembic for production migrations:
+
 ```python
 async def init_db():
     """Initialize the database, creating all tables."""
@@ -565,8 +652,20 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
 ```
 
-For production deployments with existing data, consider using Alembic for migrations.
-For simple column additions, PostgreSQL supports `ALTER TABLE` directly:
+**Alembic** is configured in `alembic.ini` and `migrations/env.py` for schema versioning:
+
+```bash
+# Generate migration
+alembic revision --autogenerate -m "description"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback
+alembic downgrade -1
+```
+
+The `app/database.py` module also includes inline migration helpers for backward-compatible column additions:
 ```python
 async def add_column_if_not_exists(conn, table: str, column: str, col_type: str):
     """Add a column to an existing table if it doesn't exist."""
@@ -862,12 +961,26 @@ function loadInstances() {
 ### Relationships
 
 ```
+User (standalone, multi-user auth)
+
 GitLabInstance (1)
     ├──> InstancePair (N) via source_instance_id
     └──> InstancePair (N) via target_instance_id
 
 InstancePair (1)
     └──> Mirror (N) via instance_pair_id
+
+Mirror (1)
+    └──> MirrorIssueConfig (1) via mirror_id
+
+MirrorIssueConfig (1)
+    ├──> IssueMapping (N) via mirror_issue_config_id
+    ├──> LabelMapping (N) via mirror_issue_config_id
+    └──> IssueSyncJob (N) via mirror_issue_config_id
+
+IssueMapping (1)
+    ├──> CommentMapping (N) via issue_mapping_id
+    └──> AttachmentMapping (N) via issue_mapping_id
 ```
 
 ### Cascade Delete Behavior
@@ -2856,4 +2969,4 @@ See [docs/ENTERPRISE_DEPLOYMENT.md](docs/ENTERPRISE_DEPLOYMENT.md) for comprehen
 
 ---
 
-This guide should serve as your comprehensive reference when working on the GitLab Mirror Wizard codebase. Follow these patterns and conventions to maintain consistency and quality across the project.
+This guide should serve as your comprehensive reference when working on the Mirror Maestro codebase. Follow these patterns and conventions to maintain consistency and quality across the project.
