@@ -657,17 +657,19 @@ If you are using a custom `POSTGRES_USER` (not the default `postgres`), replace 
 
 **Step 2: Update the `.env` file**
 
-Update **both** password references in your `.env` file to match the new password:
+Update `POSTGRES_PASSWORD` in your `.env` file to match the new password:
 
 ```bash
-# Update the password used by docker-compose for the db service
 POSTGRES_PASSWORD=your-new-secure-password
-
-# Update the connection string used by the application
-DATABASE_URL=postgresql+asyncpg://postgres:your-new-secure-password@db:5432/mirror_maestro
 ```
 
-If you are running locally (not via Docker), your `DATABASE_URL` host will be `localhost` instead of `db`.
+**How this works with Docker Compose:** The `docker-compose.yml` constructs the application's `DATABASE_URL` automatically from the `POSTGRES_PASSWORD` variable (see line 46 in `docker-compose.yml`). You only need to update `POSTGRES_PASSWORD` — do **not** try to set `DATABASE_URL` directly in `.env`, because the explicit `environment` entry in `docker-compose.yml` takes precedence over `env_file` values and your override would be silently ignored.
+
+**For local development (without Docker):** There is no `docker-compose.yml` involved, so you must update `DATABASE_URL` directly in `.env` instead:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://postgres:your-new-secure-password@localhost:5432/mirror_maestro
+```
 
 **Step 3: Restart the application**
 
@@ -687,13 +689,12 @@ Check that the application starts successfully and can connect to the database:
 docker-compose logs app --tail=20
 ```
 
-Look for the normal startup messages. If you see connection errors like `password authentication failed`, double-check that the password in `DATABASE_URL` exactly matches what you set in the `ALTER USER` command.
+Look for the normal startup messages. If you see connection errors like `password authentication failed`, double-check that `POSTGRES_PASSWORD` in `.env` exactly matches what you set in the `ALTER USER` command.
 
 **Important notes:**
 
 - **Production mode validation**: If `ENVIRONMENT=production`, the application will refuse to start if `DATABASE_URL` still contains the default credentials (`postgres:postgres`). Changing the password resolves this.
 - **Backups**: If you use Mirror Maestro's backup/restore feature, note that backups do not contain database credentials. After restoring a backup on a new deployment, configure the password independently.
-- **docker-compose.yml**: The `DATABASE_URL` for the `app` service in `docker-compose.yml` is constructed from `POSTGRES_USER` and `POSTGRES_PASSWORD` variables. If you override `DATABASE_URL` directly in your `.env` file, that takes precedence — make sure the password is consistent in both places.
 
 #### Database Migrations
 
