@@ -222,6 +222,13 @@ class GitLabClient:
                 "get_all": get_all,
                 "per_page": per_page,
             }
+            if search:
+                # Use similarity ordering for search queries — this leverages
+                # GitLab's trigram matching (pg_trgm) which produces more
+                # reliable results for exact and near-exact name matches than
+                # the default created_at ordering.  Available since GitLab 14.1.
+                kwargs["order_by"] = "similarity"
+                kwargs["sort"] = "desc"
             if not get_all:
                 kwargs["page"] = page
 

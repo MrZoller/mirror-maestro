@@ -3193,10 +3193,7 @@ async function loadMoreProjects(side, page) {
     }
 
     try {
-        const res = await apiRequest(
-            `/api/instances/${instanceId}/projects?search=${encodeURIComponent(searchTerm)}&per_page=${perPage}&page=${page}&get_all=false`
-        );
-        const newProjects = res?.projects || [];
+        const newProjects = await _fetchProjects(instanceId, searchTerm, perPage, page);
         let filtered = filterProjectsByPath(newProjects, pathFilter);
 
         // Deduplicate against existing projects
@@ -3226,6 +3223,13 @@ async function loadMoreProjects(side, page) {
             loadMoreBtn.classList.remove('loading');
         }
     }
+}
+
+async function _fetchProjects(instanceId, searchTerm, perPage, page) {
+    const res = await apiRequest(
+        `/api/instances/${instanceId}/projects?search=${encodeURIComponent(searchTerm)}&per_page=${perPage}&page=${page}&get_all=false`
+    );
+    return res?.projects || [];
 }
 
 async function searchProjectsForMirror(side, { linkedQuery } = {}) {
@@ -3289,10 +3293,22 @@ async function searchProjectsForMirror(side, { linkedQuery } = {}) {
 
     const perPage = 100;
     try {
-        const res = await apiRequest(
-            `/api/instances/${instanceId}/projects?search=${encodeURIComponent(searchTerm)}&per_page=${perPage}&page=1&get_all=false`
-        );
-        const allResults = res?.projects || [];
+        let allResults = await _fetchProjects(instanceId, searchTerm, perPage, 1);
+
+        // Fallback: if the exact search returned nothing, retry with the
+        // search term trimmed by one character, then filter client-side.
+        // Works around a GitLab API quirk where exact project name matches
+        // sometimes return no results while partial matches do.
+        if (allResults.length === 0 && searchTerm.length > 2) {
+            const shorter = searchTerm.slice(0, -1);
+            const retryResults = await _fetchProjects(instanceId, shorter, perPage, 1);
+            const lowerQ = q.toLowerCase();
+            allResults = retryResults.filter(p => {
+                const name = (p.name || '').toLowerCase();
+                const fullPath = (p.path_with_namespace || '').toLowerCase();
+                return name.includes(lowerQ) || fullPath.includes(lowerQ);
+            });
+        }
 
         // Apply client-side path filtering when user included group path
         const projects = filterProjectsByPath(allResults, pathFilter);
