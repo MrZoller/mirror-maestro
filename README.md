@@ -267,12 +267,17 @@ The easiest way to run Mirror Maestro is using the pre-built Docker image from G
        image: ghcr.io/mrzoller/mirror-maestro:latest
    ```
 
-4. **Start the application**
+4. **Create the database volume** (one-time setup)
+   ```bash
+   docker volume create mirror-maestro_postgres_data
+   ```
+
+5. **Start the application**
    ```bash
    docker-compose up -d
    ```
 
-5. **Access the web interface**
+6. **Access the web interface**
    Open your browser to `http://localhost` (or `http://localhost:8000` if not using nginx)
 
    Default credentials (if auth is enabled):
@@ -308,12 +313,17 @@ If you prefer to build the image locally:
    # Edit .env with your preferred settings
    ```
 
-3. **Start the application**
+3. **Create the database volume** (one-time setup)
+   ```bash
+   ./scripts/create-db-volume.sh
+   ```
+
+4. **Start the application**
    ```bash
    docker-compose up -d
    ```
 
-4. **Access the web interface**
+5. **Access the web interface**
    Open your browser to `http://localhost`
 
    Default credentials (if auth is enabled):
@@ -620,6 +630,29 @@ The `docker-compose.yml` includes CPU and memory limits for all services:
 | Nginx | 1 | 256MB | 64MB |
 
 Adjust these in `docker-compose.yml` based on your workload.
+
+#### Database Volume Protection
+
+The PostgreSQL data volume is marked as `external` in `docker-compose.yml`, which means:
+
+- `docker-compose down -v` will **not** remove it
+- `docker volume prune` will **not** remove it
+- It must be explicitly destroyed with `docker volume rm mirror-maestro_postgres_data`
+
+The volume must be created once before the first run:
+
+```bash
+./scripts/create-db-volume.sh
+# or directly: docker volume create mirror-maestro_postgres_data
+```
+
+**For development** (if you want Compose to manage the volume automatically):
+
+```bash
+cp docker-compose.override.example.yml docker-compose.override.yml
+```
+
+This override reverts to the default Compose behavior where `docker-compose down -v` **will** delete the volume.
 
 #### Request Logging
 
