@@ -1006,16 +1006,16 @@ function renderDashboard(metrics) {
     renderPairsDistribution(metrics.mirrors_by_pair);
 
     // Render status freshness
-    renderStatusFreshness(metrics.status_freshness);
+    renderStatusFreshness(metrics.status_freshness, metrics.summary.total_mirrors);
 }
 
-function renderStatusFreshness(freshness) {
+function renderStatusFreshness(freshness, totalMirrors) {
     const container = document.getElementById('status-freshness-info');
     if (!container || !freshness) return;
 
     const autoRefresh = freshness.auto_refresh || {};
     const staleCount = freshness.stale_count || 0;
-    const total = (freshness.fresh_count || 0) + staleCount;
+    const total = totalMirrors || 0;
 
     let html = '<div class="freshness-details">';
 
@@ -4094,15 +4094,18 @@ function formatMirrorStatus(mirror) {
     }
 
     // Dim the badge if the status data is stale (>1 hour old)
-    const stale = isStatusStale(mirror.updated_at);
+    // Use status_checked_at (when we last fetched from GitLab) rather than
+    // updated_at (which changes on any row edit).
+    const checkedAt = mirror.status_checked_at;
+    const stale = isStatusStale(checkedAt);
     const staleClass = stale ? ' badge-stale' : '';
     let badge = `<span class="badge ${badgeClass}${staleClass}">${escapeHtml(displayStatus)}</span>`;
 
-    // Show relative age of the status
-    const age = timeAgo(mirror.updated_at);
+    // Show relative age of the status check
+    const age = timeAgo(checkedAt);
     if (age) {
         const ageClass = stale ? 'text-warning' : 'text-muted';
-        badge += `<br><small class="${ageClass}" title="Status last checked ${formatZulu(mirror.updated_at)}">${age}</small>`;
+        badge += `<br><small class="${ageClass}" title="Status last checked ${formatZulu(checkedAt)}">${age}</small>`;
     }
 
     // Add error tooltip if there's an error

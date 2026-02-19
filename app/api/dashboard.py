@@ -119,18 +119,18 @@ async def get_dashboard_metrics(
     ]
 
     # Status freshness: how old are the mirror statuses?
+    # Uses status_checked_at (when we last fetched status from GitLab)
+    # rather than updated_at (which changes on any row modification).
     now = datetime.utcnow()
-    freshness_threshold = now - timedelta(
-        minutes=settings.mirror_status_refresh_interval_minutes * 2
-    )
     stale_threshold = now - timedelta(hours=1)
 
     freshness_result = await db.execute(
         select(
-            func.count(case((Mirror.updated_at >= freshness_threshold, 1))).label('fresh'),
-            func.count(case((Mirror.updated_at < stale_threshold, 1))).label('stale'),
-            func.min(Mirror.updated_at).label('oldest'),
-            func.max(Mirror.updated_at).label('newest'),
+            func.count(Mirror.id).label('total'),
+            func.count(case((Mirror.status_checked_at >= stale_threshold, 1))).label('fresh'),
+            func.count(case(((Mirror.status_checked_at < stale_threshold) | Mirror.status_checked_at.is_(None), 1))).label('stale'),
+            func.min(Mirror.status_checked_at).label('oldest'),
+            func.max(Mirror.status_checked_at).label('newest'),
         )
     )
     freshness = freshness_result.one()

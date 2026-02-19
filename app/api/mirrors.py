@@ -367,6 +367,7 @@ class MirrorResponse(BaseModel):
     last_update_status: str | None
     last_error: str | None  # Error message from GitLab if last update failed
     enabled: bool
+    status_checked_at: str | None = None  # When status was last fetched from GitLab
     # Token status fields
     mirror_token_expires_at: str | None = None
     token_status: str | None = None  # "active", "expiring_soon", "expired", "none"
@@ -628,6 +629,7 @@ async def list_mirrors(
                 last_update_at=mirror.last_update_at.isoformat() + "Z" if mirror.last_update_at else None,
                 last_update_status=mirror.last_update_status,
                 last_error=mirror.last_error,
+                status_checked_at=mirror.status_checked_at.isoformat() + "Z" if mirror.status_checked_at else None,
                 enabled=mirror.enabled,
                 mirror_token_expires_at=mirror.mirror_token_expires_at.isoformat() + "Z" if mirror.mirror_token_expires_at else None,
                 token_status=_compute_token_status(mirror.mirror_token_expires_at),
@@ -1242,6 +1244,7 @@ async def create_mirror(
         last_update_at=db_mirror.last_update_at.isoformat() + "Z" if db_mirror.last_update_at else None,
         last_update_status=db_mirror.last_update_status,
         last_error=db_mirror.last_error,
+        status_checked_at=db_mirror.status_checked_at.isoformat() + "Z" if db_mirror.status_checked_at else None,
         enabled=db_mirror.enabled,
         mirror_token_expires_at=db_mirror.mirror_token_expires_at.isoformat() + "Z" if db_mirror.mirror_token_expires_at else None,
         token_status=_compute_token_status(db_mirror.mirror_token_expires_at),
@@ -1448,6 +1451,7 @@ async def get_mirror(
         last_update_at=mirror.last_update_at.isoformat() + "Z" if mirror.last_update_at else None,
         last_update_status=mirror.last_update_status,
         last_error=mirror.last_error,
+        status_checked_at=mirror.status_checked_at.isoformat() + "Z" if mirror.status_checked_at else None,
         enabled=mirror.enabled,
         mirror_token_expires_at=mirror.mirror_token_expires_at.isoformat() + "Z" if mirror.mirror_token_expires_at else None,
         token_status=_compute_token_status(mirror.mirror_token_expires_at),
@@ -1648,6 +1652,7 @@ async def update_mirror(
         last_update_at=mirror.last_update_at.isoformat() + "Z" if mirror.last_update_at else None,
         last_update_status=mirror.last_update_status,
         last_error=mirror.last_error,
+        status_checked_at=mirror.status_checked_at.isoformat() + "Z" if mirror.status_checked_at else None,
         enabled=mirror.enabled,
         mirror_token_expires_at=mirror.mirror_token_expires_at.isoformat() + "Z" if mirror.mirror_token_expires_at else None,
         token_status=_compute_token_status(mirror.mirror_token_expires_at),
@@ -2692,6 +2697,7 @@ async def _refresh_mirror_status(
     mirror.last_update_at = last_update_at
     mirror.last_successful_update = last_successful_update
     mirror.last_error = last_error
+    mirror.status_checked_at = datetime.utcnow()
 
     await db.commit()
     await db.refresh(mirror)
