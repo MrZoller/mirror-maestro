@@ -42,6 +42,10 @@ spec:
                 configMapKeyRef:
                   name: mirror-maestro-config
                   key: POSTGRES_DB
+            # Use a subdirectory for PGDATA so that storage provisioners
+            # that place lost+found at the volume root don't break initdb.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
