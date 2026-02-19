@@ -10,4 +10,4 @@
 volumes:
   postgres_data:
     external: false
-    name: mirror-maestro-postgres-data
+    name: mirror-maestro_postgres_data

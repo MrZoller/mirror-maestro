@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-VOLUME_NAME="mirror-maestro-postgres-data"
+VOLUME_NAME="mirror-maestro_postgres_data"
 
 if docker volume inspect "$VOLUME_NAME" >/dev/null 2>&1; then
     echo "Volume '$VOLUME_NAME' already exists."
