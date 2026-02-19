@@ -3295,6 +3295,9 @@ async function searchProjectsForMirror(side, { linkedQuery } = {}) {
     try {
         let allResults = await _fetchProjects(instanceId, searchTerm, perPage, 1);
 
+        // Track raw result count for pagination before any client-side filtering.
+        let rawResultCount = allResults.length;
+
         // Fallback: if the exact search returned nothing, retry with the
         // search term trimmed by one character, then filter client-side.
         // Works around a GitLab API quirk where exact project name matches
@@ -3302,6 +3305,7 @@ async function searchProjectsForMirror(side, { linkedQuery } = {}) {
         if (allResults.length === 0 && searchTerm.length > 2) {
             const shorter = searchTerm.slice(0, -1);
             const retryResults = await _fetchProjects(instanceId, shorter, perPage, 1);
+            rawResultCount = retryResults.length;
             const lowerQ = q.toLowerCase();
             allResults = retryResults.filter(p => {
                 const name = (p.name || '').toLowerCase();
@@ -3315,7 +3319,7 @@ async function searchProjectsForMirror(side, { linkedQuery } = {}) {
         autocompleteState[side].projects = projects;
         autocompleteState[side].highlightedIndex = -1;
 
-        const hasMore = allResults.length >= perPage;
+        const hasMore = rawResultCount >= perPage;
 
         if (projects.length === 0) {
             if (pathFilter && hasMore) {
