@@ -39,6 +39,9 @@
     --text-secondary: #94a3b8;
     --border-color: #334155;
 
+    --secondary-color: #5ba3e6;
+    --secondary-hover: #7bb8ed;
+
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 1px rgba(0, 0, 0, 0.2);
     --shadow-md: 0 10px 24px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
 }
@@ -686,6 +689,16 @@ table thead tr.table-filter-row th {
 table td {
     padding: 12px;
     border-bottom: 1px solid var(--border-color);
+}
+
+table td a {
+    color: var(--secondary-color);
+    text-decoration: none;
+}
+
+table td a:hover {
+    color: var(--secondary-hover);
+    text-decoration: underline;
 }
 
 table tbody tr:hover {
