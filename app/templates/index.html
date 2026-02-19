@@ -627,113 +627,116 @@
                 <p class="text-muted">Create and restore complete backups of your Mirror Maestro database and encryption key.</p>
             </div>
 
-            <!-- Create Backup -->
-            <div class="card">
-                <h3>📦 Create Backup</h3>
-                <p>Download a complete backup of your Mirror Maestro configuration.</p>
+            <div class="backup-columns">
+                <!-- Create Backup -->
+                <div class="card backup-card">
+                    <div class="backup-card-header">
+                        <h3>Create Backup</h3>
+                        <p class="text-muted">Download a complete backup of your configuration.</p>
+                    </div>
 
-                <div class="backup-info">
                     <div class="backup-stat-grid">
                         <div class="backup-stat">
-                            <div class="backup-stat-label">GitLab Instances</div>
                             <div class="backup-stat-value" id="backup-stat-instances">-</div>
+                            <div class="backup-stat-label">Instances</div>
                         </div>
                         <div class="backup-stat">
-                            <div class="backup-stat-label">Instance Pairs</div>
                             <div class="backup-stat-value" id="backup-stat-pairs">-</div>
+                            <div class="backup-stat-label">Pairs</div>
                         </div>
                         <div class="backup-stat">
-                            <div class="backup-stat-label">Mirrors</div>
                             <div class="backup-stat-value" id="backup-stat-mirrors">-</div>
+                            <div class="backup-stat-label">Mirrors</div>
                         </div>
                         <div class="backup-stat">
-                            <div class="backup-stat-label">Database Size</div>
                             <div class="backup-stat-value" id="backup-stat-size">-</div>
+                            <div class="backup-stat-label">DB Size</div>
                         </div>
                     </div>
 
                     <div class="backup-includes">
-                        <p><strong>Backup includes:</strong></p>
-                        <ul>
-                            <li>All GitLab instances (with encrypted tokens)</li>
-                            <li>All instance pairs (with default settings)</li>
-                            <li>All mirrors (with configurations and status)</li>
-                            <li>Encryption key (required to decrypt tokens)</li>
-                        </ul>
+                        <strong>Includes:</strong> instances, pairs, mirrors, and encryption key
                     </div>
 
                     <div class="alert alert-warning">
-                        <strong>⚠️ Security Warning:</strong> Backup files contain your encryption key and can decrypt all stored GitLab tokens. Store backups securely and never share them publicly!
+                        <strong>Security:</strong> Backup files contain your encryption key and can decrypt all stored tokens. Store securely.
                     </div>
+
+                    <button id="create-backup-btn" class="btn btn-primary" style="width: 100%;">
+                        <span id="create-backup-text">Create & Download Backup</span>
+                        <span id="create-backup-spinner" class="btn-spinner" style="display:none;">
+                            <div class="spinner"></div>
+                        </span>
+                    </button>
                 </div>
 
-                <button id="create-backup-btn" class="btn btn-primary">
-                    <span id="create-backup-text">Create & Download Backup</span>
-                    <span id="create-backup-spinner" class="btn-spinner" style="display:none;">
-                        <div class="spinner"></div>
-                    </span>
-                </button>
-            </div>
+                <!-- Restore from Backup -->
+                <div class="card backup-card">
+                    <div class="backup-card-header">
+                        <h3>Restore from Backup</h3>
+                        <p class="text-muted">Replace current configuration from a backup file.</p>
+                    </div>
 
-            <!-- Restore from Backup -->
-            <div class="card">
-                <h3>📤 Restore from Backup</h3>
-                <p>Restore your configuration from a backup file.</p>
+                    <div class="alert alert-danger">
+                        <strong>Warning:</strong> Restoring replaces all current data (instances, pairs, mirrors, and encryption key). This cannot be undone.
+                    </div>
 
-                <div class="alert alert-danger">
-                    <strong>⚠️ Warning:</strong> Restoring will REPLACE all current data including:
-                    <ul>
-                        <li>All GitLab instances</li>
-                        <li>All instance pairs</li>
-                        <li>All mirrors</li>
-                        <li>The encryption key</li>
-                    </ul>
-                    This action cannot be undone. Make sure you have a current backup before proceeding.
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label>
+                            <input type="checkbox" id="backup-before-restore" checked>
+                            Create backup before restore
+                        </label>
+                        <p class="text-muted" style="margin-top: 4px; font-size: 0.85rem;">
+                            Saves a copy of current data first.
+                        </p>
+                    </div>
+
+                    <div class="backup-upload">
+                        <input type="file" id="restore-file-input" accept=".tar.gz" style="display:none;">
+                        <button id="select-backup-btn" class="btn btn-secondary">Select File</button>
+                        <span id="restore-filename" class="text-muted">No file selected</span>
+                    </div>
+
+                    <button id="restore-backup-btn" class="btn btn-danger" style="width: 100%;" disabled>
+                        <span id="restore-backup-text">Restore Backup</span>
+                        <span id="restore-backup-spinner" class="btn-spinner" style="display:none;">
+                            <div class="spinner"></div>
+                        </span>
+                    </button>
                 </div>
-
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="backup-before-restore" checked>
-                        Create backup before restore (recommended)
-                    </label>
-                    <p class="text-muted" style="margin-top: 8px;">
-                        Automatically creates a backup of your current data before restoring.
-                    </p>
-                </div>
-
-                <div class="backup-upload">
-                    <input type="file" id="restore-file-input" accept=".tar.gz" style="display:none;">
-                    <button id="select-backup-btn" class="btn btn-secondary">Select Backup File</button>
-                    <span id="restore-filename" class="text-muted">No file selected</span>
-                </div>
-
-                <button id="restore-backup-btn" class="btn btn-danger" disabled>
-                    <span id="restore-backup-text">Restore Backup</span>
-                    <span id="restore-backup-spinner" class="btn-spinner" style="display:none;">
-                        <div class="spinner"></div>
-                    </span>
-                </button>
             </div>
 
             <!-- Backup Information -->
             <div class="card">
-                <h3>ℹ️ Backup Information</h3>
-                <ul>
-                    <li><strong>Format:</strong> Backups are compressed archives (.tar.gz)</li>
-                    <li><strong>Portability:</strong> Compatible across Mirror Maestro versions and servers</li>
-                    <li><strong>Migration:</strong> Can be used to migrate between different servers</li>
-                    <li><strong>Security:</strong> Encryption key is included - keep backups safe!</li>
-                    <li><strong>Automatic naming:</strong> Files are named <code>mirror-maestro-backup-YYYYMMDD-HHMMSS.tar.gz</code></li>
-                </ul>
+                <h3>Backup Information</h3>
 
-                <h4>Best Practices</h4>
-                <ul>
-                    <li>Create regular backups (daily or weekly depending on your change frequency)</li>
-                    <li>Store backups in a secure location separate from your Mirror Maestro server</li>
-                    <li>Test your backups periodically to ensure they can be restored</li>
-                    <li>Keep multiple backup versions in case of corruption</li>
-                    <li>Use encryption or access controls on your backup storage</li>
-                </ul>
+                <div class="backup-info-grid">
+                    <div class="backup-info-item">
+                        <div class="backup-info-label">Format</div>
+                        <div class="backup-info-desc">Compressed archives (<code>.tar.gz</code>)</div>
+                    </div>
+                    <div class="backup-info-item">
+                        <div class="backup-info-label">Portability</div>
+                        <div class="backup-info-desc">Compatible across versions and servers</div>
+                    </div>
+                    <div class="backup-info-item">
+                        <div class="backup-info-label">Migration</div>
+                        <div class="backup-info-desc">Transfer configuration between servers</div>
+                    </div>
+                    <div class="backup-info-item">
+                        <div class="backup-info-label">Naming</div>
+                        <div class="backup-info-desc"><code>mirror-maestro-backup-YYYYMMDD-HHMMSS.tar.gz</code></div>
+                    </div>
+                </div>
+
+                <h4 style="margin-top: 20px; margin-bottom: 12px;">Best Practices</h4>
+                <div class="backup-practices">
+                    <div class="backup-practice-item">Back up regularly based on your change frequency</div>
+                    <div class="backup-practice-item">Store backups separately from your Mirror Maestro server</div>
+                    <div class="backup-practice-item">Test restores periodically to verify backup integrity</div>
+                    <div class="backup-practice-item">Keep multiple versions in case of corruption</div>
+                    <div class="backup-practice-item">Use encryption or access controls on backup storage</div>
+                </div>
             </div>
         </div>
 
