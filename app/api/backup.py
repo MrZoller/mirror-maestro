@@ -181,16 +181,21 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     await db.execute(text("DELETE FROM mirrors"))
     await db.execute(text("DELETE FROM instance_pairs"))
     await db.execute(text("DELETE FROM gitlab_instances"))
-    await db.execute(text("DELETE FROM users"))
 
-    # Import users
-    for row in data.get('users', []):
-        for field in ['created_at', 'updated_at']:
-            if row.get(field) and isinstance(row[field], str):
-                row[field] = _parse_naive_utc(row[field])
-        user = User(**row)
-        db.add(user)
-    counts['users'] = len(data.get('users', []))
+    # Only clear and restore users if the backup contains user data.
+    # Pre-change backups lack the 'users' key; deleting unconditionally
+    # would silently wipe all accounts when restoring a legacy backup.
+    if 'users' in data:
+        await db.execute(text("DELETE FROM users"))
+        for row in data['users']:
+            for field in ['created_at', 'updated_at']:
+                if row.get(field) and isinstance(row[field], str):
+                    row[field] = _parse_naive_utc(row[field])
+            user = User(**row)
+            db.add(user)
+        counts['users'] = len(data['users'])
+    else:
+        counts['users'] = 0
 
     # Import GitLab instances
     for row in data.get('gitlab_instances', []):

@@ -444,3 +444,59 @@ async def test_restore_with_complex_data(client, session_maker, monkeypatch):
     data = mirrors_resp.json()
     assert data['total'] == 1
     assert len(data['mirrors']) == 1
+
+
+@pytest.mark.asyncio
+async def test_restore_legacy_backup_preserves_users(client, session_maker):
+    """Test that restoring a pre-change backup (no 'users' key) does not wipe existing users."""
+    from app.models import User
+
+    # Seed a user directly in the database
+    async with session_maker() as s:
+        user = User(
+            username="existing-admin",
+            hashed_password="hashed-pw",
+            email="admin@example.com",
+            is_admin=True,
+            is_active=True,
+        )
+        s.add(user)
+        await s.commit()
+
+    # Create a legacy-style backup that has no 'users' key
+    db_data = {
+        "gitlab_instances": [],
+        "instance_pairs": [],
+        "mirrors": []
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmppath = Path(tmpdir)
+
+        db_file = tmppath / "database.json"
+        db_file.write_text(json.dumps(db_data))
+
+        key_file = tmppath / "encryption.key"
+        key_file.write_bytes(b"test-key-content")
+
+        backup_file = tmppath / "legacy-no-users.tar.gz"
+        with tarfile.open(backup_file, "w:gz") as tar:
+            tar.add(db_file, arcname="database.json")
+            tar.add(key_file, arcname="encryption.key")
+
+        backup_content = backup_file.read_bytes()
+
+    resp = await client.post(
+        "/api/backup/restore",
+        files={"file": ("legacy-no-users.tar.gz", io.BytesIO(backup_content), "application/gzip")},
+        data={"create_backup_first": "false"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+    # Verify the user was NOT deleted
+    async with session_maker() as s:
+        result = await s.execute(select(User))
+        users = result.scalars().all()
+        assert len(users) == 1
+        assert users[0].username == "existing-admin"
