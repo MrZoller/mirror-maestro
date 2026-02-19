@@ -24,6 +24,14 @@ Self-contained Kubernetes manifests for deploying Mirror Maestro. No changes to 
                        └─────────┘          └───────────┘
 ```
 
+### Components
+
+| Resource | Description |
+|----------|-------------|
+| **mirror-maestro** Deployment | FastAPI application serving the web UI and API on port 8000. Includes a `wait-for-postgres` init container that blocks startup until the database is reachable. Persists encryption keys to the `app-data` PVC. |
+| **postgres** Deployment | PostgreSQL 16 database storing all configuration, mirrors, issue mappings, and user accounts. Data is persisted to the `postgres-data` PVC. Uses `Recreate` strategy to avoid two pods writing to the same volume. |
+| **Ingress** | Routes external traffic to the app Service with optional TLS termination. Replaces the nginx reverse proxy used in the Docker Compose setup. |
+
 ## Prerequisites
 
 - Kubernetes cluster (1.25+)
