@@ -3210,6 +3210,15 @@ async function loadMoreProjects(side, page) {
 
         const hasMore = newProjects.length >= perPage;
         renderAutocompleteItems(dropdown, allProjects, side, pathFilter, hasMore, page);
+
+        // When no matches have been found yet, show an informative message
+        if (allProjects.length === 0 && pathFilter) {
+            const message = hasMore
+                ? 'No matches on this page'
+                : `No projects matching path "${escapeHtml(q)}" — try a shorter path`;
+            dropdown.insertAdjacentHTML('afterbegin',
+                `<div class="autocomplete-empty">${message}</div>`);
+        }
     } catch (error) {
         console.error('Failed to load more projects:', error);
         if (loadMoreBtn) {
