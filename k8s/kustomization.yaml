@@ -21,3 +21,5 @@ commonLabels:
 images:
   - name: ghcr.io/mrzoller/mirror-maestro
     newTag: latest  # Pin to a specific version for production, e.g. "1.2.3"
+  - name: postgres
+    newTag: 16-alpine  # Must match the tag used in postgres/ and app/ init container

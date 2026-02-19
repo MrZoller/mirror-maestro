@@ -35,7 +35,7 @@ Self-contained Kubernetes manifests for deploying Mirror Maestro. No changes to 
 
 ### 1. Configure secrets
 
-Edit `secret.yaml` and replace **all** `CHANGE-ME-*` placeholder values:
+Edit `secret.yaml` and replace **all** default placeholder values:
 
 ```bash
 vi k8s/secret.yaml
@@ -148,6 +148,31 @@ images:
   - name: ghcr.io/mrzoller/mirror-maestro
     newTag: "1.2.3"
 ```
+
+## Air-Gapped / Private Registry Deployment
+
+In environments without internet access, all container images must be available in a local registry. Both images are listed in `kustomization.yaml` so you can retarget them with `newName`:
+
+```yaml
+# kustomization.yaml
+images:
+  - name: ghcr.io/mrzoller/mirror-maestro
+    newName: harbor.internal/mirror-maestro/app
+    newTag: "1.2.3"
+  - name: postgres
+    newName: harbor.internal/proxy/postgres
+    newTag: 16-alpine
+```
+
+This rewrites all image references in the manifests (app container, init container, and postgres deployment) without editing individual YAML files.
+
+You also need to enable local frontend vendor assets so the app doesn't try to load Chart.js and D3.js from the CDN at runtime. Set this in `configmap.yaml`:
+
+```yaml
+  USE_LOCAL_VENDOR_ASSETS: "true"
+```
+
+The Docker image must have been built with the vendor assets baked in (see `scripts/download-vendor-assets.sh` and the main project's [Enterprise Deployment guide](../docs/ENTERPRISE_DEPLOYMENT.md)).
 
 ## Troubleshooting
 
