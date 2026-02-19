@@ -634,6 +634,67 @@ Example log output:
 2026-01-03 12:34:56 [INFO] [abc12345] GET /api/mirrors -> 200 (45ms)
 ```
 
+#### Changing the Database Password
+
+If you need to change the PostgreSQL password after the database has already been created (e.g., rotating credentials, hardening a deployment that was initially set up with defaults), follow these steps carefully. Simply changing `POSTGRES_PASSWORD` in `.env` is **not sufficient** — that variable is only used by PostgreSQL during initial database creation (when the data volume is empty). After that, the password lives inside PostgreSQL itself and must be changed there directly.
+
+**Step 1: Change the password inside PostgreSQL**
+
+Connect to the running database container and use `ALTER USER`:
+
+```bash
+# Connect to PostgreSQL inside the container
+docker-compose exec db psql -U postgres -d mirror_maestro
+
+# Change the password (replace 'your-new-secure-password' with your actual password)
+ALTER USER postgres WITH PASSWORD 'your-new-secure-password';
+
+# Exit psql
+\q
+```
+
+If you are using a custom `POSTGRES_USER` (not the default `postgres`), replace `postgres` in the `ALTER USER` command with your username.
+
+**Step 2: Update the `.env` file**
+
+Update **both** password references in your `.env` file to match the new password:
+
+```bash
+# Update the password used by docker-compose for the db service
+POSTGRES_PASSWORD=your-new-secure-password
+
+# Update the connection string used by the application
+DATABASE_URL=postgresql+asyncpg://postgres:your-new-secure-password@db:5432/mirror_maestro
+```
+
+If you are running locally (not via Docker), your `DATABASE_URL` host will be `localhost` instead of `db`.
+
+**Step 3: Restart the application**
+
+Restart the services so the application picks up the new connection string:
+
+```bash
+docker-compose restart app
+```
+
+You do **not** need to restart the `db` service — PostgreSQL already accepted the password change in Step 1. Restarting only the `app` service minimizes downtime.
+
+**Step 4: Verify connectivity**
+
+Check that the application starts successfully and can connect to the database:
+
+```bash
+docker-compose logs app --tail=20
+```
+
+Look for the normal startup messages. If you see connection errors like `password authentication failed`, double-check that the password in `DATABASE_URL` exactly matches what you set in the `ALTER USER` command.
+
+**Important notes:**
+
+- **Production mode validation**: If `ENVIRONMENT=production`, the application will refuse to start if `DATABASE_URL` still contains the default credentials (`postgres:postgres`). Changing the password resolves this.
+- **Backups**: If you use Mirror Maestro's backup/restore feature, note that backups do not contain database credentials. After restoring a backup on a new deployment, configure the password independently.
+- **docker-compose.yml**: The `DATABASE_URL` for the `app` service in `docker-compose.yml` is constructed from `POSTGRES_USER` and `POSTGRES_PASSWORD` variables. If you override `DATABASE_URL` directly in your `.env` file, that takes precedence — make sure the password is consistent in both places.
+
 #### Database Migrations
 
 Mirror Maestro uses [Alembic](https://alembic.sqlalchemy.org/) for database schema management:
