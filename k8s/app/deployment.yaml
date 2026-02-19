@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mirror-maestro
+  namespace: mirror-maestro
+  labels:
+    app.kubernetes.io/name: mirror-maestro
+    app.kubernetes.io/component: app
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mirror-maestro
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mirror-maestro
+        app.kubernetes.io/component: app
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        # Wait for PostgreSQL to be reachable before starting the app
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: app
+          image: ghcr.io/mrzoller/mirror-maestro:latest
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: mirror-maestro-config
+            - secretRef:
+                name: mirror-maestro-secret
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+          livenessProbe:
+            httpGet:
+              path: /api/health/quick
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health/quick
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: app-data
+          persistentVolumeClaim:
+            claimName: app-data

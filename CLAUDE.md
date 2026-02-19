@@ -36,7 +36,7 @@ This document provides comprehensive guidance for AI assistants working on the M
 - **Authentication**: HTTP Basic Auth (single-user) or JWT tokens (multi-user)
 - **Visualization**: Chart.js (dashboard charts), D3.js (topology graph)
 - **Scheduling**: APScheduler (issue sync scheduling)
-- **Deployment**: Docker and Docker Compose (nginx + app + PostgreSQL)
+- **Deployment**: Docker and Docker Compose (nginx + app + PostgreSQL), Kubernetes (self-contained manifests in `k8s/`)
 
 ### Core Features
 
@@ -195,6 +195,22 @@ mirror-maestro/
 │   ├── env.py                        # Alembic environment
 │   ├── script.py.mako                # Migration template
 │   └── versions/                     # Migration files
+│
+├── k8s/                              # Kubernetes deployment manifests (self-contained)
+│   ├── README.md                     # K8s deployment guide
+│   ├── kustomization.yaml            # Kustomize entry point (kubectl apply -k k8s/)
+│   ├── namespace.yaml                # mirror-maestro namespace
+│   ├── configmap.yaml                # Non-sensitive environment variables
+│   ├── secret.yaml                   # Sensitive credentials (template with placeholders)
+│   ├── ingress.yaml                  # Ingress with TLS support
+│   ├── app/
+│   │   ├── deployment.yaml           # FastAPI app with probes and init container
+│   │   ├── service.yaml              # ClusterIP service
+│   │   └── pvc.yaml                  # Persistent storage for encryption keys
+│   └── postgres/
+│       ├── deployment.yaml           # PostgreSQL with probes
+│       ├── service.yaml              # ClusterIP service
+│       └── pvc.yaml                  # Persistent storage for database
 │
 ├── nginx/                            # Nginx reverse proxy configuration
 │   └── templates/
@@ -2090,6 +2106,25 @@ MIRROR_SETTING_FIELDS = [
     Enable new setting
 </label>
 ```
+
+### Keeping Kubernetes Manifests in Sync
+
+The `k8s/` directory contains self-contained Kubernetes manifests that mirror the Docker Compose deployment. When making changes to the main project, check whether the Kubernetes manifests need a corresponding update:
+
+| Change | K8s file(s) to update |
+|--------|----------------------|
+| New environment variable in `app/config.py` | `k8s/configmap.yaml` (non-sensitive) or `k8s/secret.yaml` (credentials/tokens) |
+| Health check endpoint changed in `app/api/health.py` | `k8s/app/deployment.yaml` (liveness/readiness probe paths) |
+| Application port changed | `k8s/app/deployment.yaml` (containerPort), `k8s/app/service.yaml` (targetPort) |
+| Resource limits changed in `docker-compose.yml` | `k8s/app/deployment.yaml` and/or `k8s/postgres/deployment.yaml` (resources) |
+| PostgreSQL version bumped in `docker-compose.yml` | `k8s/postgres/deployment.yaml` (image tag) |
+| New container/service added to `docker-compose.yml` | New manifest(s) in `k8s/`, update `k8s/kustomization.yaml` resources list |
+
+Changes that do **not** require k8s updates:
+- Application code changes (same Docker image)
+- Database schema/migration changes (handled by the app at startup)
+- Frontend changes (bundled in the Docker image)
+- Nginx configuration changes (Kubernetes uses Ingress instead)
 
 ## Troubleshooting
 

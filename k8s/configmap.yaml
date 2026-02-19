@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mirror-maestro-config
+  namespace: mirror-maestro
+  labels:
+    app.kubernetes.io/name: mirror-maestro
+    app.kubernetes.io/component: config
+data:
+  # Application
+  ENVIRONMENT: "production"
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  LOG_LEVEL: "INFO"
+
+  # Authentication mode
+  AUTH_ENABLED: "true"
+  AUTH_USERNAME: "admin"
+  MULTI_USER_ENABLED: "false"
+
+  # Database connection pool
+  DB_POOL_SIZE: "20"
+  DB_POOL_MAX_OVERFLOW: "40"
+  DB_POOL_RECYCLE: "3600"
+  DB_POOL_PRE_PING: "true"
+
+  # PostgreSQL (used by the postgres container)
+  POSTGRES_DB: "mirror_maestro"
+
+  # GitLab API resilience
+  GITLAB_API_DELAY_MS: "200"
+  GITLAB_API_MAX_RETRIES: "3"
+  GITLAB_API_TIMEOUT: "60"
+
+  # Circuit breaker
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD: "5"
+  CIRCUIT_BREAKER_RECOVERY_TIMEOUT: "60"
+
+  # Issue sync
+  MAX_ISSUES_PER_SYNC: "10000"
+  MAX_PAGES_PER_REQUEST: "100"
+  MAX_ATTACHMENT_SIZE_MB: "100"
+  ATTACHMENT_DOWNLOAD_TIMEOUT: "30"
+  ISSUE_BATCH_SIZE: "50"
+  SYNC_SHUTDOWN_TIMEOUT: "300"
+
+  # Automatic mirror status refresh
+  MIRROR_STATUS_REFRESH_ENABLED: "true"
+  MIRROR_STATUS_REFRESH_INTERVAL_MINUTES: "15"
+
+  # Frontend assets (set to "true" for air-gapped environments)
+  USE_LOCAL_VENDOR_ASSETS: "false"
