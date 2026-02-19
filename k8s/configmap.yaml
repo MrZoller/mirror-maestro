@@ -44,5 +44,9 @@ data:
   ISSUE_BATCH_SIZE: "50"
   SYNC_SHUTDOWN_TIMEOUT: "300"
 
+  # Automatic mirror status refresh
+  MIRROR_STATUS_REFRESH_ENABLED: "true"
+  MIRROR_STATUS_REFRESH_INTERVAL_MINUTES: "15"
+
   # Frontend assets (set to "true" for air-gapped environments)
   USE_LOCAL_VENDOR_ASSETS: "false"
