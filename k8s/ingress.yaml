@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mirror-maestro
+  namespace: mirror-maestro
+  labels:
+    app.kubernetes.io/name: mirror-maestro
+    app.kubernetes.io/component: ingress
+  annotations:
+    # Uncomment and adjust for your ingress controller:
+
+    # --- nginx-ingress ---
+    # nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    # nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+
+    # --- cert-manager (automatic TLS certificates) ---
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  # Uncomment to specify your ingress class:
+  # ingressClassName: nginx
+
+  tls:
+    - hosts:
+        - mirror-maestro.example.com
+      secretName: mirror-maestro-tls  # Provide your own TLS secret, or use cert-manager
+
+  rules:
+    - host: mirror-maestro.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mirror-maestro
+                port:
+                  number: 80

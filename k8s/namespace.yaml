@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mirror-maestro
+  labels:
+    app.kubernetes.io/name: mirror-maestro
+    app.kubernetes.io/part-of: mirror-maestro
