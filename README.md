@@ -116,15 +116,63 @@ Orchestrate GitLab mirrors across multiple instance pairs with precision. A mode
 
 ## Architecture
 
+### Overview
+
+```
+┌───────────────────────────────────────────────────┐
+│              Browser (SPA)                        │
+│  Vanilla JS  ·  D3.js topology  ·  Chart.js      │
+└──────────────────────┬────────────────────────────┘
+                       │ HTTPS
+┌──────────────────────▼────────────────────────────┐
+│            nginx  (reverse proxy)                 │
+│  SSL/TLS termination  ·  static file caching      │
+└──────────────────────┬────────────────────────────┘
+                       │ HTTP :8000
+┌──────────────────────▼────────────────────────────┐
+│          FastAPI  (async Python 3.11+)            │
+│                                                   │
+│  API routers ─── instances / pairs / mirrors /    │
+│                  topology / dashboard / export     │
+│                                                   │
+│  Core ───────── GitLab client (python-gitlab)     │
+│                  Fernet encryption                 │
+│                  Auth (Basic or JWT)               │
+│                  Rate limiter & circuit breakers   │
+│                  Issue sync engine                 │
+│                                                   │
+│  Data ───────── SQLAlchemy 2.0 (async ORM)        │
+└────────┬─────────────────────────────┬────────────┘
+         │                             │
+┌────────▼────────┐          ┌─────────▼──────────┐
+│   PostgreSQL    │          │  GitLab instances   │
+│  (asyncpg)      │          │  (REST API)         │
+└─────────────────┘          └────────────────────┘
+```
+
+Requests arrive through **nginx**, which terminates SSL and proxies to the
+**FastAPI** backend.  The backend talks to **PostgreSQL** for persistent
+state (instances, pairs, mirrors, tokens) and to one or more **GitLab
+instances** via the python-gitlab library for mirror CRUD, project
+discovery, and issue syncing.
+
+All GitLab tokens are encrypted at rest with **Fernet** (symmetric
+encryption).  External API calls are protected by per-instance **circuit
+breakers** and **rate limiting** with exponential-backoff retries.
+
+The frontend is a single-page application built with vanilla JavaScript—no
+build step required.  D3.js powers the interactive topology graph and
+Chart.js renders the dashboard charts.
+
 ### Technology Stack
 - **Backend**: Python 3.11+ with FastAPI
 - **Database**: PostgreSQL (async with asyncpg)
 - **Frontend**: Vanilla JavaScript with modern CSS
 - **Visualization**: Chart.js for charts, D3.js for topology graphs
 - **API Integration**: python-gitlab library
-- **Deployment**: Docker and Docker Compose
+- **Deployment**: Docker and Docker Compose (nginx + app + postgres)
 - **Authentication**: HTTP Basic Auth (single-user) or JWT tokens (multi-user)
-- **Security**: Encrypted storage of GitLab tokens using Fernet encryption
+- **Security**: Encrypted token storage (Fernet), security headers, rate limiting, circuit breakers
 
 ### Project Structure
 ```
@@ -213,6 +261,19 @@ If you prefer to build the image locally:
    git clone https://github.com/MrZoller/mirror-maestro.git
    cd mirror-maestro
    ```
+
+   > **Note**: This repository uses [Git LFS](https://git-lfs.com/) for logo and
+   > screenshot images. Make sure `git-lfs` is installed **before** you clone,
+   > otherwise the Docker build will embed LFS pointer files instead of the actual
+   > images and logos will appear broken.
+   >
+   > ```bash
+   > # Install Git LFS (once per machine)
+   > git lfs install
+   >
+   > # If you already cloned without LFS, pull the real files:
+   > git lfs pull
+   > ```
 
 2. **Configure environment**
    ```bash
