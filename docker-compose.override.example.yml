@@ -1,0 +1,13 @@
+# Development override: removes the external volume protection so that
+# docker-compose up/down manages the volume automatically.
+#
+# Usage:
+#   cp docker-compose.override.example.yml docker-compose.override.yml
+#   docker-compose up
+#
+# WARNING: With this override, 'docker-compose down -v' WILL delete the database.
+
+volumes:
+  postgres_data:
+    external: false
+    name: mirror-maestro-postgres-data

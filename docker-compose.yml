@@ -90,3 +90,11 @@ services:
 
 volumes:
   postgres_data:
+    # external: true prevents 'docker-compose down -v' and 'docker volume prune'
+    # from destroying the database. The volume must be created once before first run:
+    #   docker volume create mirror-maestro-postgres-data
+    # To opt out of this protection (e.g. for development), set in .env:
+    #   PROTECT_DB_VOLUME=false
+    # and use docker-compose.override.yml (see below).
+    external: true
+    name: mirror-maestro-postgres-data
