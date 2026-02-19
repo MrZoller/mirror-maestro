@@ -225,7 +225,17 @@ class GitLabClient:
             if not get_all:
                 kwargs["page"] = page
 
-            projects = self.gl.projects.list(**kwargs)
+            # When searching, prefer similarity ordering (GitLab 14.1+) which
+            # uses trigram matching for more reliable exact/near-exact results.
+            # Fall back gracefully if the instance doesn't support it.
+            if search:
+                try:
+                    sim_kwargs = {**kwargs, "order_by": "similarity", "sort": "desc"}
+                    projects = self.gl.projects.list(**sim_kwargs)
+                except Exception:
+                    projects = self.gl.projects.list(**kwargs)
+            else:
+                projects = self.gl.projects.list(**kwargs)
             return [
                 {
                     "id": p.id,
