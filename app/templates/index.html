@@ -852,7 +852,8 @@
                         <span class="tech-badge">Python 3.11+</span>
                         <span class="tech-badge">FastAPI</span>
                         <span class="tech-badge">SQLAlchemy</span>
-                        <span class="tech-badge">SQLite</span>
+                        <span class="tech-badge">PostgreSQL</span>
+                        <span class="tech-badge">Chart.js</span>
                         <span class="tech-badge">D3.js</span>
                     </div>
                 </div>
@@ -878,14 +879,24 @@
                 <h3>Application Overview</h3>
                 <p>Mirror Maestro is organized into several tabs, each focused on a specific aspect of mirror management:</p>
                 <ul>
-                    <li><strong><a href="#" onclick="switchTab('dashboard-tab'); return false;">Dashboard</a></strong> - Quick overview with statistics, recent activity, and system health</li>
+                    <li><strong><a href="#" onclick="switchTab('dashboard-tab'); return false;">Dashboard</a></strong> - Real-time overview with statistics, health charts, recent activity, and live polling</li>
                     <li><strong><a href="#" onclick="switchTab('instances-tab'); return false;">GitLab Instances</a></strong> - Manage connections to your GitLab servers</li>
                     <li><strong><a href="#" onclick="switchTab('pairs-tab'); return false;">Instance Pairs</a></strong> - Configure mirroring relationships between instances</li>
-                    <li><strong><a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a></strong> - Create and manage individual repository mirrors</li>
+                    <li><strong><a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a></strong> - Create and manage individual repository mirrors with flat or tree view</li>
                     <li><strong><a href="#" onclick="switchTab('topology-tab'); return false;">Topology</a></strong> - Visualize your mirror network with an interactive graph</li>
                     <li><strong><a href="#" onclick="switchTab('backup-tab'); return false;">Backup</a></strong> - Create and restore complete database backups</li>
+                    <li><strong><a href="#" onclick="switchTab('settings-tab'); return false;">Settings</a></strong> - User management (multi-user mode only, admin access required)</li>
                     <li><strong><a href="#" onclick="switchTab('about-tab'); return false;">About</a></strong> - Project information and version details</li>
                     <li><strong><a href="#" onclick="switchTab('help-tab'); return false;">Help</a></strong> - This comprehensive guide</li>
+                </ul>
+
+                <h3>UI Features</h3>
+                <p>Mirror Maestro includes several convenience features available across the application:</p>
+                <ul>
+                    <li><strong>Dark Mode</strong> - Toggle between light and dark themes using the sun/moon button in the header. Your preference is saved automatically.</li>
+                    <li><strong>Global Search</strong> - Use the search box in the header to quickly find instances, pairs, and mirrors by name or path. Results appear in a dropdown as you type.</li>
+                    <li><strong>Table Sorting & Filtering</strong> - Click column headers to sort any table. Use the search input above tables to filter rows in real time.</li>
+                    <li><strong>URL Navigation</strong> - Tabs are reflected in the URL (e.g., <code>?tab=mirrors-tab</code>), so you can bookmark or share specific views.</li>
                 </ul>
 
                 <h3>Core Concepts</h3>
@@ -901,6 +912,32 @@
                     <li><strong>Create an Instance Pair</strong> - Go to <a href="#" onclick="switchTab('pairs-tab'); return false;">Instance Pairs</a> and create a pair (can be the same instance for internal mirroring).</li>
                     <li><strong>Create a Mirror</strong> - Go to <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a>, select your pair, choose source and target projects, and create the mirror. Authentication tokens are managed automatically.</li>
                 </ol>
+            </div>
+
+            <!-- Dashboard -->
+            <div class="card">
+                <h2>Dashboard</h2>
+                <p class="text-muted">Real-time overview of your mirror infrastructure.</p>
+
+                <h3>Stats Cards</h3>
+                <p>The top of the dashboard shows four key metrics at a glance:</p>
+                <ul>
+                    <li><strong>Total Mirrors</strong> - Number of mirrors configured across all pairs</li>
+                    <li><strong>Health %</strong> - Percentage of mirrors that are syncing successfully</li>
+                    <li><strong>Failed</strong> - Number of mirrors with sync errors that need attention</li>
+                    <li><strong>Syncing Now</strong> - Number of mirrors currently in the process of syncing</li>
+                </ul>
+
+                <h3>Charts & Activity</h3>
+                <ul>
+                    <li><strong>Recent Activity</strong> - Timeline of recent mirror events (syncs, failures, token rotations)</li>
+                    <li><strong>Health Chart</strong> - Visual breakdown of mirror health across all pairs (Chart.js)</li>
+                    <li><strong>Pairs Distribution</strong> - Chart showing how mirrors are distributed across instance pairs</li>
+                    <li><strong>System Health</strong> - Component status for database, mirrors, and tokens</li>
+                </ul>
+
+                <h3>Live Polling</h3>
+                <p>The dashboard automatically refreshes data at regular intervals while you have it open. This ensures you always see up-to-date information without manually reloading the page.</p>
             </div>
 
             <!-- GitLab Instances -->
@@ -1109,7 +1146,7 @@ Safe and controlled cleanup</code></pre>
                 <ol>
                     <li>Navigate to the <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a> tab</li>
                     <li>Select an instance pair from the dropdown</li>
-                    <li>Search and select the source project</li>
+                    <li>Search and select the source project (type to autocomplete from available projects)</li>
                     <li>Search and select the target project</li>
                     <li>Click "Preflight Check" to validate the configuration</li>
                     <li>Review the effective settings shown in the preflight results</li>
@@ -1119,9 +1156,10 @@ Safe and controlled cleanup</code></pre>
                 <h3>Preflight Checks</h3>
                 <p>Before creating a mirror, the preflight check verifies:</p>
                 <ul>
-                    <li>Both projects are accessible</li>
-                    <li>Required tokens are available</li>
-                    <li>The effective mirror settings (combining mirror, group, and pair defaults)</li>
+                    <li>Both source and target projects are accessible via the GitLab API</li>
+                    <li>Required permissions are available for token creation</li>
+                    <li>The effective mirror settings (combining mirror-level overrides and pair defaults)</li>
+                    <li>No duplicate mirror already exists for the same source/target combination</li>
                 </ul>
 
                 <h3>Mirror Settings</h3>
@@ -1130,6 +1168,32 @@ Safe and controlled cleanup</code></pre>
                     <li><strong>Only protected branches</strong> - Sync only branches marked as protected</li>
                     <li><strong>Trigger builds</strong> - Run CI/CD on target after successful sync</li>
                     <li><strong>Overwrite diverged</strong> - Force-push if target has diverged from source</li>
+                </ul>
+
+                <h3>View Modes</h3>
+                <p>The mirrors table supports two display modes, toggled with the view mode button:</p>
+                <ul>
+                    <li><strong>Flat View</strong> - A standard table listing all mirrors with sorting, filtering, and pagination (50 mirrors per page)</li>
+                    <li><strong>Tree View</strong> - Mirrors grouped hierarchically by project namespace/path, making it easy to see the structure of large mirror sets</li>
+                </ul>
+
+                <h3>Mirror Actions</h3>
+                <p>Each mirror row provides several actions:</p>
+                <ul>
+                    <li><strong>Update Now</strong> - Trigger an immediate sync</li>
+                    <li><strong>Refresh Status</strong> - Fetch the latest status from GitLab</li>
+                    <li><strong>Rotate Token</strong> - Create a new project access token and update the mirror</li>
+                    <li><strong>Verify</strong> - Check whether the mirror still exists on GitLab and if settings match</li>
+                    <li><strong>Edit</strong> - Modify mirror settings (per-mirror overrides)</li>
+                    <li><strong>Delete</strong> - Remove the mirror from GitLab and the database</li>
+                </ul>
+
+                <h3>Batch Operations</h3>
+                <p>When viewing mirrors for a pair, several batch actions are available:</p>
+                <ul>
+                    <li><strong>Verify All</strong> - Check all visible mirrors against GitLab in a single operation</li>
+                    <li><strong>Refresh Status</strong> - Batch-refresh sync status for all mirrors in the pair</li>
+                    <li><strong>Export / Import</strong> - Bulk export or import mirrors (see the <a href="#" onclick="document.querySelector('#help-tab h2:nth-of-type(9)').scrollIntoView({behavior:'smooth'}); return false;">Import/Export</a> section)</li>
                 </ul>
 
                 <h3>Syncing Mirrors</h3>
@@ -1620,6 +1684,131 @@ Safe and controlled cleanup</code></pre>
                 </ul>
             </div>
 
+            <!-- User Management -->
+            <div class="card">
+                <h2>User Management</h2>
+                <p class="text-muted">Manage application access with multi-user authentication.</p>
+
+                <h3>Authentication Modes</h3>
+                <p>Mirror Maestro supports two authentication modes:</p>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Mode</th>
+                            <th>How It Works</th>
+                            <th>Best For</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Single-User</strong> (default)</td>
+                            <td>HTTP Basic Auth with a single username/password set via environment variables (<code>AUTH_USERNAME</code>, <code>AUTH_PASSWORD</code>)</td>
+                            <td>Small teams, personal use, simple deployments</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Multi-User</strong></td>
+                            <td>JWT-based authentication with individual user accounts stored in the database. Enable with <code>MULTI_USER_ENABLED=true</code></td>
+                            <td>Teams, enterprise environments, audit requirements</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Multi-User Mode</h3>
+                <p>When multi-user mode is enabled:</p>
+                <ul>
+                    <li>An initial admin account is created on first startup (configured via <code>INITIAL_ADMIN_USERNAME</code> and <code>INITIAL_ADMIN_PASSWORD</code>)</li>
+                    <li>The <strong><a href="#" onclick="switchTab('settings-tab'); return false;">Settings</a></strong> tab becomes available to admin users</li>
+                    <li>Users log in via a login form and receive a JWT token valid for 24 hours (configurable via <code>JWT_EXPIRATION_HOURS</code>)</li>
+                    <li>The user menu in the header shows the logged-in username and role</li>
+                </ul>
+
+                <h3>User Roles</h3>
+                <ul>
+                    <li><strong>Admin</strong> - Full access including user management (create, edit, delete users)</li>
+                    <li><strong>Regular User</strong> - Full access to mirrors, instances, pairs, and all other features except user management</li>
+                </ul>
+
+                <h3>Managing Users (Admin Only)</h3>
+                <p>In the <a href="#" onclick="switchTab('settings-tab'); return false;">Settings</a> tab, administrators can:</p>
+                <ul>
+                    <li>Create new user accounts with username, email, password, and role</li>
+                    <li>Edit existing user details and change roles</li>
+                    <li>Deactivate or delete user accounts</li>
+                </ul>
+                <p>All users (including non-admins) can change their own password via the user menu in the header.</p>
+            </div>
+
+            <!-- Advanced Configuration -->
+            <div class="card">
+                <h2>Advanced Configuration</h2>
+                <p class="text-muted">Enterprise and advanced deployment options.</p>
+
+                <h3>Custom CA Certificates</h3>
+                <p>If your GitLab instances use certificates signed by a custom or internal Certificate Authority (common in enterprise environments), configure Mirror Maestro to trust them:</p>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto;"><code># In .env
+CUSTOM_CA_CERT=/app/certs/ca-bundle.crt</code></pre>
+                <p>The CA bundle file should be in PEM format. Leave empty to use the system default CA bundle.</p>
+
+                <h3>TLS Keep-Alive</h3>
+                <p>In environments with aggressive firewall idle timeouts (common in AWS and enterprise networks), persistent connections to GitLab instances may be dropped. TLS keep-alive maintains background connections to prevent this:</p>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto;"><code># In .env
+TLS_KEEPALIVE_ENABLED=true
+TLS_KEEPALIVE_INTERVAL=5       # Seconds between reconnects
+TLS_KEEPALIVE_TLS_VERSION=1.2  # TLS version (1.2, 1.3, or empty for auto)</code></pre>
+                <p>TLS keep-alive is a global switch; individual instances can also opt in or out. Check status via the GitLab Instances tab.</p>
+
+                <h3>SSRF Protection</h3>
+                <p>By default, Mirror Maestro blocks GitLab URLs that resolve to private/internal IP addresses. For air-gapped or enterprise environments with internal GitLab instances, set:</p>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto;"><code># In .env
+ALLOW_PRIVATE_IPS=true</code></pre>
+
+                <h3>Air-Gapped / Enterprise Deployments</h3>
+                <p>Mirror Maestro supports fully air-gapped environments where external internet access is restricted. All dependencies (Docker images, APT packages, Python packages, frontend assets) can be pulled from local mirrors:</p>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto;"><code># In .env
+DOCKER_REGISTRY=harbor.company.com/proxy/
+APT_MIRROR=http://nexus.company.com/repository/ubuntu-proxy/ubuntu
+PIP_INDEX_URL=http://nexus.company.com/repository/pypi-proxy/simple
+USE_LOCAL_VENDOR_ASSETS=true</code></pre>
+                <p>See the <a href="https://github.com/MrZoller/mirror-maestro/blob/main/docs/ENTERPRISE_DEPLOYMENT.md" target="_blank" rel="noopener">Enterprise Deployment Guide</a> for complete setup instructions.</p>
+
+                <h3>Production Mode</h3>
+                <p>When <code>ENVIRONMENT=production</code>, Mirror Maestro enforces additional security checks at startup:</p>
+                <ul>
+                    <li>Default passwords (<code>changeme</code>) must be changed</li>
+                    <li>Database URL must not contain default credentials</li>
+                    <li>SQL debug logging is disabled to prevent credential exposure</li>
+                </ul>
+
+                <h3>Rate Limiting & Resilience</h3>
+                <p>All GitLab API operations (mirror management, issue syncing, batch operations) use enterprise-grade resilience patterns:</p>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Setting</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>GITLAB_API_DELAY_MS</code></td>
+                            <td>200</td>
+                            <td>Delay between API operations in milliseconds (~300 ops/min)</td>
+                        </tr>
+                        <tr>
+                            <td><code>GITLAB_API_MAX_RETRIES</code></td>
+                            <td>3</td>
+                            <td>Automatic retries on rate limit or transient errors</td>
+                        </tr>
+                        <tr>
+                            <td><code>GITLAB_API_TIMEOUT</code></td>
+                            <td>60</td>
+                            <td>Timeout for individual GitLab API requests (seconds)</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
             <!-- Troubleshooting -->
             <div class="card">
                 <h2>Troubleshooting</h2>
@@ -1681,12 +1870,41 @@ Safe and controlled cleanup</code></pre>
                     </tbody>
                 </table>
 
+                <h3>Token & Authentication Errors</h3>
+                <table class="help-table">
+                    <thead>
+                        <tr>
+                            <th>Error</th>
+                            <th>Cause</th>
+                            <th>Solution</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>Token expired</code></td>
+                            <td>Project access token has expired (1-year lifetime)</td>
+                            <td>Click "Rotate Token" on the affected mirror to create a new token</td>
+                        </tr>
+                        <tr>
+                            <td><code>InvalidToken</code></td>
+                            <td>Encryption key changed or corrupted</td>
+                            <td>Restore your <code>data/encryption.key</code> from backup, or re-create instances with new tokens</td>
+                        </tr>
+                        <tr>
+                            <td>Login returns HTML error</td>
+                            <td>Server error during JWT authentication</td>
+                            <td>Check application logs (<code>docker-compose logs app</code>) for database or JWT secret issues</td>
+                        </tr>
+                    </tbody>
+                </table>
+
                 <h3>Checking Mirror Status</h3>
                 <ol>
                     <li>Go to the <a href="#" onclick="switchTab('mirrors-tab'); return false;">Mirrors</a> tab</li>
                     <li>Find your mirror in the table</li>
                     <li>Check the "Status" column for the current state</li>
-                    <li>Click "Details" or "Refresh Status" for more information</li>
+                    <li>Click "Refresh Status" to fetch the latest information from GitLab</li>
+                    <li>Click "Verify" to check if the mirror still exists on GitLab and if settings match</li>
                     <li>The "Last Sync" column shows when the mirror last synced successfully</li>
                 </ol>
 
@@ -1695,6 +1913,7 @@ Safe and controlled cleanup</code></pre>
                 <ul>
                     <li>Check the GitLab project's mirror settings directly in the GitLab UI</li>
                     <li>Review GitLab's documentation on <a href="https://docs.gitlab.com/ee/user/project/repository/mirror/" target="_blank" rel="noopener">repository mirroring</a></li>
+                    <li>Use the <a href="/docs" target="_blank" rel="noopener">API Documentation</a> (Swagger UI) to test endpoints directly</li>
                     <li>Open an issue on the <a href="https://github.com/MrZoller/mirror-maestro/issues" target="_blank" rel="noopener">Mirror Maestro GitHub repository</a></li>
                 </ul>
             </div>
