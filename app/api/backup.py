@@ -28,6 +28,7 @@ from app.core.encryption import encryption
 from app.database import get_db, engine
 from app.config import settings
 from app.models import (
+    User,
     GitLabInstance,
     InstancePair,
     Mirror,
@@ -113,6 +114,10 @@ async def _export_table_data(db: AsyncSession) -> Dict[str, List[Dict]]:
     """Export all table data as dictionaries."""
     data = {}
 
+    # Export users (for multi-user mode)
+    result = await db.execute(select(User).order_by(User.id))
+    data['users'] = [_model_to_dict(row) for row in result.scalars().all()]
+
     # Export GitLab instances
     result = await db.execute(select(GitLabInstance).order_by(GitLabInstance.id))
     data['gitlab_instances'] = [_model_to_dict(row) for row in result.scalars().all()]
@@ -176,6 +181,21 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     await db.execute(text("DELETE FROM mirrors"))
     await db.execute(text("DELETE FROM instance_pairs"))
     await db.execute(text("DELETE FROM gitlab_instances"))
+
+    # Only clear and restore users if the backup contains user data.
+    # Pre-change backups lack the 'users' key; deleting unconditionally
+    # would silently wipe all accounts when restoring a legacy backup.
+    if 'users' in data:
+        await db.execute(text("DELETE FROM users"))
+        for row in data['users']:
+            for field in ['created_at', 'updated_at']:
+                if row.get(field) and isinstance(row[field], str):
+                    row[field] = _parse_naive_utc(row[field])
+            user = User(**row)
+            db.add(user)
+        counts['users'] = len(data['users'])
+    else:
+        counts['users'] = 0
 
     # Import GitLab instances
     for row in data.get('gitlab_instances', []):
@@ -264,6 +284,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     # Reset sequences for PostgreSQL
     # Use a whitelist of valid table names to prevent SQL injection
     VALID_SEQUENCE_TABLES = frozenset({
+        'users',
         'gitlab_instances',
         'instance_pairs',
         'mirrors',
@@ -278,6 +299,7 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     try:
         # Get max IDs and reset sequences
         for table, model in [
+            ('users', User),
             ('gitlab_instances', GitLabInstance),
             ('instance_pairs', InstancePair),
             ('mirrors', Mirror),
@@ -365,6 +387,7 @@ async def create_backup(
             "database_type": "postgresql",
             "app_version": settings.app_title,
             "record_counts": {
+                "users": len(db_data.get('users', [])),
                 "gitlab_instances": len(db_data.get('gitlab_instances', [])),
                 "instance_pairs": len(db_data.get('instance_pairs', [])),
                 "mirrors": len(db_data.get('mirrors', [])),
@@ -627,6 +650,7 @@ async def get_backup_stats(
     from sqlalchemy import func
 
     # Get counts
+    user_count = await db.scalar(select(func.count()).select_from(User))
     instance_count = await db.scalar(select(func.count()).select_from(GitLabInstance))
     pair_count = await db.scalar(select(func.count()).select_from(InstancePair))
     mirror_count = await db.scalar(select(func.count()).select_from(Mirror))
@@ -649,6 +673,7 @@ async def get_backup_stats(
         db_size = 0
 
     return {
+        "users": user_count or 0,
         "instances": instance_count or 0,
         "pairs": pair_count or 0,
         "mirrors": mirror_count or 0,
