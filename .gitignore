@@ -57,6 +57,7 @@ Thumbs.db
 
 # Docker
 .dockerignore
+docker-compose.override.yml
 
 # Testing
 .pytest_cache/
