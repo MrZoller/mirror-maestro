@@ -37,6 +37,7 @@ async def init_db():
     await _migrate_add_instance_version_columns()
     await _migrate_add_issue_sync_enabled_columns()
     await _migrate_add_tls_keepalive_column()
+    await _migrate_add_status_checked_at_column()
     # Clean up orphaned issue sync data from previously deleted mirrors
     await _cleanup_orphaned_issue_sync_data()
 
@@ -178,6 +179,37 @@ async def _migrate_add_tls_keepalive_column():
                 ))
             except Exception as e:
                 logging.debug(f"Could not add tls_keepalive_enabled column: {e}")
+
+
+async def _migrate_add_status_checked_at_column():
+    """
+    Add status_checked_at column to mirrors table if it doesn't exist.
+
+    This column tracks when the mirror status was last fetched from GitLab,
+    as distinct from updated_at which changes on any row modification.
+    """
+    import logging
+    from sqlalchemy import text, inspect
+
+    async with engine.begin() as conn:
+        def get_columns(sync_conn):
+            insp = inspect(sync_conn)
+            try:
+                columns = insp.get_columns('mirrors')
+                return {col['name'] for col in columns}
+            except Exception:
+                return set()
+
+        existing_columns = await conn.run_sync(get_columns)
+
+        if 'status_checked_at' not in existing_columns:
+            logging.info("Adding status_checked_at column to mirrors table")
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE mirrors ADD COLUMN status_checked_at TIMESTAMP"
+                ))
+            except Exception as e:
+                logging.debug(f"Could not add status_checked_at column: {e}")
 
 
 async def _cleanup_orphaned_issue_sync_data():

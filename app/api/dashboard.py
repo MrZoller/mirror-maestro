@@ -4,9 +4,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select, func, case, literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models import Mirror, InstancePair, GitLabInstance
 from app.core.auth import verify_credentials
+from app.core.mirror_status_scheduler import mirror_status_scheduler
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -116,6 +118,25 @@ async def get_dashboard_metrics(
         for row in mirrors_by_pair_result.all()
     ]
 
+    # Status freshness: how old are the mirror statuses?
+    # Uses status_checked_at (when we last fetched status from GitLab)
+    # rather than updated_at (which changes on any row modification).
+    now = datetime.utcnow()
+    stale_threshold = now - timedelta(hours=1)
+
+    freshness_result = await db.execute(
+        select(
+            func.count(Mirror.id).label('total'),
+            func.count(case((Mirror.status_checked_at >= stale_threshold, 1))).label('fresh'),
+            func.count(case(((Mirror.status_checked_at < stale_threshold) | Mirror.status_checked_at.is_(None), 1))).label('stale'),
+            func.min(Mirror.status_checked_at).label('oldest'),
+            func.max(Mirror.status_checked_at).label('newest'),
+        )
+    )
+    freshness = freshness_result.one()
+
+    auto_refresh_status = mirror_status_scheduler.get_status()
+
     return {
         "summary": {
             "total_mirrors": total_mirrors,
@@ -129,6 +150,13 @@ async def get_dashboard_metrics(
             "failed": status_counts.get('failed', 0),
             "pending": status_counts.get('pending', 0),
             "unknown": status_counts.get('unknown', 0)
+        },
+        "status_freshness": {
+            "fresh_count": freshness.fresh or 0,
+            "stale_count": freshness.stale or 0,
+            "oldest_update": freshness.oldest.isoformat() + "Z" if freshness.oldest else None,
+            "newest_update": freshness.newest.isoformat() + "Z" if freshness.newest else None,
+            "auto_refresh": auto_refresh_status,
         },
         "recent_activity": recent_activity,
         "mirrors_by_pair": mirrors_by_pair[:5]  # Top 5 pairs

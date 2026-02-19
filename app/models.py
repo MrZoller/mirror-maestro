@@ -109,6 +109,7 @@ class Mirror(Base):
     last_update_at: Mapped[Optional[datetime]] = mapped_column(DateTime)  # Last update attempt
     last_update_status: Mapped[Optional[str]] = mapped_column(String(50))
     last_error: Mapped[Optional[str]] = mapped_column(Text)  # Error message from GitLab
+    status_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime)  # When status was last fetched from GitLab
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Project access token for mirror authentication (auto-managed)
