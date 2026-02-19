@@ -130,6 +130,12 @@ class Settings(BaseSettings):
     # Stale job cleanup
     stale_job_timeout_minutes: int = 60  # Jobs running longer than this are considered stale and will be marked as failed
 
+    # Automatic Mirror Status Refresh
+    # Periodically refreshes mirror statuses from GitLab in the background
+    # to keep dashboard health metrics accurate without manual intervention
+    mirror_status_refresh_enabled: bool = True  # Enable/disable automatic status refresh
+    mirror_status_refresh_interval_minutes: int = 15  # Minutes between refresh cycles
+
     # TLS Keep-Alive (for AWS/enterprise environments with firewall idle timeouts)
     # Maintains persistent openssl s_client connections to keep network paths alive
     tls_keepalive_enabled: bool = False  # Master switch (per-instance opt-in still required)
@@ -300,6 +306,14 @@ class Settings(BaseSettings):
         """Ensure stale job timeout is positive."""
         if v <= 0:
             raise ValueError("stale_job_timeout_minutes must be positive")
+        return v
+
+    @field_validator('mirror_status_refresh_interval_minutes')
+    @classmethod
+    def validate_mirror_status_refresh_interval(cls, v: int) -> int:
+        """Ensure mirror status refresh interval is positive."""
+        if v <= 0:
+            raise ValueError("mirror_status_refresh_interval_minutes must be positive")
         return v
 
     @field_validator('tls_keepalive_interval')

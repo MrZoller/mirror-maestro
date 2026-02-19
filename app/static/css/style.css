@@ -839,6 +839,10 @@ table tbody tr:hover {
     color: var(--info-color);
 }
 
+.badge-stale {
+    opacity: 0.6;
+}
+
 /* Project mirrors badge (shown when selecting projects in create mirror form) */
 .project-mirrors-badge {
     min-height: 24px;
@@ -1113,6 +1117,10 @@ table tbody tr:hover {
 
 .text-muted {
     color: var(--text-secondary);
+}
+
+.text-warning {
+    color: var(--warning-color);
 }
 
 .text-center {
@@ -2050,6 +2058,16 @@ table tbody tr:hover {
 
 .health-dot-unknown {
     background: var(--text-secondary);
+}
+
+/* Status Freshness */
+.status-freshness {
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.freshness-details {
+    line-height: 1.6;
 }
 
 /* Pairs Distribution */

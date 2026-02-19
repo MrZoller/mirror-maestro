@@ -56,6 +56,36 @@ function formatZuluDate(isoString) {
     return d.toISOString().split('T')[0];
 }
 
+/**
+ * Format an ISO 8601 timestamp as a human-readable relative time string.
+ * Returns null for falsy input. Examples: "2m ago", "3h ago", "1d ago".
+ */
+function timeAgo(isoString) {
+    if (!isoString) return null;
+    const d = new Date(_ensureUtc(isoString));
+    if (isNaN(d.getTime())) return null;
+    const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (seconds < 0) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+}
+
+/**
+ * Return true if the given ISO timestamp is considered "stale" (older than 1 hour).
+ */
+function isStatusStale(isoString) {
+    if (!isoString) return true;
+    const d = new Date(_ensureUtc(isoString));
+    if (isNaN(d.getTime())) return true;
+    const ageMs = Date.now() - d.getTime();
+    return ageMs > 3600000; // 1 hour
+}
+
 // Initialize the application
 document.addEventListener('DOMContentLoaded', async () => {
     initDarkMode();
@@ -974,6 +1004,48 @@ function renderDashboard(metrics) {
 
     // Render pairs distribution
     renderPairsDistribution(metrics.mirrors_by_pair);
+
+    // Render status freshness
+    renderStatusFreshness(metrics.status_freshness);
+}
+
+function renderStatusFreshness(freshness) {
+    const container = document.getElementById('status-freshness-info');
+    if (!container || !freshness) return;
+
+    const autoRefresh = freshness.auto_refresh || {};
+    const staleCount = freshness.stale_count || 0;
+    const total = (freshness.fresh_count || 0) + staleCount;
+
+    let html = '<div class="freshness-details">';
+
+    if (autoRefresh.enabled && autoRefresh.running) {
+        const lastCompleted = autoRefresh.last_refresh_completed_at;
+        const age = lastCompleted ? timeAgo(lastCompleted) : null;
+
+        html += `<small class="text-muted">Auto-refresh: every ${autoRefresh.interval_minutes}m`;
+        if (age) {
+            html += ` (last: ${age})`;
+        }
+        html += '</small>';
+
+        if (autoRefresh.refreshing) {
+            html += '<br><small class="text-muted">Refreshing now...</small>';
+        }
+    } else if (autoRefresh.enabled) {
+        html += '<small class="text-muted">Auto-refresh: starting...</small>';
+    } else {
+        html += '<small class="text-muted">Auto-refresh: disabled</small>';
+    }
+
+    if (staleCount > 0 && total > 0) {
+        html += `<br><small class="text-warning">${staleCount} of ${total} mirror statuses are over 1 hour old</small>`;
+    }
+
+    html += '</div>';
+
+    container.innerHTML = html;
+    container.style.display = 'block';
 }
 
 // ----------------------------
@@ -4020,7 +4092,19 @@ function formatMirrorStatus(mirror) {
         badgeClass = 'badge-secondary';
         displayStatus = 'Pending';
     }
-    let badge = `<span class="badge ${badgeClass}">${escapeHtml(displayStatus)}</span>`;
+
+    // Dim the badge if the status data is stale (>1 hour old)
+    const stale = isStatusStale(mirror.updated_at);
+    const staleClass = stale ? ' badge-stale' : '';
+    let badge = `<span class="badge ${badgeClass}${staleClass}">${escapeHtml(displayStatus)}</span>`;
+
+    // Show relative age of the status
+    const age = timeAgo(mirror.updated_at);
+    if (age) {
+        const ageClass = stale ? 'text-warning' : 'text-muted';
+        badge += `<br><small class="${ageClass}" title="Status last checked ${formatZulu(mirror.updated_at)}">${age}</small>`;
+    }
+
     // Add error tooltip if there's an error
     if (mirror.last_error && status === 'failed') {
         const truncatedError = mirror.last_error.substring(0, 50) + (mirror.last_error.length > 50 ? '...' : '');

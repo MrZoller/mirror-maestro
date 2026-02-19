@@ -15,6 +15,7 @@ from app.database import init_db, migrate_mirrors_to_auto_tokens, drop_legacy_gr
 from app.api import instances, pairs, mirrors, export, topology, dashboard, backup, search, health, auth, users, issue_mirrors
 from app.core.auth import verify_credentials, get_password_hash
 from app.core.issue_scheduler import scheduler
+from app.core.mirror_status_scheduler import mirror_status_scheduler
 from app.core.api_rate_limiter import limiter, rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -272,6 +273,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.error(f"Failed to start issue sync scheduler: {e}", exc_info=True)
 
+    # Start mirror status auto-refresh scheduler
+    try:
+        await mirror_status_scheduler.start()
+    except Exception as e:
+        logging.error(f"Failed to start mirror status scheduler: {e}", exc_info=True)
+
     # Start TLS keep-alive manager (if enabled)
     if settings.tls_keepalive_enabled:
         try:
@@ -305,6 +312,12 @@ async def lifespan(app: FastAPI):
             logging.info("TLS keep-alive manager stopped")
         except Exception as e:
             logging.error(f"Error stopping TLS keep-alive manager: {e}", exc_info=True)
+
+    # Shutdown - stop mirror status scheduler
+    try:
+        await mirror_status_scheduler.stop()
+    except Exception as e:
+        logging.error(f"Error stopping mirror status scheduler: {e}", exc_info=True)
 
     # Shutdown - wait for all sync jobs to complete gracefully
     try:
