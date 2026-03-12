@@ -699,6 +699,20 @@ class APIError extends Error {
     }
 }
 
+/**
+ * Check a fetch response for 401 status and handle session expiration.
+ * Returns true if session expired (caller should stop processing).
+ */
+function handleSessionExpiredResponse(response) {
+    if (response.status === 401 && authState.isMultiUser && authState.token) {
+        logout(false);
+        showMessage('Your session has expired. Please sign in again.', 'error');
+        showLoginModal();
+        return true;
+    }
+    return false;
+}
+
 async function apiRequest(url, options = {}) {
     try {
         // Build headers with optional auth token
@@ -750,6 +764,13 @@ async function apiRequest(url, options = {}) {
             // Classify error type based on status code
             if (response.status === 401 || response.status === 403) {
                 errorType = 'auth';
+
+                // Handle session expiration: log out and show login modal
+                if (response.status === 401 && authState.isMultiUser && authState.token) {
+                    logout(false);
+                    showMessage('Your session has expired. Please sign in again.', 'error');
+                    showLoginModal();
+                }
             } else if (response.status === 400 || response.status === 409 || response.status === 422) {
                 errorType = 'validation';
             } else if (response.status >= 500) {
@@ -3791,6 +3812,7 @@ async function exportMirrors() {
         }
         const response = await fetch(`/api/export/pair/${state.selectedPair}`, { headers: exportHeaders });
         if (!response.ok) {
+            if (handleSessionExpiredResponse(response)) return;
             const error = await response.json();
             throw new Error(error.detail || 'Failed to export mirrors');
         }
@@ -3930,6 +3952,7 @@ async function createBackup() {
         const response = await fetch('/api/backup/create', { headers });
 
         if (!response.ok) {
+            if (handleSessionExpiredResponse(response)) return;
             const error = await response.json();
             throw new Error(error.detail || 'Failed to create backup');
         }
@@ -4017,6 +4040,7 @@ async function restoreBackup() {
         });
 
         if (!response.ok) {
+            if (handleSessionExpiredResponse(response)) return;
             const error = await response.json();
             throw new Error(error.detail || 'Failed to restore backup');
         }
@@ -4176,6 +4200,7 @@ function initGlobalSearch() {
                 headers: searchHeaders,
                 signal: globalSearchController.signal
             });
+            if (!response.ok && handleSessionExpiredResponse(response)) return;
             const data = await response.json();
             renderSearchResults(data, resultsContainer);
         } catch (error) {
@@ -4369,8 +4394,13 @@ const authState = {
     isAuthenticated: false,
     isMultiUser: false,
     user: null,
-    token: null
+    token: null,
+    tokenExpiresAt: null  // Unix timestamp (ms) when the token expires
 };
+
+// Session expiration warning interval
+let sessionExpirationTimer = null;
+const SESSION_EXPIRY_WARNING_MS = 5 * 60 * 1000; // Warn 5 minutes before expiry
 
 // Promise that resolves when user is authenticated (for multi-user mode)
 let authReadyResolve = null;
@@ -4390,8 +4420,23 @@ async function initAuth() {
             const storedToken = localStorage.getItem('auth_token');
             if (storedToken) {
                 authState.token = storedToken;
+                const storedExpiresAt = localStorage.getItem('auth_token_expires_at');
+                if (storedExpiresAt) {
+                    authState.tokenExpiresAt = parseInt(storedExpiresAt, 10);
+                }
+
+                // Check if token has already expired before making any requests
+                if (authState.tokenExpiresAt && Date.now() >= authState.tokenExpiresAt) {
+                    logout(false);
+                    showMessage('Your session has expired. Please sign in again.', 'error');
+                    showLoginModal();
+                    await authReady;
+                    return;
+                }
+
                 try {
                     await loadCurrentUser();
+                    startSessionExpirationTimer();
                     document.body.classList.remove('auth-required');
                     authReadyResolve();
                 } catch (error) {
@@ -4594,12 +4639,20 @@ async function handleLogin(event) {
 
         const data = await response.json();
 
-        // Store token
+        // Store token and expiration
         authState.token = data.access_token;
         localStorage.setItem('auth_token', data.access_token);
 
+        if (data.expires_in) {
+            authState.tokenExpiresAt = Date.now() + (data.expires_in * 1000);
+            localStorage.setItem('auth_token_expires_at', String(authState.tokenExpiresAt));
+        }
+
         // Load user info
         await loadCurrentUser();
+
+        // Start session expiration monitoring
+        startSessionExpirationTimer();
 
         // Show main content and signal auth is complete
         document.body.classList.remove('auth-required');
@@ -4623,7 +4676,10 @@ function logout(showMsg = true) {
     authState.token = null;
     authState.user = null;
     authState.isAuthenticated = false;
+    authState.tokenExpiresAt = null;
     localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_token_expires_at');
+    stopSessionExpirationTimer();
 
     hideUserMenu();
 
@@ -4637,6 +4693,48 @@ function logout(showMsg = true) {
 
     if (authState.isMultiUser) {
         showLoginModal();
+    }
+}
+
+// Session expiration timer
+function startSessionExpirationTimer() {
+    stopSessionExpirationTimer();
+    if (!authState.tokenExpiresAt || !authState.isMultiUser) return;
+
+    const checkExpiration = () => {
+        if (!authState.tokenExpiresAt || !authState.token) {
+            stopSessionExpirationTimer();
+            return;
+        }
+
+        const timeLeft = authState.tokenExpiresAt - Date.now();
+
+        if (timeLeft <= 0) {
+            // Token has expired
+            logout(false);
+            showMessage('Your session has expired. Please sign in again.', 'error');
+            showLoginModal();
+        } else if (timeLeft <= SESSION_EXPIRY_WARNING_MS) {
+            // Show warning
+            const minutesLeft = Math.ceil(timeLeft / 60000);
+            showMessage(`Your session will expire in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}. Please save your work.`, 'error');
+        }
+    };
+
+    // Check every 60 seconds
+    sessionExpirationTimer = setInterval(checkExpiration, 60000);
+
+    // Also do an immediate check if we're close to expiry
+    const timeLeft = authState.tokenExpiresAt - Date.now();
+    if (timeLeft <= SESSION_EXPIRY_WARNING_MS) {
+        checkExpiration();
+    }
+}
+
+function stopSessionExpirationTimer() {
+    if (sessionExpirationTimer) {
+        clearInterval(sessionExpirationTimer);
+        sessionExpirationTimer = null;
     }
 }
 
