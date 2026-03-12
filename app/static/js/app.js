@@ -4018,6 +4018,7 @@ async function restoreBackup() {
     const btnSpinner = document.getElementById('restore-backup-spinner');
     const createBackupFirst = document.getElementById('backup-before-restore')?.checked || false;
 
+    let success = false;
     try {
         // Show loading state
         btn.disabled = true;
@@ -4046,6 +4047,7 @@ async function restoreBackup() {
         }
 
         const result = await response.json();
+        success = true;
 
         showMessage('Backup restored successfully! Reloading application...', 'success');
 
@@ -4058,11 +4060,14 @@ async function restoreBackup() {
         console.error('Backup restore failed:', error);
         showMessage(`Failed to restore backup: ${error.message}`, 'error');
     } finally {
-        // Reset button state (skipped on success since page reloads,
-        // but needed for error/session-expiry paths)
-        btn.disabled = false;
-        btnText.style.display = 'inline';
-        btnSpinner.style.display = 'none';
+        // Only reset button state on failure/session-expiry.
+        // On success, keep button disabled until page reloads to prevent
+        // users from triggering a second destructive restore.
+        if (!success) {
+            btn.disabled = false;
+            btnText.style.display = 'inline';
+            btnSpinner.style.display = 'none';
+        }
     }
 }
 
