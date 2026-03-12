@@ -4057,13 +4057,13 @@ async function restoreBackup() {
     } catch (error) {
         console.error('Backup restore failed:', error);
         showMessage(`Failed to restore backup: ${error.message}`, 'error');
-
-        // Reset button state on error
+    } finally {
+        // Reset button state (skipped on success since page reloads,
+        // but needed for error/session-expiry paths)
         btn.disabled = false;
         btnText.style.display = 'inline';
         btnSpinner.style.display = 'none';
     }
-    // Note: We don't reset button state on success because we're reloading the page
 }
 
 async function loadAboutInfo() {
