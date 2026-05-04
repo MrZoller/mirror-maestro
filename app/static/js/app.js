@@ -2152,9 +2152,19 @@ function renderMirrors(mirrors) {
         const statusBadge = mirror.enabled ?
             `<span class="badge badge-success">Enabled</span>` :
             `<span class="badge badge-warning">Disabled</span>`;
+        const statusSort = mirror.enabled ? 'Enabled' : 'Disabled';
 
         // Format update status with appropriate badge color
         const updateStatus = formatMirrorStatus(mirror);
+        const syncStatusSort = (() => {
+            const s = mirror.last_update_status;
+            if (!s) return '';
+            if (s === 'finished' || s === 'success') return 'Success';
+            if (s === 'failed') return 'Failed';
+            if (s === 'started' || s === 'updating' || s === 'syncing') return 'Syncing';
+            if (s === 'pending') return 'Pending';
+            return s;
+        })();
 
         const dir = (mirror.effective_mirror_direction || '').toString().toLowerCase();
         const settingsCell = (() => {
@@ -2279,6 +2289,14 @@ function renderMirrors(mirrors) {
             }
             return '<span class="badge badge-secondary">Unknown</span>';
         })();
+        const tokenSort = (() => {
+            const s = mirror.token_status;
+            if (!s || s === 'none') return 'No token';
+            if (s === 'active') return 'Active';
+            if (s === 'expiring_soon') return 'Expiring';
+            if (s === 'expired') return 'Expired';
+            return 'Unknown';
+        })();
 
         const verifyBadge = getVerificationBadgeHtml(mirror.id);
 
@@ -2287,8 +2305,8 @@ function renderMirrors(mirrors) {
                 <td>${formatProjectPath(mirror.source_project_path, { baseUrl: sourceBaseUrl })}</td>
                 <td>${formatProjectPath(mirror.target_project_path, { baseUrl: targetBaseUrl })}</td>
                 <td>${settingsCell}</td>
-                <td class="mirror-status">${statusBadge}</td>
-                <td>${updateStatus}</td>
+                <td class="mirror-status" data-sort="${statusSort}">${statusBadge}</td>
+                <td data-sort="${syncStatusSort}">${updateStatus}</td>
                 <td data-sort="${escapeHtml(mirror.last_update_at || mirror.last_successful_update || '')}">
                     <div>
                         ${mirror.last_successful_update
@@ -2299,7 +2317,7 @@ function renderMirrors(mirrors) {
                             : ''}
                     </div>
                 </td>
-                <td>${tokenStatusBadge}</td>
+                <td data-sort="${tokenSort}">${tokenStatusBadge}</td>
                 <td>${verifyBadge}</td>
                 <td>
                     <div class="table-actions">
