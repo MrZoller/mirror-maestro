@@ -245,8 +245,12 @@ async def _get_mirror_health(db: AsyncSession) -> MirrorHealthSummary:
             func.count(case((Mirror.enabled == False, 1))).label('disabled'),
             func.count(case(((Mirror.last_update_status == 'success') | (Mirror.last_update_status == 'finished'), 1))).label('success'),
             func.count(case((Mirror.last_update_status == 'failed', 1))).label('failed'),
-            func.count(case(((Mirror.last_update_status == 'pending') | (Mirror.last_update_status == 'started'), 1))).label('pending'),
-            func.count(case((Mirror.last_update_status.is_(None), 1))).label('unknown'),
+            func.count(case((Mirror.last_update_status.in_(['pending', 'started', 'syncing', 'updating']), 1))).label('pending'),
+            func.count(case((
+                Mirror.last_update_status.is_(None) |
+                Mirror.last_update_status.notin_(['success', 'finished', 'failed', 'pending', 'started', 'syncing', 'updating']),
+                1
+            ))).label('unknown'),
         )
     )
     row = result.one()
