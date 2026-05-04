@@ -2658,7 +2658,21 @@ function renderMirrorPagination() {
     const { page, totalPages, total, pageSize } = state.mirrorsPagination;
 
     if (totalPages <= 1) {
-        container.innerHTML = '';
+        container.innerHTML = `
+            <div class="pagination-controls">
+                <div class="pagination-info">
+                    Showing ${total} mirror${total !== 1 ? 's' : ''}
+                </div>
+                <div class="pagination-size">
+                    <select id="mirror-page-size" onchange="changeMirrorPageSize(this.value)" class="table-select">
+                        <option value="25" ${pageSize === 25 ? 'selected' : ''}>25 per page</option>
+                        <option value="50" ${pageSize === 50 ? 'selected' : ''}>50 per page</option>
+                        <option value="100" ${pageSize === 100 ? 'selected' : ''}>100 per page</option>
+                        <option value="200" ${pageSize === 200 ? 'selected' : ''}>200 per page</option>
+                    </select>
+                </div>
+            </div>
+        `;
         return;
     }
 
