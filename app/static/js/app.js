@@ -2421,14 +2421,22 @@ async function refreshAllMirrorStatus() {
 
     showMessage(`Refreshing status for ${mirrorIds.length} mirrors...`, 'info');
 
-    try {
-        const results = await apiRequest('/api/mirrors/refresh-status', {
-            method: 'POST',
-            body: JSON.stringify({ mirror_ids: mirrorIds }),
-        });
+    // Batch requests to avoid proxy timeout (each GitLab call ~500ms, 60s limit)
+    const BATCH_SIZE = 25;
+    const allResults = [];
 
-        const successCount = results.filter(r => r.success).length;
-        const failedCount = results.filter(r => !r.success).length;
+    try {
+        for (let i = 0; i < mirrorIds.length; i += BATCH_SIZE) {
+            const batch = mirrorIds.slice(i, i + BATCH_SIZE);
+            const results = await apiRequest('/api/mirrors/refresh-status', {
+                method: 'POST',
+                body: JSON.stringify({ mirror_ids: batch }),
+            });
+            allResults.push(...results);
+        }
+
+        const successCount = allResults.filter(r => r.success).length;
+        const failedCount = allResults.filter(r => !r.success).length;
 
         if (failedCount === 0) {
             showMessage(`Status refreshed for ${successCount} mirrors`, 'success');
@@ -2506,16 +2514,24 @@ async function verifyAllMirrors() {
         btn.textContent = 'Verifying...';
     }
 
+    // Batch requests to avoid proxy timeout (each GitLab call ~500ms, 60s limit)
+    const BATCH_SIZE = 25;
+    const allResults = [];
+
     try {
-        const results = await apiRequest('/api/mirrors/verify', {
-            method: 'POST',
-            body: JSON.stringify({ mirror_ids: mirrorIds }),
-        });
+        for (let i = 0; i < mirrorIds.length; i += BATCH_SIZE) {
+            const batch = mirrorIds.slice(i, i + BATCH_SIZE);
+            const results = await apiRequest('/api/mirrors/verify', {
+                method: 'POST',
+                body: JSON.stringify({ mirror_ids: batch }),
+            });
+            allResults.push(...results);
+        }
 
         // Update cache and UI for each result
         let healthy = 0, orphan = 0, drift = 0, errors = 0, notCreated = 0;
 
-        for (const result of results) {
+        for (const result of allResults) {
             verificationCache.set(result.mirror_id, result);
             updateVerificationBadge(result.mirror_id, result);
 
