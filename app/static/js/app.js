@@ -1153,6 +1153,22 @@ function refreshSystemHealth() {
     loadSystemHealth();
 }
 
+async function refreshDashboard() {
+    const btn = document.getElementById('dashboard-refresh-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '↻ Refreshing…';
+    }
+    try {
+        await Promise.all([loadDashboard(), updateLiveStats()]);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '↻ Refresh';
+        }
+    }
+}
+
 function renderSystemHealth(health, container) {
     const statusIcons = {
         healthy: '✓',

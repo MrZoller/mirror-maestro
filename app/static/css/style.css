@@ -1764,6 +1764,12 @@ table tbody tr:hover {
    ---------------------------- */
 
 /* Dashboard Stats Cards */
+.dashboard-header {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--spacing-md);
+}
+
 .dashboard-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
