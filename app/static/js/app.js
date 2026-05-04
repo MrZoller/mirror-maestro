@@ -2930,22 +2930,39 @@ function renderTreeNode(node, level, parentPath = '') {
                 const statusBadge = mirror.enabled
                     ? '<span class="badge badge-success">Enabled</span>'
                     : '<span class="badge badge-warning">Disabled</span>';
+                const statusSort = mirror.enabled ? 'Enabled' : 'Disabled';
+
+                const syncStatusSort = (() => {
+                    const s = mirror.last_update_status;
+                    if (!s) return 'N/A';
+                    if (s === 'finished' || s === 'success') return 'Success';
+                    if (s === 'failed') return 'Failed';
+                    if (s === 'started' || s === 'updating' || s === 'syncing') return 'Syncing';
+                    if (s === 'pending') return 'Pending';
+                    return escapeHtml(s);
+                })();
 
                 const tokenStatus = mirror.token_status;
                 let tokenStatusBadge;
+                let tokenSort;
                 if (!tokenStatus || tokenStatus === 'none') {
                     tokenStatusBadge = '<span class="badge badge-secondary">No token</span>';
+                    tokenSort = 'No token';
                 } else if (tokenStatus === 'active') {
                     tokenStatusBadge = '<span class="badge badge-success">Active</span>';
+                    tokenSort = 'Active';
                 } else if (tokenStatus === 'expiring_soon') {
                     const expiresAt = mirror.mirror_token_expires_at
                         ? formatZuluDate(mirror.mirror_token_expires_at)
                         : 'soon';
                     tokenStatusBadge = `<span class="badge badge-warning" title="Expires ${expiresAt}">Expiring</span>`;
+                    tokenSort = 'Expiring';
                 } else if (tokenStatus === 'expired') {
                     tokenStatusBadge = '<span class="badge badge-danger">Expired</span>';
+                    tokenSort = 'Expired';
                 } else {
                     tokenStatusBadge = '<span class="badge badge-secondary">Unknown</span>';
+                    tokenSort = 'Unknown';
                 }
 
                 const verifyBadge = getVerificationBadgeHtml(mirror.id);
@@ -2958,10 +2975,10 @@ function renderTreeNode(node, level, parentPath = '') {
                         <td style="padding-left: ${indent + 20}px;">${formatProjectPath(mirror.source_project_path, { baseUrl: sourceBaseUrl })}</td>
                         <td>${formatProjectPath(mirror.target_project_path, { baseUrl: targetBaseUrl })}</td>
                         <td>${settingsCell}</td>
-                        <td class="mirror-status">${statusBadge}</td>
-                        <td>${formatMirrorStatus(mirror)}</td>
+                        <td class="mirror-status" data-sort="${statusSort}">${statusBadge}</td>
+                        <td data-sort="${syncStatusSort}">${formatMirrorStatus(mirror)}</td>
                         <td>${formatMirrorSyncTime(mirror)}</td>
-                        <td>${tokenStatusBadge}</td>
+                        <td data-sort="${tokenSort}">${tokenStatusBadge}</td>
                         <td>${verifyBadge}</td>
                         <td>
                             <div class="table-actions">
