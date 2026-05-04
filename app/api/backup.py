@@ -13,15 +13,17 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 from pathlib import Path
 import json
+import os
 import shutil
 import tarfile
 import tempfile
 from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import Response
-from sqlalchemy import select, text
+from fastapi.responses import FileResponse, Response
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.core.auth import verify_credentials
 from app.core.encryption import encryption
@@ -110,51 +112,75 @@ def _model_to_dict(obj: Any) -> Dict:
     return result
 
 
+# Tables exported by the backup, in the order they appear in database.json.
+# Defined as a module-level constant so the create endpoint and
+# _export_table_data agree on order and contents without duplication.
+_BACKUP_EXPORT_TABLES = (
+    ('users', User),
+    ('gitlab_instances', GitLabInstance),
+    ('instance_pairs', InstancePair),
+    ('mirrors', Mirror),
+    ('mirror_issue_configs', MirrorIssueConfig),
+    ('issue_mappings', IssueMapping),
+    ('comment_mappings', CommentMapping),
+    ('label_mappings', LabelMapping),
+    ('attachment_mappings', AttachmentMapping),
+    ('issue_sync_jobs', IssueSyncJob),
+)
+
+
 async def _export_table_data(db: AsyncSession) -> Dict[str, List[Dict]]:
-    """Export all table data as dictionaries."""
-    data = {}
+    """
+    Export all table data as a single in-memory dict.
 
-    # Export users (for multi-user mode)
-    result = await db.execute(select(User).order_by(User.id))
-    data['users'] = [_model_to_dict(row) for row in result.scalars().all()]
-
-    # Export GitLab instances
-    result = await db.execute(select(GitLabInstance).order_by(GitLabInstance.id))
-    data['gitlab_instances'] = [_model_to_dict(row) for row in result.scalars().all()]
-
-    # Export instance pairs
-    result = await db.execute(select(InstancePair).order_by(InstancePair.id))
-    data['instance_pairs'] = [_model_to_dict(row) for row in result.scalars().all()]
-
-    # Export mirrors
-    result = await db.execute(select(Mirror).order_by(Mirror.id))
-    data['mirrors'] = [_model_to_dict(row) for row in result.scalars().all()]
-
-    # Export issue mirroring configurations
-    result = await db.execute(select(MirrorIssueConfig).order_by(MirrorIssueConfig.id))
-    data['mirror_issue_configs'] = [_model_to_dict(row) for row in result.scalars().all()]
-
-    # Export issue mappings
-    result = await db.execute(select(IssueMapping).order_by(IssueMapping.id))
-    data['issue_mappings'] = [_model_to_dict(row) for row in result.scalars().all()]
-
-    # Export comment mappings
-    result = await db.execute(select(CommentMapping).order_by(CommentMapping.id))
-    data['comment_mappings'] = [_model_to_dict(row) for row in result.scalars().all()]
-
-    # Export label mappings
-    result = await db.execute(select(LabelMapping).order_by(LabelMapping.id))
-    data['label_mappings'] = [_model_to_dict(row) for row in result.scalars().all()]
-
-    # Export attachment mappings
-    result = await db.execute(select(AttachmentMapping).order_by(AttachmentMapping.id))
-    data['attachment_mappings'] = [_model_to_dict(row) for row in result.scalars().all()]
-
-    # Export issue sync jobs
-    result = await db.execute(select(IssueSyncJob).order_by(IssueSyncJob.id))
-    data['issue_sync_jobs'] = [_model_to_dict(row) for row in result.scalars().all()]
-
+    Retained for tests and any caller that genuinely needs the materialized
+    form (e.g. the pre-restore backup path in restore_backup). The streaming
+    backup endpoint uses ``_stream_table_data_to_json`` instead, since
+    materializing every row of every table for a large deployment can OOM
+    the worker and cause nginx to return 502.
+    """
+    data: Dict[str, List[Dict]] = {}
+    for table_name, model in _BACKUP_EXPORT_TABLES:
+        result = await db.execute(select(model).order_by(model.id))
+        data[table_name] = [_model_to_dict(row) for row in result.scalars().all()]
     return data
+
+
+async def _stream_table_data_to_json(db: AsyncSession, output_path: Path) -> Dict[str, int]:
+    """
+    Stream every row of every backup table directly to ``output_path`` as a
+    single JSON object, without materializing the full export in memory.
+
+    Returns a ``{table_name: row_count}`` map for the metadata file.
+    """
+    counts: Dict[str, int] = {}
+    # Newline-delimited rows so the file is human-readable but we never have
+    # to hold more than one row's worth of JSON at a time.
+    with output_path.open("w", encoding="utf-8") as fh:
+        fh.write("{\n")
+        for table_idx, (table_name, model) in enumerate(_BACKUP_EXPORT_TABLES):
+            if table_idx > 0:
+                fh.write(",\n")
+            fh.write(f"  {json.dumps(table_name)}: [")
+
+            row_count = 0
+            stmt = select(model).order_by(model.id).execution_options(yield_per=500)
+            result = await db.stream(stmt)
+            async for row in result.scalars():
+                if row_count > 0:
+                    fh.write(",")
+                fh.write("\n    ")
+                fh.write(json.dumps(_model_to_dict(row), default=str))
+                row_count += 1
+
+            if row_count > 0:
+                fh.write("\n  ")
+            fh.write("]")
+            counts[table_name] = row_count
+
+        fh.write("\n}\n")
+
+    return counts
 
 
 async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> Dict[str, int]:
@@ -333,11 +359,19 @@ async def _import_table_data(db: AsyncSession, data: Dict[str, List[Dict]]) -> D
     return counts
 
 
+def _cleanup_backup_staging(staging_dir: str) -> None:
+    """Best-effort cleanup of the temp staging dir after the response streams."""
+    try:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug(f"Failed to clean up backup staging dir {staging_dir}: {e}")
+
+
 @router.get("/create")
 async def create_backup(
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_credentials)
-) -> Response:
+) -> FileResponse:
     """
     Create and download a complete backup of the database and encryption key.
 
@@ -349,13 +383,19 @@ async def create_backup(
     The backup format is database-agnostic and can be restored to any
     supported database (PostgreSQL).
 
+    Implementation notes:
+    - Database rows are streamed directly to ``database.json`` on disk
+      (one row at a time) rather than materialized into a single in-memory
+      dict and JSON string. Without this a large deployment will OOM the
+      worker mid-export and nginx returns a 502 to the client.
+    - The finished archive is sent via ``FileResponse``, which streams from
+      disk; the staging directory is cleaned up by a ``BackgroundTask``
+      after the response has been sent.
+
     ⚠️  WARNING: The backup file contains sensitive data including the encryption
     key which can decrypt all stored GitLab tokens. Store securely!
     """
     key_path = _get_encryption_key_path()
-
-    # Export database data
-    db_data = await _export_table_data(db)
 
     # Get encryption key content
     if key_path.exists():
@@ -367,13 +407,17 @@ async def create_backup(
         else:
             key_content = b"test-encryption-key-placeholder"
 
-    # Create temporary directory for staging
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
+    # Use a regular mkdtemp (not the context manager) so the directory
+    # survives until the FileResponse finishes streaming. A BackgroundTask
+    # cleans it up afterwards.
+    staging_dir = tempfile.mkdtemp(prefix="mm-backup-")
+    try:
+        temp_path = Path(staging_dir)
 
-        # Write database JSON
+        # Stream database rows to disk (avoids buffering the full export
+        # in memory).
         db_file = temp_path / "database.json"
-        db_file.write_text(json.dumps(db_data, indent=2, default=str))
+        record_counts = await _stream_table_data_to_json(db, db_file)
 
         # Write encryption key
         key_file = temp_path / "encryption.key"
@@ -386,18 +430,7 @@ async def create_backup(
             "format": "json",
             "database_type": "postgresql",
             "app_version": settings.app_title,
-            "record_counts": {
-                "users": len(db_data.get('users', [])),
-                "gitlab_instances": len(db_data.get('gitlab_instances', [])),
-                "instance_pairs": len(db_data.get('instance_pairs', [])),
-                "mirrors": len(db_data.get('mirrors', [])),
-                "mirror_issue_configs": len(db_data.get('mirror_issue_configs', [])),
-                "issue_mappings": len(db_data.get('issue_mappings', [])),
-                "comment_mappings": len(db_data.get('comment_mappings', [])),
-                "label_mappings": len(db_data.get('label_mappings', [])),
-                "attachment_mappings": len(db_data.get('attachment_mappings', [])),
-                "issue_sync_jobs": len(db_data.get('issue_sync_jobs', []))
-            },
+            "record_counts": record_counts,
             "files": ["database.json", "encryption.key"]
         }
 
@@ -413,18 +446,19 @@ async def create_backup(
             tar.add(db_file, arcname="database.json")
             tar.add(key_file, arcname="encryption.key")
             tar.add(metadata_file, arcname="backup_metadata.json")
+    except Exception:
+        _cleanup_backup_staging(staging_dir)
+        raise
 
-        # Read the archive into memory before temp dir is cleaned up
-        archive_bytes = archive_path.read_bytes()
-
-        return Response(
-            content=archive_bytes,
-            media_type="application/gzip",
-            headers={
-                "Content-Disposition": f'attachment; filename="{archive_name}"',
-                "Cache-Control": "no-cache"
-            }
-        )
+    # FileResponse streams from disk; BackgroundTask removes the staging
+    # directory once the response has been fully sent (or aborted).
+    return FileResponse(
+        path=str(archive_path),
+        media_type="application/gzip",
+        filename=archive_name,
+        headers={"Cache-Control": "no-cache"},
+        background=BackgroundTask(_cleanup_backup_staging, staging_dir),
+    )
 
 
 def _validate_backup_archive(archive_path: Path) -> Dict:

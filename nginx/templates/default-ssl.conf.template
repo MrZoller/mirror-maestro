@@ -43,6 +43,27 @@ server {
     # Client max body size (for file uploads)
     client_max_body_size 100M;
 
+    # Backup/restore endpoints can take significantly longer than typical
+    # API calls (full DB export, tar.gz creation, archive upload + import).
+    # Without a longer timeout, large databases hit the default 60s
+    # proxy_read_timeout and the client receives an HTML 504 page from nginx
+    # instead of the streamed archive.
+    location /api/backup/ {
+        proxy_pass http://app;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_request_buffering off;
+        proxy_buffering off;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+    }
+
     # Proxy settings
     location / {
         proxy_pass http://app;
