@@ -6,6 +6,13 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-05-04
+
+### Fixed
+- Backup creation no longer OOM-kills the worker on larger deployments. The previous implementation called `_export_table_data` to materialize every row of every table as Python dicts in memory, then ran `json.dumps` over the whole structure, then `read_bytes()` on the resulting tar.gz. For a deployment with substantial issue/comment/attachment mappings the peak allocation easily exceeded the 2GB container limit and the process was killed mid-request — surfacing to the client as an HTTP 502 from nginx (which is also why the previous patch's longer `proxy_read_timeout` didn't appear to help: the symptom was an upstream death, not an nginx timeout).
+- The endpoint now streams rows directly to `database.json` via `_stream_table_data_to_json` (one row at a time, with `yield_per=500` on the SQLAlchemy stream), and returns the finished archive via `FileResponse` so the bytes never have to live in the worker's memory. A `BackgroundTask` cleans up the temp staging directory after the response is sent.
+- Regression tests guard the streaming path: the create endpoint is asserted to call `_stream_table_data_to_json` and not the in-memory `_export_table_data`, the staging directory is asserted to be cleaned up after the response completes, and `record_counts` in the metadata is asserted to match the row counts actually written to `database.json`.
+
 ## [1.2.4] - 2026-05-04
 
 ### Fixed
@@ -173,7 +180,8 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 
 <!--
 Links:
-[Unreleased]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.4...HEAD
+[Unreleased]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.5...HEAD
+[1.2.5]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.1...v1.2.2

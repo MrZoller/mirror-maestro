@@ -500,3 +500,161 @@ async def test_restore_legacy_backup_preserves_users(client, session_maker):
         users = result.scalars().all()
         assert len(users) == 1
         assert users[0].username == "existing-admin"
+
+
+# ---------------------------------------------------------------------------
+# Streaming backup behavior (regression: large backups OOM-killing the worker)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_backup_streams_without_materializing_dict(monkeypatch, client, session_maker):
+    """
+    Regression: the original implementation called ``_export_table_data``
+    which materialized every row of every table as Python dicts in memory,
+    then passed the result through ``json.dumps``. For large deployments
+    that allocation alone could exceed the worker's memory limit and the
+    process was OOM-killed mid-request, surfacing as an HTTP 502 from
+    nginx. The endpoint must now stream rows to disk via
+    ``_stream_table_data_to_json`` instead.
+
+    This test fails if the create path regresses to the old
+    materialize-everything implementation.
+    """
+    from app.api import backup as backup_mod
+
+    calls = {"export": 0, "stream": 0}
+
+    real_stream = backup_mod._stream_table_data_to_json
+
+    def _fail_export(*args, **kwargs):
+        calls["export"] += 1
+        raise AssertionError(
+            "create_backup must not call _export_table_data — it materializes "
+            "every row in memory and was the cause of OOM 502s. Use "
+            "_stream_table_data_to_json instead."
+        )
+
+    async def _counting_stream(db, output_path):
+        calls["stream"] += 1
+        return await real_stream(db, output_path)
+
+    monkeypatch.setattr(backup_mod, "_export_table_data", _fail_export)
+    monkeypatch.setattr(backup_mod, "_stream_table_data_to_json", _counting_stream)
+
+    resp = await client.get("/api/backup/create")
+    assert resp.status_code == 200, resp.text
+    assert calls["stream"] == 1
+    assert calls["export"] == 0
+
+
+@pytest.mark.asyncio
+async def test_create_backup_cleans_up_staging_dir(monkeypatch, client):
+    """
+    Backup creation uses ``tempfile.mkdtemp`` (not the context-managed
+    ``TemporaryDirectory``) so the staging files survive long enough for
+    ``FileResponse`` to stream them. The staging dir must be removed
+    afterwards via the ``BackgroundTask`` so we don't leak temp files
+    every time someone clicks "Create Backup".
+    """
+    from app.api import backup as backup_mod
+
+    created_dirs: list[str] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def _tracking_mkdtemp(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        created_dirs.append(path)
+        return path
+
+    monkeypatch.setattr(backup_mod.tempfile, "mkdtemp", _tracking_mkdtemp)
+
+    resp = await client.get("/api/backup/create")
+    assert resp.status_code == 200, resp.text
+    # Read the body so the BackgroundTask gets a chance to fire.
+    _ = resp.content
+
+    assert len(created_dirs) == 1, "expected backup endpoint to allocate exactly one staging dir"
+    staging_dir = Path(created_dirs[0])
+
+    # The BackgroundTask runs asynchronously after the response is sent.
+    # Give it a moment, then assert the directory is gone.
+    import asyncio
+    for _ in range(20):
+        if not staging_dir.exists():
+            break
+        await asyncio.sleep(0.05)
+
+    assert not staging_dir.exists(), (
+        f"backup staging dir {staging_dir} was not cleaned up — every backup "
+        "would leak its temp files"
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_backup_metadata_record_counts_match_rows(client, session_maker, monkeypatch):
+    """
+    The ``record_counts`` metadata block has to reflect what was actually
+    written to ``database.json`` — counting the in-memory dict (which the
+    streaming path no longer holds) and counting rows during the stream
+    must agree. Regression guard for switching the two paths in the future.
+    """
+    from app.api import instances as inst_mod
+    from app.models import User
+    from app.core.encryption import encryption
+
+    monkeypatch.setattr(inst_mod, "GitLabClient", FakeGitLabClient)
+
+    # Seed multiple users + an instance so several tables are non-empty.
+    async with session_maker() as s:
+        s.add(User(
+            username="alpha",
+            email="a@example.com",
+            hashed_password="x",
+            is_admin=True,
+            is_active=True,
+        ))
+        s.add(User(
+            username="beta",
+            email="b@example.com",
+            hashed_password="x",
+            is_admin=False,
+            is_active=True,
+        ))
+        await s.commit()
+
+    resp = await client.post(
+        "/api/instances",
+        json={
+            "name": "metadata-test",
+            "url": "https://gitlab.example.com",
+            "token": "tok",
+        },
+    )
+    assert resp.status_code == 201
+
+    resp = await client.get("/api/backup/create")
+    assert resp.status_code == 200
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        backup_file = Path(tmpdir) / "b.tar.gz"
+        backup_file.write_bytes(resp.content)
+
+        with tarfile.open(backup_file, "r:gz") as tar:
+            db_member = tar.extractfile("database.json")
+            assert db_member is not None
+            db_data = json.loads(db_member.read().decode())
+
+            meta_member = tar.extractfile("backup_metadata.json")
+            assert meta_member is not None
+            metadata = json.loads(meta_member.read().decode())
+
+    counts = metadata["record_counts"]
+    for table, rows in db_data.items():
+        assert counts.get(table) == len(rows), (
+            f"record_counts[{table}]={counts.get(table)} != "
+            f"actual rows in database.json[{table}]={len(rows)}"
+        )
+    # Sanity: we actually wrote something.
+    assert counts["users"] == 2
+    assert counts["gitlab_instances"] == 1
