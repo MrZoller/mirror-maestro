@@ -700,6 +700,58 @@ class APIError extends Error {
 }
 
 /**
+ * Pull a human-readable error message out of a non-OK fetch Response.
+ *
+ * The backup/restore endpoints stream binary or JSON responses, so callers
+ * use raw `fetch` rather than `apiRequest`. Naively calling `response.json()`
+ * on the error body throws "Unexpected token '<'" when the upstream
+ * (nginx, a load balancer, FastAPI's default 500 page in some configs) returns
+ * HTML instead of JSON, which then surfaces to the user as a cryptic JSON
+ * parse error. This helper degrades gracefully:
+ *   1. Try to parse the body as JSON and use `detail`.
+ *   2. Fall back to the raw body text (truncated).
+ *   3. Fall back to the HTTP status line.
+ * It also adds a hint for 502/504 since those usually mean a proxy timeout
+ * (the backup endpoint can take a while on large databases).
+ */
+async function readErrorMessage(response, fallback = 'Request failed') {
+    let bodyText = '';
+    try {
+        bodyText = await response.text();
+    } catch (e) {
+        bodyText = '';
+    }
+
+    let detail = '';
+    if (bodyText) {
+        try {
+            const parsed = JSON.parse(bodyText);
+            if (parsed && typeof parsed === 'object') {
+                if (typeof parsed.detail === 'string') {
+                    detail = parsed.detail;
+                } else if (parsed.detail && typeof parsed.detail === 'object' && parsed.detail.message) {
+                    detail = parsed.detail.message;
+                }
+            }
+        } catch (e) {
+            // Body wasn't JSON (e.g. nginx HTML error page). Use a short snippet.
+            const stripped = bodyText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+            if (stripped) {
+                detail = stripped.length > 200 ? stripped.slice(0, 200) + '…' : stripped;
+            }
+        }
+    }
+
+    const status = `HTTP ${response.status}${response.statusText ? ' ' + response.statusText : ''}`;
+    let message = detail ? `${status}: ${detail}` : `${status}: ${fallback}`;
+
+    if (response.status === 502 || response.status === 504) {
+        message += ' (proxy timeout — the backup may have exceeded the nginx proxy_read_timeout for large databases)';
+    }
+    return message;
+}
+
+/**
  * Check a fetch response for 401 status and handle session expiration.
  * Returns true if session expired (caller should stop processing).
  */
@@ -3976,8 +4028,7 @@ async function createBackup() {
 
         if (!response.ok) {
             if (handleSessionExpiredResponse(response)) return;
-            const error = await response.json();
-            throw new Error(error.detail || 'Failed to create backup');
+            throw new Error(await readErrorMessage(response, 'Failed to create backup'));
         }
 
         // Get filename from Content-Disposition header
@@ -4065,8 +4116,7 @@ async function restoreBackup() {
 
         if (!response.ok) {
             if (handleSessionExpiredResponse(response)) return;
-            const error = await response.json();
-            throw new Error(error.detail || 'Failed to restore backup');
+            throw new Error(await readErrorMessage(response, 'Failed to restore backup'));
         }
 
         const result = await response.json();

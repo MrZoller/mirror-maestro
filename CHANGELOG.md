@@ -6,6 +6,12 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-05-04
+
+### Fixed
+- Backup creation no longer surfaces the cryptic ``Unexpected token '<', "<html>..." is not valid JSON`` message when the request fails with a non-JSON response (e.g. an nginx 504 Gateway Timeout HTML page). The frontend now reads the response body defensively, falls back to the HTTP status line when the body isn't JSON, strips HTML tags from the displayed snippet, and adds a "proxy timeout" hint for 502/504 responses. Same handling applies to the restore flow.
+- nginx now uses extended `proxy_send_timeout` and `proxy_read_timeout` of 600s for `/api/backup/` (vs the default 60s). Full database export/restore on larger deployments was reliably exceeding the 60s window and being terminated by nginx with an HTML 504 page — the underlying cause of the JSON parse error above.
+
 ## [1.2.3] - 2026-05-04
 
 ### Fixed
@@ -167,7 +173,8 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 
 <!--
 Links:
-[Unreleased]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.3...HEAD
+[Unreleased]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.0...v1.2.1
