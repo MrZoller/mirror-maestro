@@ -791,9 +791,12 @@ async def sync_all_mirrors(
             )
 
         except Exception as e:
-            # GitLab API call failed — no DB write occurred yet, so no rollback needed.
-            # (Rolling back here would expire every ORM instance, which previously
-            # caused "greenlet_spawn has not been called" on the next iteration.)
+            # GitLab API call failed — no DB write occurred yet, but rolling back
+            # clears the open transaction so we don't hold a pooled connection and
+            # long-lived snapshot for the rest of the batch. This is safe now that
+            # the loop uses plain dicts instead of live ORM instances; rollback can
+            # no longer expire attributes we depend on.
+            await db.rollback()
             error_msg = f"{mirror_identifier}: {str(e)}"
             errors.append(error_msg)
             tracker.record_failure(error_msg)
