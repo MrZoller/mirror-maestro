@@ -2158,12 +2158,12 @@ function renderMirrors(mirrors) {
         const updateStatus = formatMirrorStatus(mirror);
         const syncStatusSort = (() => {
             const s = mirror.last_update_status;
-            if (!s) return '';
+            if (!s) return 'N/A';
             if (s === 'finished' || s === 'success') return 'Success';
             if (s === 'failed') return 'Failed';
             if (s === 'started' || s === 'updating' || s === 'syncing') return 'Syncing';
             if (s === 'pending') return 'Pending';
-            return s;
+            return escapeHtml(s);
         })();
 
         const dir = (mirror.effective_mirror_direction || '').toString().toLowerCase();
