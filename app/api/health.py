@@ -140,10 +140,21 @@ async def detailed_health(
                 message=f"{mirrors_summary.failed} of {mirrors_summary.enabled} enabled mirrors failed"
             ))
         else:
+            unsynced = mirrors_summary.total - mirrors_summary.success
+            if unsynced > 0:
+                parts = []
+                if mirrors_summary.pending > 0:
+                    parts.append(f"{mirrors_summary.pending} pending")
+                if mirrors_summary.unknown > 0:
+                    parts.append(f"{mirrors_summary.unknown} unknown")
+                detail = ", ".join(parts)
+                msg = f"{mirrors_summary.success} of {mirrors_summary.total} mirrors synced ({detail})"
+            else:
+                msg = f"All {mirrors_summary.success} mirrors synced successfully"
             components.append(ComponentHealth(
                 name="mirrors",
                 status="healthy",
-                message=f"All {mirrors_summary.success} synced mirrors healthy"
+                message=msg
             ))
     else:
         components.append(ComponentHealth(
