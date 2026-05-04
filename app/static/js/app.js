@@ -517,13 +517,13 @@ function createTableEnhancer(table, tbody, config) {
     }
 
     function refresh() {
-        // Skip enhancer processing when tbody is in tree view mode.
-        // Tree view uses colspan group rows that the enhancer would
-        // misclassify as meta/placeholder rows and hide.
-        if (tbody.dataset.viewMode === 'tree') return;
-
         ensureUI();
         updateSelectOptions();
+
+        // Skip filtering/sorting in tree view — colspan group rows would be
+        // misclassified as meta/placeholder rows and hidden by the enhancer.
+        if (tbody.dataset.viewMode === 'tree') return;
+
         applyFiltering();
         applySorting();
         updateSortIndicators();
