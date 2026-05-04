@@ -1827,3 +1827,58 @@ async def test_execute_gitlab_op_returns_400_for_validation_error(monkeypatch):
     assert detail["reason"] == "fork_network_restriction"
     assert "fork network" in detail["message"].lower()
 
+
+@pytest.mark.asyncio
+async def test_create_pull_mirror_returns_400_with_fork_network_detail(client, session_maker, monkeypatch):
+    """
+    End-to-end: when GitLab rejects pull mirror creation with the fork-network
+    validation error, the API must return HTTP 400 (not 500) with a detail
+    object that the frontend can display.
+    """
+    from app.api import mirrors as mod
+    from app.core.gitlab_client import GitLabValidationError
+
+    class _ForkRejectingClient(FakeGitLabClient):
+        def create_pull_mirror(self, project_id, mirror_url, **kwargs):
+            raise GitLabValidationError(
+                f"Failed to create pull mirror on project {project_id}: "
+                f"url: must be inside the fork network",
+                gitlab_error={"url": ["must be inside the fork network"]},
+            )
+
+    monkeypatch.setattr(mod, "GitLabClient", _ForkRejectingClient)
+    FakeGitLabClient.pull_calls.clear()
+    FakeGitLabClient.pull_mirrors.clear()
+    FakeGitLabClient.token_create_calls.clear()
+    FakeGitLabClient.token_delete_calls.clear()
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    payload = {
+        "instance_pair_id": pair_id,
+        "source_project_id": 1,
+        "source_project_path": "platform/proj",
+        "target_project_id": 52542,
+        "target_project_path": "platform/proj",
+        "enabled": True,
+    }
+    resp = await client.post("/api/mirrors", json=payload)
+
+    # Must NOT be a generic 500 — must be 400 with a structured detail.
+    assert resp.status_code == 400, resp.text
+    body = resp.json()
+    detail = body["detail"]
+    assert isinstance(detail, dict)
+    assert detail["reason"] == "fork_network_restriction"
+    assert "fork network" in detail["message"].lower()
+    assert "remove the fork relationship" in detail["message"].lower()
+    # Original GitLab error body is preserved for debugging.
+    assert detail["gitlab_error"] == {"url": ["must be inside the fork network"]}
+
+    # No mirror should have been persisted in the DB.
+    async with session_maker() as s:
+        rows = (await s.execute(select(Mirror))).scalars().all()
+        assert rows == []
+

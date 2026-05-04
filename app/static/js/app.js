@@ -3593,7 +3593,21 @@ function applyMirrorDirectionUI(direction) {
     }
 }
 
+function setMirrorFormError(message) {
+    const el = document.getElementById('mirror-form-error');
+    if (!el) return;
+    if (message) {
+        el.textContent = message;
+        el.hidden = false;
+    } else {
+        el.textContent = '';
+        el.hidden = true;
+    }
+}
+
 async function createMirror() {
+    setMirrorFormError(null);
+
     if (!state.selectedPair) {
         showMessage('Please select an instance pair first', 'error');
         return;
@@ -3722,6 +3736,7 @@ async function createMirror() {
             body: JSON.stringify(data)
         });
 
+        setMirrorFormError(null);
         showMessage('Mirror created successfully', 'success');
         form.reset();
         clearProjectAutocomplete('source');
@@ -3731,6 +3746,9 @@ async function createMirror() {
     } catch (error) {
         console.error('Failed to create mirror:', error);
         const message = (error && error.message) ? error.message : 'Failed to create mirror';
+        // Show the error in two places: a floating toast (non-blocking) and an
+        // inline region in the form (always visible, never auto-dismisses).
+        setMirrorFormError(message);
         showMessage(message, 'error');
 
         if (error instanceof APIError && error.type === 'validation') {

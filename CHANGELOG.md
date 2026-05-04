@@ -6,6 +6,11 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-05-04
+
+### Fixed
+- Mirror creation errors are now shown inline in the "Create New Mirror" form (in addition to the floating toast). The floating toast at the top of the page can be missed if the user has scrolled or if it auto-dismisses; the inline region always appears next to the submit button and persists until the next submission. End-to-end test coverage for the GitLab fork-network rejection path was added.
+
 ## [1.2.2] - 2026-05-04
 
 ### Fixed
@@ -162,7 +167,8 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 
 <!--
 Links:
-[Unreleased]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/MrZoller/mirror-maestro/compare/v1.1.0...v1.2.0
