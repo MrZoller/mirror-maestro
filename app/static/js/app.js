@@ -517,13 +517,13 @@ function createTableEnhancer(table, tbody, config) {
     }
 
     function refresh() {
-        // Skip enhancer processing when tbody is in tree view mode.
-        // Tree view uses colspan group rows that the enhancer would
-        // misclassify as meta/placeholder rows and hide.
-        if (tbody.dataset.viewMode === 'tree') return;
-
         ensureUI();
         updateSelectOptions();
+
+        // Skip filtering/sorting in tree view — colspan group rows would be
+        // misclassified as meta/placeholder rows and hidden by the enhancer.
+        if (tbody.dataset.viewMode === 'tree') return;
+
         applyFiltering();
         applySorting();
         updateSortIndicators();
@@ -2152,9 +2152,19 @@ function renderMirrors(mirrors) {
         const statusBadge = mirror.enabled ?
             `<span class="badge badge-success">Enabled</span>` :
             `<span class="badge badge-warning">Disabled</span>`;
+        const statusSort = mirror.enabled ? 'Enabled' : 'Disabled';
 
         // Format update status with appropriate badge color
         const updateStatus = formatMirrorStatus(mirror);
+        const syncStatusSort = (() => {
+            const s = mirror.last_update_status;
+            if (!s) return 'N/A';
+            if (s === 'finished' || s === 'success') return 'Success';
+            if (s === 'failed') return 'Failed';
+            if (s === 'started' || s === 'updating' || s === 'syncing') return 'Syncing';
+            if (s === 'pending') return 'Pending';
+            return escapeHtml(s);
+        })();
 
         const dir = (mirror.effective_mirror_direction || '').toString().toLowerCase();
         const settingsCell = (() => {
@@ -2279,6 +2289,14 @@ function renderMirrors(mirrors) {
             }
             return '<span class="badge badge-secondary">Unknown</span>';
         })();
+        const tokenSort = (() => {
+            const s = mirror.token_status;
+            if (!s || s === 'none') return 'No token';
+            if (s === 'active') return 'Active';
+            if (s === 'expiring_soon') return 'Expiring';
+            if (s === 'expired') return 'Expired';
+            return 'Unknown';
+        })();
 
         const verifyBadge = getVerificationBadgeHtml(mirror.id);
 
@@ -2287,8 +2305,8 @@ function renderMirrors(mirrors) {
                 <td>${formatProjectPath(mirror.source_project_path, { baseUrl: sourceBaseUrl })}</td>
                 <td>${formatProjectPath(mirror.target_project_path, { baseUrl: targetBaseUrl })}</td>
                 <td>${settingsCell}</td>
-                <td class="mirror-status">${statusBadge}</td>
-                <td>${updateStatus}</td>
+                <td class="mirror-status" data-sort="${statusSort}">${statusBadge}</td>
+                <td data-sort="${syncStatusSort}">${updateStatus}</td>
                 <td data-sort="${escapeHtml(mirror.last_update_at || mirror.last_successful_update || '')}">
                     <div>
                         ${mirror.last_successful_update
@@ -2299,7 +2317,7 @@ function renderMirrors(mirrors) {
                             : ''}
                     </div>
                 </td>
-                <td>${tokenStatusBadge}</td>
+                <td data-sort="${tokenSort}">${tokenStatusBadge}</td>
                 <td>${verifyBadge}</td>
                 <td>
                     <div class="table-actions">
@@ -2912,22 +2930,39 @@ function renderTreeNode(node, level, parentPath = '') {
                 const statusBadge = mirror.enabled
                     ? '<span class="badge badge-success">Enabled</span>'
                     : '<span class="badge badge-warning">Disabled</span>';
+                const statusSort = mirror.enabled ? 'Enabled' : 'Disabled';
+
+                const syncStatusSort = (() => {
+                    const s = mirror.last_update_status;
+                    if (!s) return 'N/A';
+                    if (s === 'finished' || s === 'success') return 'Success';
+                    if (s === 'failed') return 'Failed';
+                    if (s === 'started' || s === 'updating' || s === 'syncing') return 'Syncing';
+                    if (s === 'pending') return 'Pending';
+                    return escapeHtml(s);
+                })();
 
                 const tokenStatus = mirror.token_status;
                 let tokenStatusBadge;
+                let tokenSort;
                 if (!tokenStatus || tokenStatus === 'none') {
                     tokenStatusBadge = '<span class="badge badge-secondary">No token</span>';
+                    tokenSort = 'No token';
                 } else if (tokenStatus === 'active') {
                     tokenStatusBadge = '<span class="badge badge-success">Active</span>';
+                    tokenSort = 'Active';
                 } else if (tokenStatus === 'expiring_soon') {
                     const expiresAt = mirror.mirror_token_expires_at
                         ? formatZuluDate(mirror.mirror_token_expires_at)
                         : 'soon';
                     tokenStatusBadge = `<span class="badge badge-warning" title="Expires ${expiresAt}">Expiring</span>`;
+                    tokenSort = 'Expiring';
                 } else if (tokenStatus === 'expired') {
                     tokenStatusBadge = '<span class="badge badge-danger">Expired</span>';
+                    tokenSort = 'Expired';
                 } else {
                     tokenStatusBadge = '<span class="badge badge-secondary">Unknown</span>';
+                    tokenSort = 'Unknown';
                 }
 
                 const verifyBadge = getVerificationBadgeHtml(mirror.id);
@@ -2940,10 +2975,10 @@ function renderTreeNode(node, level, parentPath = '') {
                         <td style="padding-left: ${indent + 20}px;">${formatProjectPath(mirror.source_project_path, { baseUrl: sourceBaseUrl })}</td>
                         <td>${formatProjectPath(mirror.target_project_path, { baseUrl: targetBaseUrl })}</td>
                         <td>${settingsCell}</td>
-                        <td class="mirror-status">${statusBadge}</td>
-                        <td>${formatMirrorStatus(mirror)}</td>
+                        <td class="mirror-status" data-sort="${statusSort}">${statusBadge}</td>
+                        <td data-sort="${syncStatusSort}">${formatMirrorStatus(mirror)}</td>
                         <td>${formatMirrorSyncTime(mirror)}</td>
-                        <td>${tokenStatusBadge}</td>
+                        <td data-sort="${tokenSort}">${tokenStatusBadge}</td>
                         <td>${verifyBadge}</td>
                         <td>
                             <div class="table-actions">
