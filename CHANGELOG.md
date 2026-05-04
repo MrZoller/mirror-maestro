@@ -6,6 +6,13 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-05-04
+
+### Fixed
+- Pull mirror creation now surfaces GitLab validation errors to the UI instead of failing silently with a generic 500. In particular, the GitLab "must be inside the fork network" restriction (raised when the target project is part of a fork network) is now reported as a 400 with an actionable message explaining how to resolve it.
+- `GitLabClient.create_pull_mirror` no longer silently swallows real failures from the dedicated `PUT /projects/:id/mirror/pull` endpoint and falls back to the Projects API. Only genuine "endpoint not available" responses (404/405) trigger the fallback; validation, auth, and permission errors propagate immediately.
+- `createMirror()` in the frontend now displays the error message via `showMessage` instead of relying on `apiRequest` to do so. Error/warning toasts now persist for 15s (up from 5s) so users have time to read longer messages.
+
 ## [1.2.1] - 2026-02-19
 
 ### Fixed
@@ -155,7 +162,8 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 
 <!--
 Links:
-[Unreleased]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/MrZoller/mirror-maestro/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/MrZoller/mirror-maestro/compare/v0.1.0...v1.1.0

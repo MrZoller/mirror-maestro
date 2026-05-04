@@ -542,4 +542,129 @@ def test_gitlab_client_update_mirror_error(monkeypatch):
         client.update_mirror(123, 456, enabled=False)
 
 
+# ---------------------------------------------------------------------------
+# Pull mirror creation: validation error surfacing (fork network case)
+# ---------------------------------------------------------------------------
 
+
+def _install_fake_gitlab(monkeypatch, http_put):
+    """Install a fake gitlab module whose Gitlab(...).http_put delegates to http_put."""
+    from app.core import gitlab_client as mod
+
+    class FakeGL:
+        def __init__(self, url, private_token, timeout=60, ssl_verify=True):
+            pass
+
+        def http_put(self, path, post_data):
+            return http_put(path, post_data)
+
+    class FakeGitlabModule:
+        Gitlab = FakeGL
+
+    monkeypatch.setattr(mod, "gitlab", FakeGitlabModule())
+    monkeypatch.setattr(mod, "encryption", type("E", (), {"decrypt": lambda _s, x: "tok"})())
+    return mod
+
+
+def test_format_gitlab_validation_message_dict():
+    """Dict-shaped GitLab validation errors are flattened into a readable string."""
+    from app.core import gitlab_client as mod
+    from gitlab.exceptions import GitlabUpdateError
+
+    err = GitlabUpdateError(
+        error_message={"url": ["must be inside the fork network"]},
+        response_code=400,
+    )
+    msg = mod._format_gitlab_validation_message(err)
+    assert "url" in msg
+    assert "must be inside the fork network" in msg
+
+
+def test_format_gitlab_validation_message_string():
+    """String-shaped GitLab validation errors pass through unchanged."""
+    from app.core import gitlab_client as mod
+    from gitlab.exceptions import GitlabUpdateError
+
+    err = GitlabUpdateError(error_message="bad request", response_code=400)
+    assert mod._format_gitlab_validation_message(err) == "bad request"
+
+
+def test_handle_gitlab_error_raises_validation_error_for_400():
+    """A 400 response from GitLab is converted into GitLabValidationError."""
+    from app.core import gitlab_client as mod
+    from gitlab.exceptions import GitlabUpdateError
+
+    err = GitlabUpdateError(
+        error_message={"url": ["must be inside the fork network"]},
+        response_code=400,
+    )
+    with pytest.raises(mod.GitLabValidationError) as excinfo:
+        mod._handle_gitlab_error(err, "Failed to do thing")
+
+    raised = excinfo.value
+    assert "must be inside the fork network" in str(raised)
+    # Original GitLab error body is retained for the API layer to inspect.
+    assert raised.gitlab_error == {"url": ["must be inside the fork network"]}
+
+
+def test_create_pull_mirror_propagates_fork_network_validation_error(monkeypatch):
+    """
+    The dedicated /mirror/pull endpoint returning a 400 must NOT be silently
+    treated as "endpoint unavailable" — the validation error has to reach the
+    caller so the UI can show the real reason.
+    """
+    from gitlab.exceptions import GitlabUpdateError
+
+    def http_put(path, post_data):
+        # Simulate GitLab 17.6+ rejecting a pull mirror because the target is a fork.
+        raise GitlabUpdateError(
+            error_message={"url": ["must be inside the fork network"]},
+            response_code=400,
+        )
+
+    mod = _install_fake_gitlab(monkeypatch, http_put)
+
+    client = mod.GitLabClient("https://example.com", "enc:any")
+    with pytest.raises(mod.GitLabValidationError) as excinfo:
+        client.create_pull_mirror(project_id=52542, mirror_url="https://example.com/x.git")
+
+    assert "must be inside the fork network" in str(excinfo.value)
+    assert excinfo.value.gitlab_error == {"url": ["must be inside the fork network"]}
+
+
+def test_create_pull_mirror_falls_back_when_endpoint_missing(monkeypatch):
+    """
+    When the dedicated /mirror/pull endpoint is genuinely unavailable
+    (404/405), the client should still fall back to the Projects API.
+    """
+    from gitlab.exceptions import GitlabUpdateError, GitlabHttpError
+
+    calls = {"count": 0}
+
+    def http_put(path, post_data):
+        calls["count"] += 1
+        if path.endswith("/mirror/pull"):
+            raise GitlabHttpError(error_message="Not Found", response_code=404)
+        # Fallback: PUT /projects/:id with import_url
+        assert path == "/projects/52542"
+        assert post_data["mirror"] is True
+        assert post_data["import_url"] == "https://example.com/x.git"
+        return {
+            "import_url": post_data["import_url"],
+            "mirror": True,
+            "only_mirror_protected_branches": False,
+            "mirror_overwrites_diverged_branches": None,
+            "mirror_trigger_builds": None,
+            "mirror_branch_regex": None,
+        }
+
+    mod = _install_fake_gitlab(monkeypatch, http_put)
+
+    client = mod.GitLabClient("https://example.com", "enc:any")
+    result = client.create_pull_mirror(
+        project_id=52542,
+        mirror_url="https://example.com/x.git",
+    )
+    assert result["enabled"] is True
+    assert result["url"] == "https://example.com/x.git"
+    assert calls["count"] == 2  # tried dedicated endpoint, then fell back

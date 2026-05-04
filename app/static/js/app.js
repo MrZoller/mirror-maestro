@@ -3730,7 +3730,9 @@ async function createMirror() {
         await loadMirrors(true);
     } catch (error) {
         console.error('Failed to create mirror:', error);
-        // Error message already shown via apiRequest
+        const message = (error && error.message) ? error.message : 'Failed to create mirror';
+        showMessage(message, 'error');
+
         if (error instanceof APIError && error.type === 'validation') {
             // Keep form filled for validation errors
             return;
@@ -3900,9 +3902,12 @@ function showMessage(message, type = 'info') {
 
     container.appendChild(div);
 
+    // Errors and warnings often carry detail the user needs time to read; give
+    // them longer before auto-dismissing.
+    const dismissAfterMs = (type === 'error' || type === 'warning') ? 15000 : 5000;
     setTimeout(() => {
         dismissMessage(div);
-    }, 5000);
+    }, dismissAfterMs);
 }
 
 function dismissMessage(el) {
