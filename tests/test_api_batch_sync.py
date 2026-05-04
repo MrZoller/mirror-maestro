@@ -347,3 +347,83 @@ async def test_sync_all_mirrors_pull_direction(client: AsyncClient, db_session: 
 
         # Verify GitLab client was created with TARGET instance (for pull)
         MockClient.assert_called_with(target_instance.url, target_instance.encrypted_token, timeout=60)
+
+
+@pytest.mark.asyncio
+async def test_sync_all_mirrors_continues_after_first_failure(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """
+    Regression test for "greenlet_spawn has not been called" on the iteration
+    after a GitLab failure.
+
+    When the first mirror's GitLab trigger raised, the previous implementation
+    issued ``await db.rollback()`` in the outer except block. SQLAlchemy
+    rollback expires every ORM instance attached to the session, so the next
+    iteration's closure access of ``mirror.mirror_id`` triggered a sync
+    lazy-load on an expired AsyncSession instance and failed with a greenlet
+    error. The endpoint must keep processing subsequent mirrors cleanly.
+    """
+    source_instance = GitLabInstance(
+        name="Source GitLab",
+        url="https://source.gitlab.com",
+        encrypted_token=encryption.encrypt("source-token"),
+    )
+    target_instance = GitLabInstance(
+        name="Target GitLab",
+        url="https://target.gitlab.com",
+        encrypted_token=encryption.encrypt("target-token"),
+    )
+    db_session.add(source_instance)
+    db_session.add(target_instance)
+    await db_session.commit()
+    await db_session.refresh(source_instance)
+    await db_session.refresh(target_instance)
+
+    pair = InstancePair(
+        name="Test Pair",
+        source_instance_id=source_instance.id,
+        target_instance_id=target_instance.id,
+        mirror_direction="push",
+    )
+    db_session.add(pair)
+    await db_session.commit()
+    await db_session.refresh(pair)
+
+    # Three mirrors: first fails, the next two must still be triggered.
+    mirrors = [
+        Mirror(
+            instance_pair_id=pair.id,
+            source_project_id=100 + i,
+            source_project_path=f"source/project-{i}",
+            target_project_id=200 + i,
+            target_project_path=f"target/project-{i}",
+            mirror_id=300 + i,
+            enabled=True,
+        )
+        for i in range(3)
+    ]
+    for m in mirrors:
+        db_session.add(m)
+    await db_session.commit()
+
+    with patch("app.api.pairs.GitLabClient") as MockClient:
+        mock_client = MagicMock()
+        mock_client.trigger_mirror_update.side_effect = [
+            Exception("GitLab API error"),  # Iteration 1: fail
+            {"status": "success"},           # Iteration 2: must NOT raise greenlet
+            {"status": "success"},           # Iteration 3: must NOT raise greenlet
+        ]
+        MockClient.return_value = mock_client
+
+        response = await client.post(f"/api/pairs/{pair.id}/sync-mirrors")
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "completed"
+        assert result["total"] == 3
+        assert result["succeeded"] == 2
+        assert result["failed"] == 1
+        # Specifically: no greenlet error should leak into the error list.
+        assert all("greenlet" not in err.lower() for err in result["errors"])
+        assert mock_client.trigger_mirror_update.call_count == 3

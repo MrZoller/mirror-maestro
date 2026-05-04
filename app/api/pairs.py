@@ -3,7 +3,7 @@ from typing import List, Optional
 import re
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, delete, and_, or_
+from sqlalchemy import select, delete, update, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -732,25 +732,46 @@ async def sync_all_mirrors(
     # Create GitLab client
     client = GitLabClient(mirror_instance.url, mirror_instance.encrypted_token, timeout=settings.gitlab_api_timeout)
 
+    # Snapshot mirror attributes into plain dicts before the loop. A per-iteration
+    # rollback (after a failed commit or GitLab error) expires every ORM instance
+    # in the session — and `expire_on_rollback` is not configurable. Without this
+    # snapshot, the next iteration's closure access of `mirror.mirror_id` would
+    # trigger a sync lazy-load on an expired AsyncSession-attached instance and
+    # raise "greenlet_spawn has not been called; can't call await_only() here".
+    mirror_specs = [
+        {
+            "id": m.id,
+            "mirror_id": m.mirror_id,
+            "source_project_path": m.source_project_path,
+            "target_project_path": m.target_project_path,
+            "source_project_id": m.source_project_id,
+            "target_project_id": m.target_project_id,
+            "mirror_token_expires_at": m.mirror_token_expires_at,
+        }
+        for m in mirrors
+    ]
+
     # Process each mirror
     skipped = 0
     errors = []
 
-    for idx, mirror in enumerate(mirrors):
-        mirror_identifier = f"{mirror.source_project_path} → {mirror.target_project_path}"
-        project_id = mirror.source_project_id if direction == "push" else mirror.target_project_id
+    for idx, spec in enumerate(mirror_specs):
+        mirror_pk = spec["id"]
+        gitlab_mirror_id = spec["mirror_id"]
+        mirror_identifier = f"{spec['source_project_path']} → {spec['target_project_path']}"
+        project_id = spec["source_project_id"] if direction == "push" else spec["target_project_id"]
 
         # Skip if mirror not configured in GitLab
-        if not mirror.mirror_id:
-            logger.warning(f"Skipping mirror {mirror.id}: not configured in GitLab")
+        if not gitlab_mirror_id:
+            logger.warning(f"Skipping mirror {mirror_pk}: not configured in GitLab")
             skipped += 1
             tracker.record_success()  # Count as processed but don't track as error
             continue
 
         # Skip if mirror token has expired
-        if _is_token_expired(mirror.mirror_token_expires_at):
+        if _is_token_expired(spec["mirror_token_expires_at"]):
             error_msg = f"{mirror_identifier}: Mirror token has expired. Please rotate the token."
-            logger.warning(f"Skipping mirror {mirror.id}: token expired")
+            logger.warning(f"Skipping mirror {mirror_pk}: token expired")
             errors.append(error_msg)
             tracker.record_failure(error_msg)
             continue
@@ -759,44 +780,47 @@ async def sync_all_mirrors(
             # Trigger mirror update with retry logic (use correct method for direction)
             if direction == "push":
                 def trigger_update():
-                    return client.trigger_mirror_update(project_id, mirror.mirror_id)
+                    return client.trigger_mirror_update(project_id, gitlab_mirror_id)
             else:
                 def trigger_update():
                     return client.trigger_pull_mirror_update(project_id)
 
             await rate_limiter.execute_with_retry(
                 trigger_update,
-                operation_name=f"sync mirror {mirror.id}"
+                operation_name=f"sync mirror {mirror_pk}"
             )
 
-            # Update mirror status in database
-            mirror.last_update_status = "updating"
-            try:
-                await db.commit()
-            except Exception as commit_error:
-                # Rollback the failed commit to maintain session state
-                await db.rollback()
-                # Record as failure and continue instead of re-raising
-                error_msg = f"{mirror_identifier}: Database commit failed - {type(commit_error).__name__}"
-                errors.append(error_msg)
-                tracker.record_failure(error_msg)
-                logger.error(f"Failed to update status for mirror {mirror.id}: {type(commit_error).__name__}")
-            else:
-                # Only record success if commit succeeded
-                tracker.record_success()
-                logger.info(f"[{idx + 1}/{len(mirrors)}] Triggered sync for {mirror_identifier}")
-
         except Exception as e:
-            # Rollback for errors during GitLab API operations
-            await db.rollback()
+            # GitLab API call failed — no DB write occurred yet, so no rollback needed.
+            # (Rolling back here would expire every ORM instance, which previously
+            # caused "greenlet_spawn has not been called" on the next iteration.)
             error_msg = f"{mirror_identifier}: {str(e)}"
             errors.append(error_msg)
             tracker.record_failure(error_msg)
-            logger.error(f"Failed to trigger sync for mirror {mirror.id}: {str(e)}")
-            # Continue with next mirror instead of failing entirely
+            logger.error(f"Failed to trigger sync for mirror {mirror_pk}: {str(e)}")
+        else:
+            # Update mirror status via a bulk UPDATE statement to avoid touching
+            # ORM identity-map state (a failed commit + rollback on an ORM-tracked
+            # instance would expire the rest of the snapshot's source rows).
+            try:
+                await db.execute(
+                    update(Mirror)
+                    .where(Mirror.id == mirror_pk)
+                    .values(last_update_status="updating")
+                )
+                await db.commit()
+            except Exception as commit_error:
+                await db.rollback()
+                error_msg = f"{mirror_identifier}: Database commit failed - {type(commit_error).__name__}"
+                errors.append(error_msg)
+                tracker.record_failure(error_msg)
+                logger.error(f"Failed to update status for mirror {mirror_pk}: {type(commit_error).__name__}")
+            else:
+                tracker.record_success()
+                logger.info(f"[{idx + 1}/{len(mirror_specs)}] Triggered sync for {mirror_identifier}")
 
         # Apply rate limiting delay (except after last mirror)
-        if idx < len(mirrors) - 1:
+        if idx < len(mirror_specs) - 1:
             await rate_limiter.delay()
 
     # Get final summary
