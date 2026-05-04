@@ -11,7 +11,7 @@ from app.database import get_db
 from app.models import InstancePair, GitLabInstance, Mirror, MirrorIssueConfig
 from app.core.auth import verify_credentials
 from app.api.mirrors import _delete_issue_sync_data_for_mirrors
-from app.core.gitlab_client import GitLabClient
+from app.core.gitlab_client import GitLabClient, GitLabMirrorPausedError
 from app.core.rate_limiter import RateLimiter, BatchOperationTracker
 from app.config import settings
 
@@ -781,14 +781,40 @@ async def sync_all_mirrors(
             if direction == "push":
                 def trigger_update():
                     return client.trigger_mirror_update(project_id, gitlab_mirror_id)
+
+                def resume_paused():
+                    return client.update_mirror(project_id, gitlab_mirror_id, enabled=True)
             else:
                 def trigger_update():
                     return client.trigger_pull_mirror_update(project_id)
 
-            await rate_limiter.execute_with_retry(
-                trigger_update,
-                operation_name=f"sync mirror {mirror_pk}"
-            )
+                def resume_paused():
+                    return client.update_pull_mirror(project_id, enabled=True)
+
+            try:
+                await rate_limiter.execute_with_retry(
+                    trigger_update,
+                    operation_name=f"sync mirror {mirror_pk}"
+                )
+            except GitLabMirrorPausedError as paused_err:
+                # GitLab auto-pauses a mirror after ~14 consecutive failures and
+                # rejects subsequent triggers with 403 "Mirroring for the project
+                # is on pause". Recover by reconfiguring the mirror with
+                # enabled=true (which clears GitLab's failure counter), then
+                # retry the trigger once. Mirrors the per-mirror Sync recovery
+                # in app/api/mirrors.py:trigger_mirror_update.
+                logger.info(
+                    f"Mirror {mirror_pk} is paused on GitLab; resuming and retrying. "
+                    f"Original error: {paused_err}"
+                )
+                await rate_limiter.execute_with_retry(
+                    resume_paused,
+                    operation_name=f"resume paused mirror {mirror_pk}"
+                )
+                await rate_limiter.execute_with_retry(
+                    trigger_update,
+                    operation_name=f"sync mirror {mirror_pk} (retry after resume)"
+                )
 
         except Exception as e:
             # GitLab API call failed — no DB write occurred yet, but rolling back

@@ -427,3 +427,146 @@ async def test_sync_all_mirrors_continues_after_first_failure(
         # Specifically: no greenlet error should leak into the error list.
         assert all("greenlet" not in err.lower() for err in result["errors"])
         assert mock_client.trigger_mirror_update.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_sync_all_mirrors_recovers_paused_push_mirror(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """
+    Regression test for "Mirror is paused on GitLab" during Sync All.
+
+    The per-mirror Sync endpoint already recovers from GitLab's auto-pause
+    state (PR #122), but Sync All went straight through to a generic failure
+    in the error list. The batch loop must apply the same recovery: detect
+    GitLabMirrorPausedError, reconfigure the mirror with enabled=True to
+    clear GitLab's failure counter, then retry the trigger once.
+    """
+    from app.core.gitlab_client import GitLabMirrorPausedError
+
+    source_instance = GitLabInstance(
+        name="Source GitLab",
+        url="https://source.gitlab.com",
+        encrypted_token=encryption.encrypt("source-token"),
+    )
+    target_instance = GitLabInstance(
+        name="Target GitLab",
+        url="https://target.gitlab.com",
+        encrypted_token=encryption.encrypt("target-token"),
+    )
+    db_session.add(source_instance)
+    db_session.add(target_instance)
+    await db_session.commit()
+    await db_session.refresh(source_instance)
+    await db_session.refresh(target_instance)
+
+    pair = InstancePair(
+        name="Test Pair",
+        source_instance_id=source_instance.id,
+        target_instance_id=target_instance.id,
+        mirror_direction="push",
+    )
+    db_session.add(pair)
+    await db_session.commit()
+    await db_session.refresh(pair)
+
+    mirror = Mirror(
+        instance_pair_id=pair.id,
+        source_project_id=100,
+        source_project_path="source/project-1",
+        target_project_id=200,
+        target_project_path="target/project-1",
+        mirror_id=300,
+        enabled=True,
+    )
+    db_session.add(mirror)
+    await db_session.commit()
+
+    with patch("app.api.pairs.GitLabClient") as MockClient:
+        mock_client = MagicMock()
+        # First trigger attempt raises paused; after update_mirror(enabled=True),
+        # the second trigger attempt succeeds.
+        mock_client.trigger_mirror_update.side_effect = [
+            GitLabMirrorPausedError("trigger_mirror_update: Mirror is paused on GitLab"),
+            {"status": "success"},
+        ]
+        mock_client.update_mirror.return_value = {"id": 300, "enabled": True}
+        MockClient.return_value = mock_client
+
+        response = await client.post(f"/api/pairs/{pair.id}/sync-mirrors")
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "completed"
+        assert result["total"] == 1
+        assert result["succeeded"] == 1
+        assert result["failed"] == 0
+        # Trigger called twice: initial paused failure + retry after resume.
+        assert mock_client.trigger_mirror_update.call_count == 2
+        # update_mirror called once with enabled=True to clear GitLab's pause.
+        mock_client.update_mirror.assert_called_once_with(100, 300, enabled=True)
+
+
+@pytest.mark.asyncio
+async def test_sync_all_mirrors_recovers_paused_pull_mirror(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """Same recovery as above, but for pull mirrors (uses update_pull_mirror)."""
+    from app.core.gitlab_client import GitLabMirrorPausedError
+
+    source_instance = GitLabInstance(
+        name="Source GitLab",
+        url="https://source.gitlab.com",
+        encrypted_token=encryption.encrypt("source-token"),
+    )
+    target_instance = GitLabInstance(
+        name="Target GitLab",
+        url="https://target.gitlab.com",
+        encrypted_token=encryption.encrypt("target-token"),
+    )
+    db_session.add(source_instance)
+    db_session.add(target_instance)
+    await db_session.commit()
+    await db_session.refresh(source_instance)
+    await db_session.refresh(target_instance)
+
+    pair = InstancePair(
+        name="Test Pair",
+        source_instance_id=source_instance.id,
+        target_instance_id=target_instance.id,
+        mirror_direction="pull",
+    )
+    db_session.add(pair)
+    await db_session.commit()
+    await db_session.refresh(pair)
+
+    mirror = Mirror(
+        instance_pair_id=pair.id,
+        source_project_id=100,
+        source_project_path="source/project-1",
+        target_project_id=200,
+        target_project_path="target/project-1",
+        mirror_id=300,
+        enabled=True,
+    )
+    db_session.add(mirror)
+    await db_session.commit()
+
+    with patch("app.api.pairs.GitLabClient") as MockClient:
+        mock_client = MagicMock()
+        mock_client.trigger_pull_mirror_update.side_effect = [
+            GitLabMirrorPausedError("trigger_pull_mirror_update: Mirror is paused on GitLab"),
+            {"status": "success"},
+        ]
+        mock_client.update_pull_mirror.return_value = {"enabled": True}
+        MockClient.return_value = mock_client
+
+        response = await client.post(f"/api/pairs/{pair.id}/sync-mirrors")
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "completed"
+        assert result["succeeded"] == 1
+        assert result["failed"] == 0
+        assert mock_client.trigger_pull_mirror_update.call_count == 2
+        mock_client.update_pull_mirror.assert_called_once_with(200, enabled=True)
