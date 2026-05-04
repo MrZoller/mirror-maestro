@@ -104,8 +104,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         await initAuth();
 
         // Now load data (token is ready)
-        loadInstances();
-        loadPairs();
+        // Load instances and pairs in parallel, then re-render pairs once both
+        // are done so instance names are available for the Source/Target columns.
+        await Promise.all([loadInstances(), loadPairs()]);
+        renderPairs(state.pairs);
 
         // Only load dashboard and start polling if dashboard tab is (or will be) active.
         // initUrlState() may switch tabs via a 50ms timeout, so check the URL param.
