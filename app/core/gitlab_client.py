@@ -52,6 +52,26 @@ class GitLabPermissionError(GitLabClientError):
     pass
 
 
+class GitLabMirrorPausedError(GitLabClientError):
+    """
+    Raised when GitLab refuses a mirror operation because the mirror is paused.
+
+    GitLab automatically pauses (a "hard failure") a mirror after roughly 14
+    consecutive update failures. In that state, ``POST /projects/:id/mirror/pull``
+    and ``POST /projects/:id/remote_mirrors/:mirror_id/sync`` return
+    ``403 Forbidden`` with a body like ``{"message": "Mirroring for the project
+    is on pause due to too many failed attempts. Please contact a maintainer."}``.
+    The pause is independent of the ``enabled`` flag — the mirror still reports
+    ``enabled=true`` when fetched.
+
+    To recover, callers should reconfigure the mirror with ``enabled=true``
+    (``PUT /projects/:id/mirror/pull`` for pull mirrors, ``PUT
+    /projects/:id/remote_mirrors/:mirror_id`` for push mirrors), which resets
+    GitLab's failure counter, and then retry the sync trigger.
+    """
+    pass
+
+
 class GitLabRateLimitError(GitLabClientError):
     """Raised when rate limited by GitLab."""
     pass
@@ -85,6 +105,12 @@ def _format_gitlab_validation_message(e: Exception) -> str:
     return str(e)
 
 
+def _is_mirror_paused_message(text: str) -> bool:
+    """Detect GitLab's "mirror is paused due to repeated failures" 403 body."""
+    lower = text.lower()
+    return "mirror" in lower and ("on pause" in lower or "is paused" in lower or "is on pause" in lower)
+
+
 def _handle_gitlab_error(e: Exception, operation: str) -> None:
     """
     Convert gitlab library exceptions to our custom exceptions with better messages.
@@ -101,6 +127,14 @@ def _handle_gitlab_error(e: Exception, operation: str) -> None:
     # Handle requests/urllib3 connection errors
     if isinstance(e, (ConnectionError, TimeoutError)):
         raise GitLabConnectionError(f"{operation}: Connection failed - {error_msg}")
+
+    # Detect GitLab's auto-pause-after-too-many-failures state.  This shows up
+    # as a 403 from the trigger endpoint with a body like
+    # "Mirroring for the project is on pause due to too many failed attempts."
+    # Check before the more general 403 handling so callers can recover by
+    # reconfiguring the mirror with enabled=true.
+    if _is_mirror_paused_message(error_msg):
+        raise GitLabMirrorPausedError(f"{operation}: Mirror is paused on GitLab — {error_msg}")
 
     # Handle gitlab-specific exceptions
     if isinstance(e, GitlabAuthError):

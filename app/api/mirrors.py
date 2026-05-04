@@ -19,6 +19,7 @@ from app.core.gitlab_client import (
     GitLabClient,
     GitLabClientError,
     GitLabConnectionError,
+    GitLabMirrorPausedError,
     GitLabRateLimitError,
     GitLabValidationError,
 )
@@ -141,6 +142,13 @@ async def _execute_gitlab_op(
             operation=operation,
             operation_name=operation_name,
         )
+    except GitLabMirrorPausedError:
+        # Let the caller handle this — trigger_mirror_update has a recovery
+        # path (re-enable + retry) that needs the specific exception type.
+        # If the caller doesn't catch it, FastAPI will turn the unhandled
+        # GitLabMirrorPausedError into a 500, which is the same outcome as
+        # the previous generic GitLabClientError handling.
+        raise
     except GitLabConnectionError as e:
         logger.error(f"{operation_name} failed - connection error: {e}")
         raise HTTPException(
@@ -2064,20 +2072,59 @@ async def trigger_mirror_update(
             # Non-fatal: if the pre-check fails we still attempt the trigger
             logger.warning(f"Pre-sync enabled check failed (non-critical): {check_err}")
 
-        if direction == "push":
-            # Push mirrors use the remote_mirrors sync endpoint
-            await _execute_gitlab_op(
-                client=client,
-                operation=lambda c: c.trigger_mirror_update(project_id, mirror.mirror_id),
-                operation_name=f"trigger_mirror_update({project_id}, {mirror.mirror_id})",
+        async def _trigger() -> None:
+            if direction == "push":
+                # Push mirrors use the remote_mirrors sync endpoint
+                await _execute_gitlab_op(
+                    client=client,
+                    operation=lambda c: c.trigger_mirror_update(project_id, mirror.mirror_id),
+                    operation_name=f"trigger_mirror_update({project_id}, {mirror.mirror_id})",
+                )
+            else:
+                # Pull mirrors use the dedicated pull mirror trigger endpoint
+                await _execute_gitlab_op(
+                    client=client,
+                    operation=lambda c: c.trigger_pull_mirror_update(project_id),
+                    operation_name=f"trigger_pull_mirror_update({project_id})",
+                )
+
+        async def _resume_paused_mirror() -> None:
+            """Reset GitLab's hard-failure pause by reconfiguring with enabled=true."""
+            if direction == "push":
+                await _execute_gitlab_op(
+                    client=client,
+                    operation=lambda c: c.update_mirror(
+                        project_id, mirror.mirror_id, enabled=True
+                    ),
+                    operation_name=f"resume_paused_push_mirror({project_id}, {mirror.mirror_id})",
+                )
+            else:
+                await _execute_gitlab_op(
+                    client=client,
+                    operation=lambda c: c.update_pull_mirror(
+                        project_id, enabled=True
+                    ),
+                    operation_name=f"resume_paused_pull_mirror({project_id})",
+                )
+
+        try:
+            await _trigger()
+        except GitLabMirrorPausedError as paused_err:
+            # GitLab auto-pauses a mirror after ~14 consecutive failures and
+            # rejects subsequent triggers with 403 "Mirroring for the project
+            # is on pause". The pre-sync enabled check above misses this case
+            # because GitLab still reports enabled=true while paused. Recover
+            # by reconfiguring the mirror with enabled=true (which clears the
+            # failure counter), then retry the trigger once.
+            logger.info(
+                f"Mirror {mirror_id} is paused on GitLab; resuming and retrying. "
+                f"Original error: {paused_err}"
             )
-        else:
-            # Pull mirrors use the dedicated pull mirror trigger endpoint
-            await _execute_gitlab_op(
-                client=client,
-                operation=lambda c: c.trigger_pull_mirror_update(project_id),
-                operation_name=f"trigger_pull_mirror_update({project_id})",
-            )
+            await _resume_paused_mirror()
+            re_enabled = True
+            mirror.enabled = True
+            await db.commit()
+            await _trigger()
 
         # Refresh status from GitLab to get actual timestamps and status
         try:
