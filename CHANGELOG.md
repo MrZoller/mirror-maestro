@@ -6,6 +6,11 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-05-04
+
+### Fixed
+- Clicking **Sync** on a mirror that GitLab had auto-paused after ~14 consecutive failures previously returned a generic 500 with `Permission denied - 403: Mirroring for the project is on pause...` in the server log. The pre-sync check only re-enabled mirrors when `enabled=False`, but GitLab's hard-failure pause is a separate state — the mirror still reports `enabled=true`. The endpoint now detects the `403 "on pause"` response specifically (new `GitLabMirrorPausedError`), reconfigures the mirror with `enabled=true` (which clears GitLab's failure counter), and retries the trigger once. Applies to both pull and push mirrors. The frontend already shows "Mirror was paused — re-enabled and sync triggered" for the resulting `re_enabled_and_update_triggered` status.
+
 ## [1.2.5] - 2026-05-04
 
 ### Fixed
@@ -180,7 +185,8 @@ The format is based on **Keep a Changelog**, and this project adheres to **Seman
 
 <!--
 Links:
-[Unreleased]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.5...HEAD
+[Unreleased]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.6...HEAD
+[1.2.6]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/MrZoller/mirror-maestro/compare/v1.2.2...v1.2.3

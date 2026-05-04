@@ -1882,3 +1882,199 @@ async def test_create_pull_mirror_returns_400_with_fork_network_detail(client, s
         rows = (await s.execute(select(Mirror))).scalars().all()
         assert rows == []
 
+
+# ---------------------------------------------------------------------------
+# GitLab auto-pause recovery on Sync (regression: clicking Sync on a hard-failed
+# mirror returned 500 because GitLab rejects the trigger with 403 "Mirroring
+# for the project is on pause" and the existing pre-check only covered
+# enabled=False, not the paused-but-still-enabled state).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_trigger_update_recovers_paused_pull_mirror(client, session_maker, monkeypatch):
+    """
+    A pull mirror that GitLab has auto-paused after too many failures still
+    reports enabled=true, so the existing pre-check (which only re-enables
+    when enabled=False) doesn't catch it. The trigger then 403s with
+    "Mirroring for the project is on pause". The endpoint must catch that
+    specific error, reconfigure the mirror with enabled=true (which clears
+    GitLab's failure counter), and retry the trigger.
+    """
+    from app.api import mirrors as mod
+    from app.core.gitlab_client import GitLabMirrorPausedError
+
+    class _PausedThenOkClient(FakeGitLabClient):
+        # First trigger raises paused; second trigger (after resume) succeeds.
+        first_trigger_done = False
+
+        def trigger_pull_mirror_update(self, project_id: int) -> bool:
+            self.__class__.trigger_pull_calls.append((project_id,))
+            if not self.__class__.first_trigger_done:
+                self.__class__.first_trigger_done = True
+                raise GitLabMirrorPausedError(
+                    "trigger_pull_mirror_update(2): Mirror is paused on GitLab — "
+                    "403: Mirroring for the project is on pause due to too many failed attempts."
+                )
+            return True
+
+    _PausedThenOkClient.trigger_pull_calls = []
+    _PausedThenOkClient.update_pull_calls = []
+    _PausedThenOkClient.pull_mirrors = {}
+    _PausedThenOkClient.first_trigger_done = False
+
+    monkeypatch.setattr(mod, "GitLabClient", _PausedThenOkClient)
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="pull")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="p/q",
+            target_project_id=2,
+            target_project_path="p/q",
+            mirror_id=77,
+            # Critical: app DB and GitLab both believe the mirror is enabled —
+            # the pause is a hidden GitLab-side state.
+            enabled=True,
+            last_update_status="failed",
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        mirror_id = m.id
+
+    _PausedThenOkClient.pull_mirrors[2] = {
+        "id": 77,
+        "url": "https://src.example.com/p/q.git",
+        "enabled": True,  # paused mirrors still report enabled=true
+        "update_status": "failed",
+        "last_update_at": "2024-01-15T10:30:00Z",
+        "last_successful_update_at": None,
+        "last_error": "13:fetch remote: too many failures",
+    }
+
+    resp = await client.post(f"/api/mirrors/{mirror_id}/update")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["status"] == "re_enabled_and_update_triggered"
+
+    # The paused trigger forced exactly one resume (PUT with enabled=True).
+    assert len(_PausedThenOkClient.update_pull_calls) == 1
+    update_call = _PausedThenOkClient.update_pull_calls[-1]
+    assert update_call[0] == 2          # target project_id
+    assert update_call[2] is True       # enabled=True
+
+    # Trigger was attempted twice: first raised paused, second succeeded.
+    assert len(_PausedThenOkClient.trigger_pull_calls) == 2
+    assert _PausedThenOkClient.trigger_pull_calls[-1] == (2,)
+
+
+@pytest.mark.asyncio
+async def test_trigger_update_recovers_paused_push_mirror(client, session_maker, monkeypatch):
+    """Same recovery logic must work for push mirrors (different GitLab endpoints)."""
+    from app.api import mirrors as mod
+    from app.core.gitlab_client import GitLabMirrorPausedError
+
+    class _PausedThenOkClient(FakeGitLabClient):
+        first_trigger_done = False
+
+        def trigger_mirror_update(self, project_id: int, mirror_id: int) -> bool:
+            self.__class__.trigger_calls.append((project_id, mirror_id))
+            if not self.__class__.first_trigger_done:
+                self.__class__.first_trigger_done = True
+                raise GitLabMirrorPausedError(
+                    f"trigger_mirror_update({project_id}, {mirror_id}): Mirror is paused on "
+                    "GitLab — 403: Mirroring for the project is on pause due to too many "
+                    "failed attempts."
+                )
+            return True
+
+    _PausedThenOkClient.trigger_calls = []
+    _PausedThenOkClient.update_calls = []
+    _PausedThenOkClient.project_mirrors = {}
+    _PausedThenOkClient.first_trigger_done = False
+
+    monkeypatch.setattr(mod, "GitLabClient", _PausedThenOkClient)
+
+    src_id = await seed_instance(session_maker, name="src", url="https://src.example.com")
+    tgt_id = await seed_instance(session_maker, name="tgt", url="https://tgt.example.com")
+    pair_id = await seed_pair(session_maker, name="pair", src_id=src_id, tgt_id=tgt_id, direction="push")
+
+    async with session_maker() as s:
+        m = Mirror(
+            instance_pair_id=pair_id,
+            source_project_id=1,
+            source_project_path="p/q",
+            target_project_id=2,
+            target_project_path="p/q",
+            mirror_id=88,
+            enabled=True,
+            last_update_status="failed",
+        )
+        s.add(m)
+        await s.commit()
+        await s.refresh(m)
+        mirror_id = m.id
+
+    # GitLab reports the push mirror as enabled — the pause is hidden state.
+    _PausedThenOkClient.project_mirrors[1] = [{
+        "id": 88,
+        "url": "https://tgt.example.com/p/q.git",
+        "enabled": True,
+        "update_status": "failed",
+        "last_update_at": "2024-01-15T10:30:00Z",
+        "last_successful_update_at": None,
+        "last_error": "13: too many failures",
+    }]
+
+    resp = await client.post(f"/api/mirrors/{mirror_id}/update")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["status"] == "re_enabled_and_update_triggered"
+
+    # Resume hit update_mirror with enabled=True.
+    assert len(_PausedThenOkClient.update_calls) == 1
+    upd = _PausedThenOkClient.update_calls[-1]
+    # update_calls signature: (project_id, mirror_id, url, enabled, ...)
+    assert upd[0] == 1
+    assert upd[1] == 88
+    assert upd[3] is True
+
+    # Trigger called twice: first paused, second succeeded.
+    assert len(_PausedThenOkClient.trigger_calls) == 2
+    assert _PausedThenOkClient.trigger_calls[-1] == (1, 88)
+
+
+def test_handle_gitlab_error_detects_paused_mirror():
+    """The 403 'Mirroring for the project is on pause' body must map to GitLabMirrorPausedError."""
+    from gitlab.exceptions import GitlabHttpError
+
+    from app.core.gitlab_client import (
+        GitLabMirrorPausedError,
+        GitLabPermissionError,
+        _handle_gitlab_error,
+    )
+
+    err = GitlabHttpError(
+        response_code=403,
+        error_message="Mirroring for the project is on pause due to too many failed attempts.",
+        response_body=b'{}',
+    )
+
+    with pytest.raises(GitLabMirrorPausedError):
+        _handle_gitlab_error(err, "trigger_pull_mirror_update(52542)")
+
+    # And a *generic* 403 must still raise GitLabPermissionError, not the paused subclass.
+    other = GitlabHttpError(
+        response_code=403,
+        error_message="403 Forbidden",
+        response_body=b'{}',
+    )
+    with pytest.raises(GitLabPermissionError) as exc:
+        _handle_gitlab_error(other, "some_op")
+    assert not isinstance(exc.value, GitLabMirrorPausedError)
+
