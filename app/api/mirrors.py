@@ -20,6 +20,7 @@ from app.core.gitlab_client import (
     GitLabClientError,
     GitLabConnectionError,
     GitLabRateLimitError,
+    GitLabValidationError,
 )
 from app.core.encryption import encryption
 from app.core.mirror_gitlab_service import get_mirror_gitlab_service
@@ -65,6 +66,50 @@ def _validate_regex_safety(pattern: str) -> None:
             )
 
 
+def _build_validation_error_detail(e: GitLabValidationError) -> dict:
+    """
+    Build an HTTPException detail dict for a GitLab 400 validation error.
+
+    Detects well-known restrictions (like the fork-network rule on pull mirrors)
+    and surfaces a friendly message alongside the raw GitLab error so the UI can
+    show the user something actionable.
+    """
+    raw = str(e)
+    gitlab_error = getattr(e, 'gitlab_error', None)
+
+    # Flatten the GitLab error body into a single string for substring checks.
+    flattened = ""
+    if isinstance(gitlab_error, dict):
+        for v in gitlab_error.values():
+            if isinstance(v, list):
+                flattened += " " + " ".join(str(x) for x in v)
+            else:
+                flattened += " " + str(v)
+    elif isinstance(gitlab_error, str):
+        flattened = gitlab_error
+    else:
+        flattened = raw
+
+    if "must be inside the fork network" in flattened.lower():
+        message = (
+            "GitLab rejected the pull mirror because the target project is part "
+            "of a fork network. GitLab requires pull mirror sources to point to "
+            "a project inside the same fork network. Remove the fork relationship "
+            "(Project Settings → General → Advanced → Remove fork relationship) "
+            "on the target project and try again."
+        )
+        return {
+            "message": message,
+            "gitlab_error": gitlab_error,
+            "reason": "fork_network_restriction",
+        }
+
+    return {
+        "message": f"GitLab rejected the request: {raw}",
+        "gitlab_error": gitlab_error,
+    }
+
+
 async def _execute_gitlab_op(
     client: GitLabClient,
     operation: Callable[[GitLabClient], T],
@@ -107,6 +152,12 @@ async def _execute_gitlab_op(
         raise HTTPException(
             status_code=429,
             detail="GitLab rate limit exceeded. Please try again later."
+        )
+    except GitLabValidationError as e:
+        logger.error(f"{operation_name} failed - validation error: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=_build_validation_error_detail(e),
         )
     except GitLabClientError as e:
         logger.error(f"{operation_name} failed: {e}")

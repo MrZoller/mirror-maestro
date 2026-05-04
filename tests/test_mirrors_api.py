@@ -1756,3 +1756,74 @@ async def test_refresh_status_syncs_enabled_field(client, session_maker, monkeyp
         assert m2.last_update_status == "failed"
         assert m2.last_error == "13:fetch remote: fatal: ..."
 
+
+# ---------------------------------------------------------------------------
+# Validation error surfacing (fork-network case)
+# ---------------------------------------------------------------------------
+
+
+def test_build_validation_error_detail_fork_network():
+    """Fork-network GitLab errors get a friendly explanation and a stable reason code."""
+    from app.api.mirrors import _build_validation_error_detail
+    from app.core.gitlab_client import GitLabValidationError
+
+    err = GitLabValidationError(
+        "create_pull_mirror(52542): url: must be inside the fork network",
+        gitlab_error={"url": ["must be inside the fork network"]},
+    )
+
+    detail = _build_validation_error_detail(err)
+
+    assert detail["reason"] == "fork_network_restriction"
+    assert "fork network" in detail["message"].lower()
+    assert "remove the fork relationship" in detail["message"].lower()
+    assert detail["gitlab_error"] == {"url": ["must be inside the fork network"]}
+
+
+def test_build_validation_error_detail_generic():
+    """Validation errors that don't match a known case still surface the GitLab message."""
+    from app.api.mirrors import _build_validation_error_detail
+    from app.core.gitlab_client import GitLabValidationError
+
+    err = GitLabValidationError(
+        "create_pull_mirror(1): import_url: is invalid",
+        gitlab_error={"import_url": ["is invalid"]},
+    )
+
+    detail = _build_validation_error_detail(err)
+
+    assert "reason" not in detail  # no special-case match
+    assert "is invalid" in detail["message"]
+    assert detail["gitlab_error"] == {"import_url": ["is invalid"]}
+
+
+@pytest.mark.asyncio
+async def test_execute_gitlab_op_returns_400_for_validation_error(monkeypatch):
+    """_execute_gitlab_op must turn a GitLabValidationError into HTTP 400 with detail."""
+    from fastapi import HTTPException
+
+    from app.api import mirrors as mod
+    from app.core.gitlab_client import GitLabValidationError
+
+    class _StubService:
+        async def execute(self, client, operation, operation_name):
+            raise GitLabValidationError(
+                f"{operation_name}: url: must be inside the fork network",
+                gitlab_error={"url": ["must be inside the fork network"]},
+            )
+
+    monkeypatch.setattr(mod, "get_mirror_gitlab_service", lambda: _StubService())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await mod._execute_gitlab_op(
+            client=None,
+            operation=lambda c: None,
+            operation_name="create_pull_mirror(52542)",
+        )
+
+    assert excinfo.value.status_code == 400
+    detail = excinfo.value.detail
+    assert isinstance(detail, dict)
+    assert detail["reason"] == "fork_network_restriction"
+    assert "fork network" in detail["message"].lower()
+

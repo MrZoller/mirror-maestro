@@ -34,6 +34,19 @@ class GitLabNotFoundError(GitLabClientError):
     pass
 
 
+class GitLabValidationError(GitLabClientError):
+    """
+    Raised when GitLab rejects a request with a 400 validation error.
+
+    Carries the parsed GitLab error body (e.g. {"url": ["must be inside the fork network"]})
+    so callers can surface a useful message to the end user instead of a generic 500.
+    """
+
+    def __init__(self, message: str, gitlab_error: Any = None):
+        super().__init__(message)
+        self.gitlab_error = gitlab_error
+
+
 class GitLabPermissionError(GitLabClientError):
     """Raised when the token lacks required permissions."""
     pass
@@ -47,6 +60,29 @@ class GitLabRateLimitError(GitLabClientError):
 class GitLabServerError(GitLabClientError):
     """Raised when GitLab returns a 5xx server error."""
     pass
+
+
+def _format_gitlab_validation_message(e: Exception) -> str:
+    """
+    Render a GitLab validation error body into a human-readable message.
+
+    GitLab returns validation errors as either a string or a dict mapping field
+    names to lists of messages, e.g. ``{"url": ["must be inside the fork network"]}``.
+    """
+    error_message = getattr(e, 'error_message', None)
+    if isinstance(error_message, dict):
+        parts: List[str] = []
+        for field, messages in error_message.items():
+            if isinstance(messages, list):
+                for msg in messages:
+                    parts.append(f"{field}: {msg}")
+            else:
+                parts.append(f"{field}: {messages}")
+        if parts:
+            return "; ".join(parts)
+    if isinstance(error_message, str) and error_message:
+        return error_message
+    return str(e)
 
 
 def _handle_gitlab_error(e: Exception, operation: str) -> None:
@@ -91,6 +127,11 @@ def _handle_gitlab_error(e: Exception, operation: str) -> None:
             raise GitLabClientError(f"{operation}: Conflict - resource already exists - {error_msg}")
         if "429" in error_msg:
             raise GitLabRateLimitError(f"{operation}: Rate limited by GitLab - try again later")
+        if getattr(e, 'response_code', None) == 400:
+            raise GitLabValidationError(
+                f"{operation}: {_format_gitlab_validation_message(e)}",
+                gitlab_error=getattr(e, 'error_message', None),
+            )
 
     if isinstance(e, GitlabDeleteError):
         if "404" in error_msg or "not found" in error_msg.lower():
@@ -103,10 +144,20 @@ def _handle_gitlab_error(e: Exception, operation: str) -> None:
             raise GitLabNotFoundError(f"{operation}: Resource not found - {error_msg}")
         if "403" in error_msg or "forbidden" in error_msg.lower():
             raise GitLabPermissionError(f"{operation}: Permission denied - {error_msg}")
+        if getattr(e, 'response_code', None) == 400:
+            raise GitLabValidationError(
+                f"{operation}: {_format_gitlab_validation_message(e)}",
+                gitlab_error=getattr(e, 'error_message', None),
+            )
 
     if isinstance(e, GitlabHttpError):
         response_code = getattr(e, 'response_code', None)
         if response_code:
+            if response_code == 400:
+                raise GitLabValidationError(
+                    f"{operation}: {_format_gitlab_validation_message(e)}",
+                    gitlab_error=getattr(e, 'error_message', None),
+                )
             if response_code == 401:
                 raise GitLabAuthenticationError(f"{operation}: Authentication failed - {error_msg}")
             if response_code == 403:
@@ -481,6 +532,14 @@ class GitLabClient:
                     "mirror_branch_regex": result.get("mirror_branch_regex"),
                 }
         except Exception as e:
+            # Only fall back to the Projects API when the dedicated endpoint is
+            # genuinely unavailable on this GitLab version (404 / 405). For any
+            # other failure (auth, permission, validation like "must be inside
+            # the fork network") propagate immediately so the caller sees the
+            # real cause instead of a confusing fallback failure.
+            response_code = getattr(e, 'response_code', None)
+            if response_code is not None and response_code not in (404, 405):
+                _handle_gitlab_error(e, f"Failed to create pull mirror on project {project_id}")
             logger.info(
                 f"Dedicated pull mirror endpoint (PUT mirror/pull) not available for "
                 f"project {project_id} ({type(e).__name__}). "
