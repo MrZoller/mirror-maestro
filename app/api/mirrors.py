@@ -2760,6 +2760,7 @@ async def _refresh_mirror_status(
         'failed': 'failed',
         'started': 'syncing',
         'none': 'pending',
+        'scheduled': 'pending',  # GitLab pull mirrors queued to sync
     }
     update_status = status_mapping.get(raw_status, raw_status)
 
