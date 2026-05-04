@@ -2629,7 +2629,7 @@ async def verify_mirrors(
 
 class RefreshStatusRequest(BaseModel):
     """Request body for refreshing mirror status."""
-    mirror_ids: List[int] = Field(..., min_length=1, max_length=100)
+    mirror_ids: List[int] = Field(..., min_length=1, max_length=200)
 
 
 class RefreshStatusResult(BaseModel):
