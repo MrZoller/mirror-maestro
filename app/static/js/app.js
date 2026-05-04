@@ -1969,7 +1969,7 @@ async function syncAllMirrors(pairId) {
     try {
         showMessage(`Starting batch sync for ${mirrorCount} mirrors...`, 'info');
 
-        const result = await apiRequest(`/api/pairs/${pairId}/sync-mirrors`, {
+        const result = await apiRequest(`/api/pairs/${pairId}/sync-mirrors?limit=${mirrorCount}`, {
             method: 'POST'
         });
 
