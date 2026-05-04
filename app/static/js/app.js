@@ -104,16 +104,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         await initAuth();
 
         // Now load data (token is ready)
-        loadInstances();
-        loadPairs();
-
-        // Only load dashboard and start polling if dashboard tab is (or will be) active.
-        // initUrlState() may switch tabs via a 50ms timeout, so check the URL param.
+        // Dashboard loads independently — not blocked by instances/pairs.
         const urlTabParam = new URLSearchParams(window.location.search).get('tab');
         if (!urlTabParam || urlTabParam === 'dashboard-tab') {
             loadDashboard();
             startLivePolling();
         }
+
+        // Load instances and pairs in parallel; once both settle, re-render
+        // pairs only if both succeeded so instance names are available for the
+        // Source/Target columns without overwriting an error state with empty UI.
+        Promise.all([loadInstances(), loadPairs()]).then(([, pairsOk]) => {
+            if (pairsOk) renderPairs(state.pairs);
+        });
     }
 });
 
@@ -1661,6 +1664,7 @@ async function loadPairs() {
         state.pairs = pairs;
         renderPairs(pairs);
         updatePairSelector();
+        return true;
     } catch (error) {
         console.error('Failed to load pairs:', error);
         showErrorState(container, error, loadPairs);
